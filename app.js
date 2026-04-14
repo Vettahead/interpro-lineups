@@ -1167,49 +1167,106 @@ function openLoadFromPlay() {
 function wireDragAndDrop() {
   const tabEl = document.getElementById('tab-content');
 
-  // Make all chips draggable
-  tabEl.querySelectorAll('.chip[draggable="true"]').forEach(chip => {
-    chip.addEventListener('dragstart', (e) => {
+  // Pointer-based drag: works on mouse and touch
+  tabEl.querySelectorAll('.chip').forEach(chip => {
+    // Disable native HTML5 drag (we do our own)
+    chip.setAttribute('draggable', 'false');
+    chip.addEventListener('dragstart', e => e.preventDefault());
+
+    chip.addEventListener('pointerdown', (e) => {
+      if (!editor?.canEdit) return;
+      if (e.button !== undefined && e.button !== 0) return; // left click / primary only
+      e.preventDefault();
+      e.stopPropagation();
+
       const pid = chip.dataset.playerId;
       const fromSlot = chip.dataset.fromSlot;
       const fromSub  = chip.dataset.fromSub;
       const payload = { playerId: pid, fromSlot: fromSlot ?? null, fromSub: fromSub ?? null };
-      e.dataTransfer.setData('application/json', JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = 'move';
-      chip.classList.add('dragging');
-    });
-    chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
-  });
 
-  // Drop targets: slots, sub-slots, palette
-  const makeDropTarget = (el, handler) => {
-    el.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drag-over');
-    });
-    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-    el.addEventListener('drop', (e) => {
-      e.preventDefault();
-      el.classList.remove('drag-over');
-      const raw = e.dataTransfer.getData('application/json');
-      if (!raw) return;
-      let payload;
-      try { payload = JSON.parse(raw); } catch { return; }
-      handler(payload);
-    });
-  };
+      const startX = e.clientX, startY = e.clientY;
+      const rect = chip.getBoundingClientRect();
+      const offX = startX - (rect.left + rect.width / 2);
+      const offY = startY - (rect.top + rect.height / 2);
 
-  tabEl.querySelectorAll('[data-slot]').forEach(slotEl => {
-    const idx = parseInt(slotEl.dataset.slot, 10);
-    makeDropTarget(slotEl, (payload) => handleDropToSlot(idx, payload));
+      let ghost = null;
+      let lastOver = null;
+      let dragging = false;
+
+      const DRAG_THRESHOLD = 4;
+
+      const findTarget = (x, y) => {
+        // Hide ghost so elementFromPoint sees what's beneath
+        if (ghost) ghost.style.display = 'none';
+        const el = document.elementFromPoint(x, y);
+        if (ghost) ghost.style.display = '';
+        if (!el) return null;
+        return el.closest('[data-slot], [data-sub], #palette');
+      };
+
+      const startDrag = () => {
+        dragging = true;
+        chip.classList.add('dragging');
+        // Build floating ghost that follows pointer
+        ghost = chip.cloneNode(true);
+        ghost.style.position = 'fixed';
+        ghost.style.left = (rect.left) + 'px';
+        ghost.style.top = (rect.top) + 'px';
+        ghost.style.width = rect.width + 'px';
+        ghost.style.height = rect.height + 'px';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '9999';
+        ghost.style.opacity = '0.9';
+        ghost.style.transform = 'scale(1.05)';
+        ghost.classList.add('chip-ghost');
+        document.body.appendChild(ghost);
+      };
+
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!dragging) {
+          if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+          startDrag();
+        }
+        ghost.style.left = (ev.clientX - offX - rect.width / 2) + 'px';
+        ghost.style.top  = (ev.clientY - offY - rect.height / 2) + 'px';
+
+        const target = findTarget(ev.clientX, ev.clientY);
+        if (target !== lastOver) {
+          if (lastOver) lastOver.classList.remove('drag-over');
+          if (target && (target.dataset.slot !== undefined || target.dataset.sub !== undefined)) {
+            target.classList.add('drag-over');
+          }
+          lastOver = target;
+        }
+      };
+
+      const up = (ev) => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        chip.classList.remove('dragging');
+        if (lastOver) lastOver.classList.remove('drag-over');
+        if (ghost) { ghost.remove(); ghost = null; }
+        if (!dragging) return; // was just a click/tap
+
+        const target = findTarget(ev.clientX, ev.clientY);
+        if (!target) return;
+        if (target.dataset.slot !== undefined) {
+          handleDropToSlot(parseInt(target.dataset.slot, 10), payload);
+        } else if (target.dataset.sub !== undefined) {
+          handleDropToSub(parseInt(target.dataset.sub, 10), payload);
+        } else if (target.id === 'palette') {
+          handleDropToPalette(payload);
+        }
+      };
+
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    });
   });
-  tabEl.querySelectorAll('[data-sub]').forEach(subEl => {
-    const idx = parseInt(subEl.dataset.sub, 10);
-    makeDropTarget(subEl, (payload) => handleDropToSub(idx, payload));
-  });
-  const palette = document.getElementById('palette');
-  if (palette) makeDropTarget(palette, (payload) => handleDropToPalette(payload));
 }
 
 function removeFromSource(payload) {
