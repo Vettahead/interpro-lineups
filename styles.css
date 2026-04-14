@@ -494,3 +494,82 @@ button.link {
   .chip-num { font-size: 0.8rem; }
   .chip-name { font-size: 0.55rem; max-width: 40px; }
 }
+
+/* ---------- Tactics overlay ---------- */
+.slots-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.slots-layer .slot { pointer-events: auto; }
+
+.tactics-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+  touch-action: none;
+}
+.tactics-canvas.tactic-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.tactics-canvas.line-drag-active {
+  pointer-events: auto;
+}
+
+.ball-el {
+  position: absolute;
+  display: none;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  cursor: grab;
+  touch-action: none;
+}
+.ball-el.visible { display: block; }
+.ball-el:active { cursor: grabbing; }
+
+.tactic-btns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-bottom: 0.5rem;
+}
+.tactic-btn {
+  font-size: 11px;
+  padding: 6px 0;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+}
+.tactic-btn.active {
+  border-color: var(--blue-2);
+  color: var(--blue-2);
+  background: #eef4ff;
+  font-weight: 600;
+}
+.tactic-info {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+  min-height: 22px;
+  line-height: 1.4;
+}
+.zone-row { margin-bottom: 0.4rem; }
+.zone-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 2px;
+  color: var(--text);
+}
+.zone-label input[type=checkbox] { margin-left: auto; }
+.zone-swatch { display: inline-block; width: 18px; height: 3px; }
+.zone-row input[type=range] { width: 100%; min-width: 0; }
