@@ -6,6 +6,7 @@
   --text: #0f172a;
   --muted: #64748b;
   --border: #e2e8f0;
+  --surface2: #f8fafc;
   --danger: #dc2626;
   --ok: #16a34a;
 }
@@ -34,8 +35,8 @@ header h1 { margin: 0; font-size: 1.2rem; }
 }
 
 main {
-  max-width: 860px;
-  margin: 2rem auto;
+  max-width: 1100px;
+  margin: 1.5rem auto;
   padding: 0 1rem;
 }
 
@@ -43,30 +44,31 @@ main {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1.25rem 1.5rem;
   margin-bottom: 1rem;
   box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
 
-h2 { margin-top: 0; }
+h2, h3 { margin-top: 0; }
 
-input, select, button {
-  font: inherit;
-}
-input[type=text], input[type=email], input[type=password] {
+input, select, button, textarea { font: inherit; }
+
+input[type=text], input[type=email], input[type=password], input[type=tel], input[type=number], select {
   width: 100%;
-  padding: 0.6rem 0.75rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
+  background: white;
+  color: var(--text);
 }
-label { display: block; margin-bottom: 0.25rem; font-size: 0.9rem; color: var(--muted); }
+label { display: block; margin-bottom: 0.15rem; font-size: 0.8rem; color: var(--muted); }
 
 button.primary {
   background: var(--blue-2);
   color: white;
   border: none;
-  padding: 0.7rem 1.2rem;
+  padding: 0.6rem 1.1rem;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
@@ -77,23 +79,187 @@ button.link {
   text-decoration: underline;
 }
 
-.error { color: var(--danger); margin: 0.5rem 0; }
-.ok    { color: var(--ok); margin: 0.5rem 0; }
+.error { color: var(--danger); margin: 0.5rem 0; font-size: 0.9rem; }
+.ok    { color: var(--ok); margin: 0.5rem 0; font-size: 0.9rem; }
 .muted { color: var(--muted); font-size: 0.9rem; }
-.loading { text-align: center; color: var(--muted); }
+.loading { text-align: center; color: var(--muted); padding: 2rem; }
 
-.team-list { list-style: none; padding: 0; }
+/* Teams home */
+.team-list { list-style: none; padding: 0; margin: 0; }
 .team-list li {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px;
   margin-bottom: 0.5rem; background: white;
 }
-.team-list li button { padding: 0.4rem 0.8rem; }
+.team-list li button { padding: 0.4rem 0.9rem; }
 
-/* Mobile tweaks — v1 just stacks things a bit tighter */
-@media (max-width: 600px) {
-  header { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 0.5rem; }
+/* Team dashboard */
+.breadcrumb {
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.breadcrumb a {
+  color: var(--blue-2);
+  text-decoration: none;
+}
+.breadcrumb a:hover { text-decoration: underline; }
+
+.team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.tabs-row {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--border);
+  margin: -0.5rem -1.5rem 0;
+  padding: 0 1.5rem;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 0.75rem 1rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+.tab-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+.tab-btn.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue-2);
+}
+
+/* Squad layout */
+.squad-layout {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 1rem;
+  align-items: start;
+}
+.squad-side .card { position: sticky; top: 1rem; }
+
+.add-row {
+  display: grid;
+  grid-template-columns: 1fr 80px auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.add-row input { margin-bottom: 0; }
+.add-row button { padding: 0.55rem 1rem; }
+
+.filter-list { display: flex; flex-direction: column; gap: 0.25rem; }
+.filter-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+.filter-btn:hover { border-color: var(--blue-2); color: var(--blue-2); }
+.filter-btn.active { background: var(--blue-2); color: white; border-color: var(--blue-2); }
+.filter-btn .count {
+  font-size: 0.75rem;
+  background: rgba(0,0,0,0.08);
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+}
+.filter-btn.active .count { background: rgba(255,255,255,0.25); }
+
+/* Player cards */
+.sc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.85rem;
+}
+.sc-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+}
+.sc-card label {
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.sc-card input, .sc-card select {
+  margin-bottom: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+.sc-top {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+.num-badge {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+.name-input {
+  font-weight: 600;
+  font-size: 0.95rem !important;
+}
+.del-btn {
+  margin-top: 0.6rem;
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.del-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Saved flash */
+.saved {
+  animation: savedFlash 0.6s ease;
+}
+@keyframes savedFlash {
+  0%   { background: #dcfce7; }
+  100% { background: white; }
+}
+.sc-card .saved { animation-name: savedFlashSurface; }
+@keyframes savedFlashSurface {
+  0%   { background: #dcfce7; }
+  100% { background: var(--surface2); }
+}
+
+/* Mobile */
+@media (max-width: 760px) {
+  header { padding: 0.75rem 1rem; }
   header h1 { font-size: 1rem; }
-  main { margin: 1rem auto; }
+  main { margin: 1rem auto; padding: 0 0.75rem; }
   .card { padding: 1rem; }
+  .squad-layout { grid-template-columns: 1fr; }
+  .squad-side { order: -1; }
+  .squad-side .card { position: static; }
+  .filter-list { flex-direction: row; flex-wrap: wrap; }
+  .filter-btn { flex: 1 1 auto; min-width: calc(50% - 0.125rem); }
+  .tabs-row { margin: -0.5rem -1rem 0; padding: 0 1rem; }
+  .sc-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.6rem; }
+  .add-row { grid-template-columns: 1fr 70px auto; }
 }
