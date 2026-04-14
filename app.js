@@ -641,8 +641,7 @@ function renderLineupsTab() {
   tabEl.innerHTML = `
     <div class="lineup-layout">
       <aside class="lineup-left">
-        ${canEdit ? `
-        ${collapsibleCard('lineup-tactics', 'Tactics', `
+        ${canEdit ? collapsibleCard('lineup-tactics', 'Tactics', `
           <div class="tactic-btns">
             <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
             <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
