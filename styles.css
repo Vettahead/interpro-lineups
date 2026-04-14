@@ -221,6 +221,8 @@ button.link {
 .name-input {
   font-weight: 600;
   font-size: 0.95rem !important;
+  flex: 1;
+  min-width: 0;
 }
 .del-btn {
   margin-top: 0.6rem;
