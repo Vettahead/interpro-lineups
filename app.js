@@ -262,6 +262,7 @@ async function renderTeamsHome(user) {
 // ---------- Team dashboard ----------
 let activeTab = 'squad';
 let currentFilter = 'All';
+const expandedPlayers = new Set(); // player ids with expanded detail panel
 
 // In-memory editor state for lineups tab
 let editor = null; // { team, canEdit, players, lineups, current: { id?, name, opponent, game_date, formation, slots, subs } }
@@ -365,27 +366,47 @@ function renderSquadTab(team, canEdit, players) {
     </div>
   `;
 
-  const cardHtml = (p) => `
-    <div class="sc-card" data-player="${p.id}">
-      <div class="sc-top">
-        <div class="num-badge">${p.number ?? '–'}</div>
-        <input class="name-input" value="${escapeHtml(p.name || '')}" data-field="name" ${canEdit ? '' : 'disabled'} />
-      </div>
-      <label>Number</label>
-      <input type="number" class="field" min="1" max="99" value="${p.number ?? ''}" data-field="number" ${canEdit ? '' : 'disabled'} />
-      <label>Position</label>
-      <select class="field" data-field="position" ${canEdit ? '' : 'disabled'}>${posOptions(p.position || '')}</select>
-      <label>Parent 1 name</label>
-      <input type="text" class="field" value="${escapeHtml(p.parent1_name || '')}" data-field="parent1_name" ${canEdit ? '' : 'disabled'} />
-      <label>Parent 1 phone</label>
-      <input type="tel" class="field" value="${escapeHtml(p.parent1_phone || '')}" data-field="parent1_phone" ${canEdit ? '' : 'disabled'} />
-      <label>Parent 2 name</label>
-      <input type="text" class="field" value="${escapeHtml(p.parent2_name || '')}" data-field="parent2_name" ${canEdit ? '' : 'disabled'} />
-      <label>Parent 2 phone</label>
-      <input type="tel" class="field" value="${escapeHtml(p.parent2_phone || '')}" data-field="parent2_phone" ${canEdit ? '' : 'disabled'} />
-      ${canEdit ? `<button class="del-btn" data-remove>Remove player</button>` : ''}
+  const cardHtml = (p) => {
+    const isOpen = expandedPlayers.has(p.id);
+    return `
+    <div class="sc-card ${isOpen ? 'open' : ''}" data-player="${p.id}">
+      <button class="sc-header" data-toggle type="button">
+        <div class="sc-chip">
+          <div class="sc-chip-num">${p.number ?? '–'}</div>
+        </div>
+        <div class="sc-chip-info">
+          <div class="sc-chip-name">${escapeHtml(shortName(p.name))}</div>
+          <div class="sc-chip-pos">${p.position || '—'}</div>
+        </div>
+        <div class="sc-chevron">${isOpen ? '▾' : '▸'}</div>
+      </button>
+      ${isOpen ? `
+      <div class="sc-details">
+        <label>Name</label>
+        <input type="text" class="field" value="${escapeHtml(p.name || '')}" data-field="name" ${canEdit ? '' : 'disabled'} />
+        <div class="sc-row-2">
+          <div>
+            <label>Number</label>
+            <input type="number" class="field" min="1" max="99" value="${p.number ?? ''}" data-field="number" ${canEdit ? '' : 'disabled'} />
+          </div>
+          <div>
+            <label>Position</label>
+            <select class="field" data-field="position" ${canEdit ? '' : 'disabled'}>${posOptions(p.position || '')}</select>
+          </div>
+        </div>
+        <label>Parent 1 name</label>
+        <input type="text" class="field" value="${escapeHtml(p.parent1_name || '')}" data-field="parent1_name" ${canEdit ? '' : 'disabled'} />
+        <label>Parent 1 phone</label>
+        <input type="tel" class="field" value="${escapeHtml(p.parent1_phone || '')}" data-field="parent1_phone" ${canEdit ? '' : 'disabled'} />
+        <label>Parent 2 name</label>
+        <input type="text" class="field" value="${escapeHtml(p.parent2_name || '')}" data-field="parent2_name" ${canEdit ? '' : 'disabled'} />
+        <label>Parent 2 phone</label>
+        <input type="tel" class="field" value="${escapeHtml(p.parent2_phone || '')}" data-field="parent2_phone" ${canEdit ? '' : 'disabled'} />
+        ${canEdit ? `<button class="del-btn" data-remove>Remove player</button>` : ''}
+      </div>` : ''}
     </div>
   `;
+  };
 
   const grid = visible.length
     ? `<div class="sc-grid">${visible.map(cardHtml).join('')}</div>`
@@ -433,6 +454,14 @@ function renderSquadTab(team, canEdit, players) {
 
   tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
     const pid = cardEl.dataset.player;
+    const toggleBtn = cardEl.querySelector('[data-toggle]');
+    if (toggleBtn) {
+      toggleBtn.onclick = () => {
+        if (expandedPlayers.has(pid)) expandedPlayers.delete(pid);
+        else expandedPlayers.add(pid);
+        renderSquadTab(team, canEdit, players);
+      };
+    }
     cardEl.querySelectorAll('[data-field]').forEach(input => {
       input.addEventListener('change', async () => {
         const field = input.dataset.field;
