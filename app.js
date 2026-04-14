@@ -531,42 +531,7 @@ function renderLineupsTab() {
 
   tabEl.innerHTML = `
     <div class="lineup-layout">
-      <div class="lineup-pitch-col">
-        <div class="card pitch-card">
-          <div class="pitch" id="pitch">
-            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-            <div class="slots-layer" id="slots-layer"></div>
-            <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
-            <div class="ball-el" id="ball-el"></div>
-          </div>
-          <div class="subs-bar">
-            <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
-            <div class="subs-row" id="subs-row"></div>
-          </div>
-        </div>
-      </div>
-
-      <aside class="lineup-sidebar">
-        <div class="card">
-          <h3 class="card-title">Lineup details</h3>
-          <label>Name</label>
-          <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
-          <label>Opponent</label>
-          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
-          <label>Game date</label>
-          <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
-          <div class="lineup-actions" style="margin-top:0.5rem">
-            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
-            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
-          </div>
-          <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
-        </div>
-
-        <div class="card">
-          <h3 class="card-title">Formation</h3>
-          <div class="f-btns">${formationBtns}</div>
-        </div>
-
+      <aside class="lineup-left">
         ${canEdit ? `
         <div class="card">
           <h3 class="card-title">Tactics</h3>
@@ -576,7 +541,7 @@ function renderLineupsTab() {
             <button class="tactic-btn ${tacticMode === 'drag' ? 'active' : ''}" data-tactic-mode="drag">↗ Drag</button>
             <button class="tactic-btn ${current.ballVisible ? 'active' : ''}" id="btn-ball">⚽ Ball</button>
           </div>
-          <div id="tactic-info" class="tactic-info">Drag endpoints or body to move. Drag middle dot to bend.</div>
+          <div id="tactic-info" class="tactic-info">Pick a mode to edit tactics.</div>
           <div class="zone-row">
             <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ffeb3b"></span>Press
               <input type="checkbox" id="chk-zone-0" ${current.zoneLines[0] !== null ? 'checked' : ''} />
@@ -595,15 +560,51 @@ function renderLineupsTab() {
         ` : ''}
 
         <div class="card">
-          <h3 class="card-title">Available players</h3>
-          <div class="palette" id="palette">${paletteHtml}</div>
-          ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Drag onto a position or subs. Drag back here to remove.</p>` : ''}
+          <h3 class="card-title">Lineup details</h3>
+          <label>Name</label>
+          <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
+          <label>Opponent</label>
+          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
+          <label>Game date</label>
+          <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+          <div class="lineup-actions" style="margin-top:0.5rem">
+            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
+          </div>
+          <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
         </div>
 
         <div class="card">
           <h3 class="card-title">Saved lineups</h3>
           <div class="lineup-list">${lineupsListHtml}</div>
           ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
+        </div>
+      </aside>
+
+      <div class="lineup-center">
+        <div class="card formation-card">
+          <h3 class="card-title">Formation</h3>
+          <div class="f-btns">${formationBtns}</div>
+        </div>
+        <div class="card pitch-card">
+          <div class="pitch" id="pitch">
+            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="slots-layer"></div>
+            <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+            <div class="ball-el" id="ball-el"></div>
+          </div>
+          <div class="subs-bar">
+            <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
+            <div class="subs-row" id="subs-row"></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="lineup-right">
+        <div class="card">
+          <h3 class="card-title">Available players</h3>
+          <div class="palette" id="palette">${paletteHtml}</div>
+          ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Tap a position on the pitch to pick a player, or drag on desktop.</p>` : ''}
         </div>
       </aside>
     </div>
@@ -818,6 +819,104 @@ function wireLineupEvents() {
 
   if (canEdit) wireDragAndDrop();
   if (canEdit) wireTacticsUI();
+  if (canEdit) wirePicker();
+}
+
+// Tap-to-pick: clicking any slot or sub slot opens a player picker modal.
+// Works on both mouse and touch. HTML5 drag still works on desktop.
+function wirePicker() {
+  const tabEl = document.getElementById('tab-content');
+  tabEl.querySelectorAll('[data-slot]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // Ignore clicks that originated during a drag
+      if (el.classList.contains('drag-over')) return;
+      openPlayerPicker('slot', parseInt(el.dataset.slot, 10));
+    });
+  });
+  tabEl.querySelectorAll('[data-sub]').forEach(el => {
+    el.addEventListener('click', () => {
+      if (el.classList.contains('drag-over')) return;
+      openPlayerPicker('sub', parseInt(el.dataset.sub, 10));
+    });
+  });
+}
+
+function openPlayerPicker(kind, idx) {
+  const { current, players } = editor;
+  const currentPid = kind === 'slot' ? current.slots[idx] : current.subs[idx];
+  const currentPlayer = currentPid ? players.find(p => p.id === currentPid) : null;
+
+  // Subs cap check (when placing into an empty sub slot)
+  if (kind === 'sub' && !currentPid) {
+    const subsFilled = current.subs.filter(Boolean).length;
+    if (subsFilled >= MAX_SUBS) { alert(`Max ${MAX_SUBS} subs.`); return; }
+  }
+
+  const usedIds = new Set([...Object.values(current.slots), ...current.subs].filter(Boolean));
+  const formation = FORMATIONS[current.formation];
+  const posLabel = kind === 'slot' ? (formation?.lbl?.[idx] || '') : '';
+
+  // Available = all players NOT currently on pitch/subs (plus currentPlayer if slot is filled — no, exclude since swap via remove)
+  const available = players
+    .filter(p => !usedIds.has(p.id))
+    .sort((a, b) => (a.number ?? 999) - (b.number ?? 999));
+
+  const title = kind === 'slot'
+    ? `Choose player${posLabel ? ' for ' + posLabel : ''}`
+    : `Choose substitute`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal">
+      <div class="picker-header">
+        <h3>${escapeHtml(title)}</h3>
+        <button class="picker-close" aria-label="Close">✕</button>
+      </div>
+      <div class="picker-body">
+        ${currentPlayer ? `
+          <div class="picker-current">
+            Currently: <strong>${escapeHtml(currentPlayer.name)}</strong>
+            ${currentPlayer.number != null ? ' · #' + currentPlayer.number : ''}
+          </div>
+          <button class="picker-remove" data-action="remove">Remove from pitch</button>
+        ` : ''}
+        ${available.length
+          ? `<div class="picker-list">
+              ${available.map(p => `
+                <button class="picker-item" data-pid="${p.id}">
+                  <span class="picker-num">${p.number ?? '–'}</span>
+                  <span class="picker-name">${escapeHtml(p.name)}</span>
+                  <span class="picker-pos">${p.position || ''}</span>
+                </button>
+              `).join('')}
+            </div>`
+          : `<p class="muted" style="padding:1rem;text-align:center">All players are already on the pitch or subs. Remove someone first to swap.</p>`
+        }
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('.picker-close').onclick = close;
+
+  overlay.querySelectorAll('[data-pid]').forEach(b => {
+    b.onclick = () => {
+      const pid = b.dataset.pid;
+      const payload = { playerId: pid, fromSlot: null, fromSub: null };
+      if (kind === 'slot') handleDropToSlot(idx, payload);
+      else handleDropToSub(idx, payload);
+      close();
+    };
+  });
+  const rm = overlay.querySelector('[data-action=remove]');
+  if (rm) rm.onclick = () => {
+    if (kind === 'slot') delete current.slots[idx];
+    else current.subs[idx] = undefined;
+    renderLineupsTab();
+    close();
+  };
 }
 
 function wireTacticsUI() {
