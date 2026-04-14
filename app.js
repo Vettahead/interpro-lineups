@@ -87,7 +87,7 @@ window.addEventListener('hashchange', render);
 
 function resetHeader() {
   const titleEl = document.getElementById('header-title');
-  if (titleEl) titleEl.innerHTML = `<h1>Interpro Blues — Lineups</h1>`;
+  if (titleEl) titleEl.innerHTML = `<img src="logo.png" alt="Interpro" class="brand-logo" /><h1>Interpro Blues — Lineups</h1>`;
   const tabsEl = document.getElementById('header-tabs');
   if (tabsEl) tabsEl.innerHTML = '';
 }
@@ -295,10 +295,13 @@ async function renderTeamDashboard(user, teamId) {
   const titleEl = document.getElementById('header-title');
   if (titleEl) {
     titleEl.innerHTML = `
-      <a href="#" class="breadcrumb-link" onclick="event.preventDefault();location.hash=''">← Your teams</a>
-      <div class="team-line">
-        <h1 class="team-name">${escapeHtml(team.name)}</h1>
-        <span class="role-chip">${escapeHtml(role)}</span>
+      <img src="logo.png" alt="Interpro" class="brand-logo" />
+      <div class="title-stack">
+        <a href="#" class="breadcrumb-link" onclick="event.preventDefault();location.hash=''">← Your teams</a>
+        <div class="team-line">
+          <h1 class="team-name">${escapeHtml(team.name)}</h1>
+          <span class="role-chip">${escapeHtml(role)}</span>
+        </div>
       </div>
     `;
   }
