@@ -22,21 +22,81 @@ body {
 header {
   background: var(--blue);
   color: white;
-  padding: 1rem 1.5rem;
+  padding: 0.5rem 1.25rem 0;
+}
+.header-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+  min-height: 40px;
 }
-header h1 { margin: 0; font-size: 1.2rem; }
-#user-bar { font-size: 0.9rem; display: flex; gap: 0.75rem; align-items: center; }
+header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+.header-title { min-width: 0; }
+.header-title .breadcrumb-link {
+  color: rgba(255,255,255,0.75);
+  text-decoration: none;
+  font-size: 0.8rem;
+  display: inline-block;
+  margin-bottom: 0.1rem;
+}
+.header-title .breadcrumb-link:hover { color: white; }
+.header-title .team-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.header-title .team-name { margin: 0; font-size: 1.1rem; font-weight: 600; line-height: 1.1; }
+.header-title .role-chip {
+  font-size: 0.7rem;
+  background: rgba(255,255,255,0.15);
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#user-bar { font-size: 0.85rem; display: flex; gap: 0.75rem; align-items: center; white-space: nowrap; }
 #user-bar button {
   background: transparent; color: white; border: 1px solid rgba(255,255,255,0.4);
-  padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+  padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+}
+
+.header-tabs {
+  display: flex;
+  gap: 0;
+  margin-top: 0.4rem;
+}
+.header-tabs:empty { display: none; }
+.header-tabs .h-tab {
+  background: transparent;
+  color: rgba(255,255,255,0.7);
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-weight: 500;
+}
+.header-tabs .h-tab.active {
+  color: white;
+  border-bottom-color: white;
+}
+.header-tabs .h-tab[disabled] {
+  color: rgba(255,255,255,0.35);
+  cursor: not-allowed;
+}
+@media (max-width: 640px) {
+  header { padding: 0.4rem 0.9rem 0; }
+  #user-bar span { display: none; } /* hide email on phone to save room */
+  .header-title .team-name { font-size: 1rem; }
+  .header-tabs .h-tab { padding: 0.5rem 0.75rem; font-size: 0.85rem; }
 }
 
 main {
   max-width: 1100px;
-  margin: 1.5rem auto;
+  margin: 0.75rem auto;
   padding: 0 1rem;
 }
 
