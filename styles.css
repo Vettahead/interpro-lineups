@@ -364,6 +364,10 @@ button.link {
   gap: 1rem;
   align-items: start;
 }
+.lineup-layout.plays-layout {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+.lineup-center-wide .card { max-width: 620px; }
 .lineup-center { display: flex; flex-direction: column; align-items: center; min-width: 0; }
 .lineup-center .card { width: 100%; max-width: 540px; margin-bottom: 0.75rem; }
 .lineup-left, .lineup-right { display: flex; flex-direction: column; gap: 0; }
