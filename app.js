@@ -85,9 +85,17 @@ function currentRoute() {
 }
 window.addEventListener('hashchange', render);
 
+function resetHeader() {
+  const titleEl = document.getElementById('header-title');
+  if (titleEl) titleEl.innerHTML = `<h1>Interpro Blues — Lineups</h1>`;
+  const tabsEl = document.getElementById('header-tabs');
+  if (tabsEl) tabsEl.innerHTML = '';
+}
+
 async function render() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
+    resetHeader();
     renderAuth();
     userBar.innerHTML = '';
     return;
@@ -98,6 +106,7 @@ async function render() {
   if (route.name === 'team') {
     await renderTeamDashboard(session.user, route.teamId);
   } else {
+    resetHeader();
     await renderTeamsHome(session.user);
   }
 }
@@ -277,30 +286,33 @@ async function renderTeamDashboard(user, teamId) {
   const players = playersRes.data || [];
   const lineups = lineupsRes.data || [];
 
-  appEl.innerHTML = `
-    <div class="breadcrumb"><a href="#" onclick="event.preventDefault();location.hash=''">← Your teams</a></div>
-    <div class="card">
-      <div class="team-header">
-        <div>
-          <h2 style="margin:0">${escapeHtml(team.name)}</h2>
-          <div class="muted">Role: ${role}</div>
-        </div>
+  // Populate blue header with team info + tabs
+  const titleEl = document.getElementById('header-title');
+  if (titleEl) {
+    titleEl.innerHTML = `
+      <a href="#" class="breadcrumb-link" onclick="event.preventDefault();location.hash=''">← Your teams</a>
+      <div class="team-line">
+        <h1 class="team-name">${escapeHtml(team.name)}</h1>
+        <span class="role-chip">${escapeHtml(role)}</span>
       </div>
-      <div class="tabs-row">
-        <button class="tab-btn ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
-        <button class="tab-btn ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
-        <button class="tab-btn" disabled title="Coming soon">Plays</button>
-      </div>
-    </div>
-    <div id="tab-content"></div>
-  `;
+    `;
+  }
+  const tabsEl = document.getElementById('header-tabs');
+  if (tabsEl) {
+    tabsEl.innerHTML = `
+      <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
+      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
+      <button class="h-tab" disabled title="Coming soon">Plays</button>
+    `;
+    tabsEl.querySelectorAll('.h-tab[data-tab]').forEach(b => {
+      b.onclick = () => {
+        activeTab = b.dataset.tab;
+        renderTeamDashboard(user, teamId);
+      };
+    });
+  }
 
-  appEl.querySelectorAll('.tab-btn[data-tab]').forEach(b => {
-    b.onclick = () => {
-      activeTab = b.dataset.tab;
-      renderTeamDashboard(user, teamId);
-    };
-  });
+  appEl.innerHTML = `<div id="tab-content"></div>`;
 
   if (activeTab === 'squad') {
     renderSquadTab(team, canEdit, players);
