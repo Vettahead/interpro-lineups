@@ -507,55 +507,49 @@ function renderLineupsTab() {
 
   tabEl.innerHTML = `
     <div class="lineup-layout">
-      <aside class="lineup-side">
-        <div class="card">
-          <h3 style="margin-top:0">Saved lineups</h3>
-          <div class="lineup-list">${lineupsListHtml}</div>
-          ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.75rem">+ New lineup</button>` : ''}
-        </div>
-      </aside>
-
-      <div class="lineup-main">
-        <div class="card">
-          <div class="lineup-meta-form">
-            <div>
-              <label>Lineup name</label>
-              <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
-            </div>
-            <div>
-              <label>Opponent</label>
-              <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
-            </div>
-            <div>
-              <label>Game date</label>
-              <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
-            </div>
-          </div>
-          <div class="formation-row">
-            <label style="width:auto;margin-right:0.5rem">Formation:</label>
-            <div class="f-btns">${formationBtns}</div>
-          </div>
-          <div class="lineup-actions">
-            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save changes' : 'Save lineup'}</button>` : ''}
-            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
-            <div id="save-msg" class="muted" style="margin-left:auto"></div>
-          </div>
-        </div>
-
+      <div class="lineup-pitch-col">
         <div class="card pitch-card">
-          <div class="pitch" id="pitch"></div>
+          <div class="pitch" id="pitch">${pitchSvgHtml()}</div>
           <div class="subs-bar">
             <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
             <div class="subs-row" id="subs-row"></div>
           </div>
         </div>
+      </div>
+
+      <aside class="lineup-sidebar">
+        <div class="card">
+          <h3 class="card-title">Lineup details</h3>
+          <label>Name</label>
+          <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
+          <label>Opponent</label>
+          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
+          <label>Game date</label>
+          <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+          <div class="lineup-actions" style="margin-top:0.5rem">
+            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
+          </div>
+          <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+        </div>
 
         <div class="card">
-          <h3 style="margin-top:0">Available players</h3>
-          <div class="palette" id="palette">${paletteHtml}</div>
-          ${canEdit ? `<p class="muted" style="font-size:0.8rem;margin-top:0.5rem">Drag a player onto a pitch position or the subs bar. Drag here to remove from lineup.</p>` : ''}
+          <h3 class="card-title">Formation</h3>
+          <div class="f-btns">${formationBtns}</div>
         </div>
-      </div>
+
+        <div class="card">
+          <h3 class="card-title">Available players</h3>
+          <div class="palette" id="palette">${paletteHtml}</div>
+          ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Drag onto a position or subs. Drag back here to remove.</p>` : ''}
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">Saved lineups</h3>
+          <div class="lineup-list">${lineupsListHtml}</div>
+          ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
+        </div>
+      </aside>
     </div>
   `;
 
@@ -586,7 +580,7 @@ function renderPitch() {
 
   const pById = id => players.find(p => p.id === id);
 
-  pitch.innerHTML = formation.pos.map(([x, y], i) => {
+  const slotsHtml = formation.pos.map(([x, y], i) => {
     const pid = current.slots[i];
     const p = pid ? pById(pid) : null;
     const label = formation.lbl[i] || '';
@@ -607,6 +601,40 @@ function renderPitch() {
       </div>
     `;
   }).join('');
+
+  // Keep SVG overlay, replace the slot overlays only
+  pitch.innerHTML = pitchSvgHtml() + slotsHtml;
+}
+
+// Proper pitch lines as SVG (viewBox 100x100 so x/y map to percent)
+function pitchSvgHtml() {
+  return `
+    <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <!-- perimeter -->
+      <rect x="1" y="1" width="98" height="98" fill="none" stroke="white" stroke-width="0.5" opacity="0.7"/>
+      <!-- halfway line -->
+      <line x1="1" y1="50" x2="99" y2="50" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- centre circle + spot -->
+      <circle cx="50" cy="50" r="9" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <circle cx="50" cy="50" r="0.6" fill="white" opacity="0.8"/>
+      <!-- top penalty area -->
+      <rect x="18" y="1" width="64" height="16" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- top goal area -->
+      <rect x="34" y="1" width="32" height="6" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- top penalty spot -->
+      <circle cx="50" cy="11" r="0.6" fill="white" opacity="0.8"/>
+      <!-- top penalty arc -->
+      <path d="M 41 17 A 9 9 0 0 0 59 17" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- bottom penalty area -->
+      <rect x="18" y="83" width="64" height="16" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- bottom goal area -->
+      <rect x="34" y="93" width="32" height="6" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <!-- bottom penalty spot -->
+      <circle cx="50" cy="89" r="0.6" fill="white" opacity="0.8"/>
+      <!-- bottom penalty arc -->
+      <path d="M 41 83 A 9 9 0 0 1 59 83" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+    </svg>
+  `;
 }
 
 function renderSubsBar() {
