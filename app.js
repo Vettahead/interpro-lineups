@@ -471,9 +471,33 @@ function newLineupState() {
     game_date: '',
     formation: '4-3-3',
     slots: {},   // { slotIndex: playerId }
-    subs: []     // [playerId]
+    subs: [],    // [playerId]
+    // tactics
+    arrows: [],             // [{x1,y1,x2,y2,cx?,cy?}] in pitch %
+    zoneLines: [null, null],// [pressY%, defY%] or null
+    ballVisible: false,
+    ballPos: { x: 50, y: 50 }
   };
 }
+
+// Tactics zones config
+const ZONES = [
+  { label: 'Press', color: '#ffeb3b', defaultY: 30 },
+  { label: 'Def',   color: '#ff7043', defaultY: 65 }
+];
+
+// Transient tactics UI state (not persisted)
+let tacticMode = null;          // null | 'click' | 'drag'
+let clickStart = null;
+let dragActive = false;
+let dragCurrent = null;
+let movingIdx = null;
+let movingEnd = null;
+let movingOx = 0;
+let movingOy = 0;
+let draggingLineIdx = null;
+let draggingLineStartY = 0;
+let draggingLinePct = 0;
 
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
@@ -509,7 +533,12 @@ function renderLineupsTab() {
     <div class="lineup-layout">
       <div class="lineup-pitch-col">
         <div class="card pitch-card">
-          <div class="pitch" id="pitch">${pitchSvgHtml()}</div>
+          <div class="pitch" id="pitch">
+            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="slots-layer"></div>
+            <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+            <div class="ball-el" id="ball-el"></div>
+          </div>
           <div class="subs-bar">
             <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
             <div class="subs-row" id="subs-row"></div>
@@ -538,6 +567,33 @@ function renderLineupsTab() {
           <div class="f-btns">${formationBtns}</div>
         </div>
 
+        ${canEdit ? `
+        <div class="card">
+          <h3 class="card-title">Tactics</h3>
+          <div class="tactic-btns">
+            <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
+            <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
+            <button class="tactic-btn ${tacticMode === 'drag' ? 'active' : ''}" data-tactic-mode="drag">↗ Drag</button>
+            <button class="tactic-btn ${current.ballVisible ? 'active' : ''}" id="btn-ball">⚽ Ball</button>
+          </div>
+          <div id="tactic-info" class="tactic-info">Drag endpoints or body to move. Drag middle dot to bend.</div>
+          <div class="zone-row">
+            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ffeb3b"></span>Press
+              <input type="checkbox" id="chk-zone-0" ${current.zoneLines[0] !== null ? 'checked' : ''} />
+            </label>
+            <input type="range" id="slider-zone-0" min="5" max="92" value="${current.zoneLines[0] ?? ZONES[0].defaultY}" ${current.zoneLines[0] === null ? 'disabled' : ''} />
+          </div>
+          <div class="zone-row">
+            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ff7043"></span>Def
+              <input type="checkbox" id="chk-zone-1" ${current.zoneLines[1] !== null ? 'checked' : ''} />
+            </label>
+            <input type="range" id="slider-zone-1" min="5" max="92" value="${current.zoneLines[1] ?? ZONES[1].defaultY}" ${current.zoneLines[1] === null ? 'disabled' : ''} />
+          </div>
+          <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
+          <button class="btn-full" id="clear-tactics" style="margin-bottom:0">✕ Clear all tactics</button>
+        </div>
+        ` : ''}
+
         <div class="card">
           <h3 class="card-title">Available players</h3>
           <div class="palette" id="palette">${paletteHtml}</div>
@@ -556,6 +612,12 @@ function renderLineupsTab() {
   renderPitch();
   renderSubsBar();
   wireLineupEvents();
+  initTacticsCanvas();
+  initBall();
+  sizeTacticsCanvas();
+  drawTactics();
+  renderBall();
+  updateTacticsCanvasClass();
 }
 
 function chipHtml(player, context) {
@@ -573,10 +635,11 @@ function chipHtml(player, context) {
 }
 
 function renderPitch() {
-  const pitch = document.getElementById('pitch');
+  const slotsLayer = document.getElementById('slots-layer');
+  if (!slotsLayer) return;
   const { current, players } = editor;
   const formation = FORMATIONS[current.formation];
-  if (!formation) { pitch.innerHTML = ''; return; }
+  if (!formation) { slotsLayer.innerHTML = ''; return; }
 
   const pById = id => players.find(p => p.id === id);
 
@@ -602,14 +665,17 @@ function renderPitch() {
     `;
   }).join('');
 
-  // Keep SVG overlay, replace the slot overlays only
-  pitch.innerHTML = pitchSvgHtml() + slotsHtml;
+  slotsLayer.innerHTML = slotsHtml;
 }
 
-// Proper pitch lines as SVG (viewBox 100x100 so x/y map to percent)
+// Kept as fallback helper (not currently called, but left in case)
 function pitchSvgHtml() {
+  return `<svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>`;
+}
+
+// Inner SVG markup (pitch lines) — placed inside the outer <svg> in render
+function pitchSvgInner() {
   return `
-    <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       <!-- perimeter -->
       <rect x="1" y="1" width="98" height="98" fill="none" stroke="white" stroke-width="0.5" opacity="0.7"/>
       <!-- halfway line -->
@@ -633,7 +699,6 @@ function pitchSvgHtml() {
       <circle cx="50" cy="89" r="0.6" fill="white" opacity="0.8"/>
       <!-- bottom penalty arc -->
       <path d="M 41 83 A 9 9 0 0 1 59 83" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
-    </svg>
   `;
 }
 
@@ -722,8 +787,13 @@ function wireLineupEvents() {
         game_date: l.game_date || '',
         formation: l.data?.formation || '4-3-3',
         slots: { ...(l.data?.slots || {}) },
-        subs: [...(l.data?.subs || [])]
+        subs: [...(l.data?.subs || [])],
+        arrows: (l.data?.arrows || []).map(a => ({ ...a })),
+        zoneLines: [...(l.data?.zoneLines || [null, null])],
+        ballVisible: !!l.data?.ballVisible,
+        ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) }
       };
+      tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       renderLineupsTab();
     };
   });
@@ -747,6 +817,30 @@ function wireLineupEvents() {
   });
 
   if (canEdit) wireDragAndDrop();
+  if (canEdit) wireTacticsUI();
+}
+
+function wireTacticsUI() {
+  const tabEl = document.getElementById('tab-content');
+  tabEl.querySelectorAll('[data-tactic-mode]').forEach(b => {
+    b.onclick = () => {
+      const next = b.dataset.tacticMode;
+      // clicking the active button turns it off
+      setTacticMode(tacticMode === next ? null : next);
+    };
+  });
+  const ballBtn = document.getElementById('btn-ball');
+  if (ballBtn) ballBtn.onclick = () => toggleBall();
+  [0, 1].forEach(i => {
+    const chk = document.getElementById('chk-zone-' + i);
+    const sl  = document.getElementById('slider-zone-' + i);
+    if (chk) chk.onchange = () => toggleZoneLine(i);
+    if (sl)  sl.oninput   = (e) => moveZoneLine(i, e.target.value);
+  });
+  const clA = document.getElementById('clear-arrows');
+  if (clA) clA.onclick = () => clearArrows();
+  const clT = document.getElementById('clear-tactics');
+  if (clT) clT.onclick = () => clearTactics();
 }
 
 function wireDragAndDrop() {
@@ -883,7 +977,11 @@ async function saveLineup() {
     data: {
       formation: current.formation,
       slots: current.slots,
-      subs: current.subs
+      subs: current.subs,
+      arrows: current.arrows,
+      zoneLines: current.zoneLines,
+      ballVisible: current.ballVisible,
+      ballPos: current.ballPos
     },
     updated_at: new Date().toISOString()
   };
@@ -917,6 +1015,413 @@ function formatDate(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return iso;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// ---------- Tactics ----------
+function setTacticMode(m) {
+  tacticMode = m;
+  clickStart = null;
+  dragCurrent = null;
+  dragActive = false;
+  movingIdx = null;
+  const info = document.getElementById('tactic-info');
+  if (info) {
+    if (m === 'click') info.textContent = 'Click start, click again to place arrow.';
+    else if (m === 'drag') info.textContent = 'Drag on pitch to draw arrow.';
+    else if (m === 'move') info.textContent = 'Drag endpoints/body to move. Middle dot bends. Red X deletes. Drag zone lines to reposition.';
+    else info.textContent = 'Pick a mode to edit tactics. Arrows and zones stay visible here.';
+  }
+  // update button active states without full rerender
+  const tabEl = document.getElementById('tab-content');
+  if (tabEl) {
+    tabEl.querySelectorAll('[data-tactic-mode]').forEach(b => {
+      const val = b.dataset.tacticMode || null;
+      b.classList.toggle('active', val === (m || null));
+    });
+  }
+  updateTacticsCanvasClass();
+  drawTactics();
+}
+
+function updateTacticsCanvasClass() {
+  const tc = document.getElementById('tactics-canvas');
+  if (!tc) return;
+  tc.classList.remove('tactic-active', 'line-drag-active');
+  // Canvas captures pointer events only when a tactic mode is active.
+  // This keeps player drag-drop working when the user isn't editing tactics.
+  if (tacticMode === 'click' || tacticMode === 'drag') tc.classList.add('tactic-active');
+  else if (tacticMode === 'move') tc.classList.add('line-drag-active');
+}
+
+function sizeTacticsCanvas() {
+  const tc = document.getElementById('tactics-canvas');
+  if (!tc) return;
+  const w = tc.offsetWidth || 400, h = tc.offsetHeight || 300;
+  if (tc.width !== w) tc.width = w;
+  if (tc.height !== h) tc.height = h;
+}
+
+function evtPct(e, tc) {
+  const r = tc.getBoundingClientRect();
+  const cx = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
+  const cy = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
+  return {
+    x: Math.min(100, Math.max(0, ((cx - r.left) / r.width) * 100)),
+    y: Math.min(100, Math.max(0, ((cy - r.top) / r.height) * 100))
+  };
+}
+
+function arrowDeleteBtnPos(a, w, h) {
+  const ax2 = a.x2 / 100 * w, ay2 = a.y2 / 100 * h;
+  const hasBend = (typeof a.cx === 'number' && typeof a.cy === 'number');
+  const fx = hasBend ? a.cx / 100 * w : a.x1 / 100 * w;
+  const fy = hasBend ? a.cy / 100 * h : a.y1 / 100 * h;
+  const ang = Math.atan2(ay2 - fy, ax2 - fx);
+  return { bx: ax2 + 12 * Math.cos(ang + Math.PI / 2), by: ay2 + 12 * Math.sin(ang + Math.PI / 2) };
+}
+
+function hitArrow(p, tc) {
+  const arrows = editor.current.arrows;
+  const w = tc.offsetWidth, h = tc.offsetHeight, px = p.x / 100 * w, py = p.y / 100 * h;
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    const ax1 = a.x1 / 100 * w, ay1 = a.y1 / 100 * h, ax2 = a.x2 / 100 * w, ay2 = a.y2 / 100 * h;
+    if (tacticMode === 'move') {
+      const { bx, by } = arrowDeleteBtnPos(a, w, h);
+      if (Math.hypot(px - bx, py - by) < 9) return { i, end: 'delete' };
+    }
+    if (Math.hypot(px - ax1, py - ay1) < 14) return { i, end: 'start' };
+    if (Math.hypot(px - ax2, py - ay2) < 14) return { i, end: 'end' };
+    const hasBend = (typeof a.cx === 'number' && typeof a.cy === 'number');
+    const bxp = hasBend ? a.cx : (a.x1 + a.x2) / 2;
+    const byp = hasBend ? a.cy : (a.y1 + a.y2) / 2;
+    const bx = bxp / 100 * w, by = byp / 100 * h;
+    if (Math.hypot(px - bx, py - by) < 12) return { i, end: 'bend' };
+    const dx = ax2 - ax1, dy = ay2 - ay1, len = Math.hypot(dx, dy);
+    if (len > 0) {
+      const t = Math.max(0, Math.min(1, ((px - ax1) * dx + (py - ay1) * dy) / (len * len)));
+      if (Math.hypot(px - (ax1 + t * dx), py - (ay1 + t * dy)) < 12) return { i, end: 'body' };
+    }
+  }
+  return null;
+}
+
+let _tacticsInited = false;
+function initTacticsCanvas() {
+  const tc = document.getElementById('tactics-canvas');
+  if (!tc || tc.dataset.inited === '1') return;
+  tc.dataset.inited = '1';
+
+  const onDown = (e) => {
+    const c = editor.current;
+    const isRight = e.button === 2;
+    e.preventDefault();
+    const p = evtPct(e, tc);
+    if (isRight) {
+      const hit = hitArrow(p, tc);
+      if (hit) {
+        if (hit.end === 'bend' && typeof c.arrows[hit.i].cx === 'number') {
+          delete c.arrows[hit.i].cx; delete c.arrows[hit.i].cy;
+        } else {
+          c.arrows.splice(hit.i, 1);
+        }
+        updateTacticsCanvasClass(); drawTactics();
+      }
+      return;
+    }
+    if (tacticMode === 'move') {
+      const hit = hitArrow(p, tc);
+      if (hit && hit.end === 'delete') { c.arrows.splice(hit.i, 1); updateTacticsCanvasClass(); drawTactics(); return; }
+      if (hit) { movingIdx = hit.i; movingEnd = hit.end; movingOx = p.x; movingOy = p.y; return; }
+      for (let i = 0; i < c.zoneLines.length; i++) {
+        if (c.zoneLines[i] !== null && Math.abs(p.y - c.zoneLines[i]) < 5) {
+          draggingLineIdx = i; draggingLineStartY = (e.clientY ?? 0); draggingLinePct = c.zoneLines[i]; return;
+        }
+      }
+      return;
+    }
+    if (tacticMode === 'click') {
+      if (!clickStart) { clickStart = p; }
+      else {
+        if (Math.hypot(p.x - clickStart.x, p.y - clickStart.y) > 2) {
+          c.arrows.push({ x1: clickStart.x, y1: clickStart.y, x2: p.x, y2: p.y });
+        }
+        clickStart = null; updateTacticsCanvasClass();
+      }
+      drawTactics();
+    } else {
+      dragActive = true;
+      dragCurrent = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+    }
+  };
+
+  const onMove = (e) => {
+    const c = editor.current;
+    const p = evtPct(e, tc);
+    if (movingIdx !== null) {
+      const a = c.arrows[movingIdx];
+      const dx = p.x - movingOx, dy = p.y - movingOy;
+      const cl = v => Math.min(99, Math.max(1, v));
+      if (movingEnd === 'start') { a.x1 = cl(a.x1 + dx); a.y1 = cl(a.y1 + dy); }
+      else if (movingEnd === 'end') { a.x2 = cl(a.x2 + dx); a.y2 = cl(a.y2 + dy); }
+      else if (movingEnd === 'bend') { a.cx = cl(p.x); a.cy = cl(p.y); }
+      else {
+        a.x1 = cl(a.x1 + dx); a.y1 = cl(a.y1 + dy); a.x2 = cl(a.x2 + dx); a.y2 = cl(a.y2 + dy);
+        if (typeof a.cx === 'number') a.cx = cl(a.cx + dx);
+        if (typeof a.cy === 'number') a.cy = cl(a.cy + dy);
+      }
+      movingOx = p.x; movingOy = p.y;
+      drawTactics();
+      return;
+    }
+    if (draggingLineIdx !== null) {
+      const pitch = document.getElementById('pitch');
+      const newY = Math.min(92, Math.max(5, draggingLinePct + (((e.clientY ?? 0) - draggingLineStartY) / pitch.offsetHeight) * 100));
+      c.zoneLines[draggingLineIdx] = newY;
+      const sl = document.getElementById('slider-zone-' + draggingLineIdx);
+      if (sl) sl.value = Math.round(newY);
+      drawTactics();
+      return;
+    }
+    if (tacticMode === 'click' && clickStart) { dragCurrent = { ...clickStart, x2: p.x, y2: p.y }; drawTactics(); }
+    if (tacticMode === 'drag' && dragActive) { dragCurrent.x2 = p.x; dragCurrent.y2 = p.y; drawTactics(); }
+    if (tacticMode === 'move') {
+      const hit = hitArrow(p, tc);
+      const nearLine = c.zoneLines.some(z => z !== null && Math.abs(p.y - z) < 5);
+      tc.style.cursor = hit
+        ? (hit.end === 'body' ? 'move' : hit.end === 'bend' ? 'grab' : hit.end === 'delete' ? 'pointer' : 'crosshair')
+        : nearLine ? 'ns-resize' : 'default';
+    }
+  };
+
+  const onUp = (e) => {
+    const c = editor.current;
+    if (movingIdx !== null) { movingIdx = null; return; }
+    if (draggingLineIdx !== null) { draggingLineIdx = null; return; }
+    if (tacticMode === 'drag' && dragActive) {
+      const p = evtPct(e, tc);
+      if (Math.hypot(p.x - dragCurrent.x1, p.y - dragCurrent.y1) > 3) {
+        c.arrows.push({ ...dragCurrent, x2: p.x, y2: p.y });
+      }
+      dragActive = false; dragCurrent = null;
+      updateTacticsCanvasClass(); drawTactics();
+    }
+  };
+
+  tc.addEventListener('pointerdown', onDown);
+  tc.addEventListener('pointermove', onMove);
+  tc.addEventListener('pointerup', onUp);
+  tc.addEventListener('pointercancel', onUp);
+  tc.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('pointerup', () => { movingIdx = null; draggingLineIdx = null; });
+
+  window.addEventListener('resize', () => { sizeTacticsCanvas(); drawTactics(); });
+}
+
+function drawTactics() {
+  const tc = document.getElementById('tactics-canvas');
+  if (!tc || !editor) return;
+  const c = editor.current;
+  sizeTacticsCanvas();
+  const w = tc.width, h = tc.height;
+  const ctx = tc.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  // Zone lines
+  c.zoneLines.forEach((y, i) => {
+    if (y === null) return;
+    const z = ZONES[i], py = y / 100 * h;
+    ctx.save();
+    ctx.setLineDash([10, 7]);
+    ctx.strokeStyle = z.color; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = z.color; ctx.globalAlpha = 0.92;
+    ctx.fillRect(w - 46, py - 13, 42, 16);
+    ctx.fillStyle = '#000'; ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(z.label, w - 25, py - 5);
+    ctx.restore();
+  });
+
+  const arrow = (x1p, y1p, x2p, y2p, preview, cxp, cyp) => {
+    const x1 = x1p / 100 * w, y1 = y1p / 100 * h, x2 = x2p / 100 * w, y2 = y2p / 100 * h;
+    const hasBend = (typeof cxp === 'number' && typeof cyp === 'number');
+    const cxv = hasBend ? cxp / 100 * w : 0, cyv = hasBend ? cyp / 100 * h : 0;
+    const len = Math.hypot(x2 - x1, y2 - y1); if (len < 4) return;
+    const ang = hasBend ? Math.atan2(y2 - cyv, x2 - cxv) : Math.atan2(y2 - y1, x2 - x1);
+    const hl = Math.min(20, len * 0.38);
+    ctx.save();
+    ctx.strokeStyle = preview ? 'rgba(255,255,255,0.7)' : 'rgba(255,220,0,0.95)';
+    ctx.fillStyle   = preview ? 'rgba(255,255,255,0.7)' : 'rgba(255,220,0,0.95)';
+    ctx.lineWidth = preview ? 1.8 : 2.5;
+    if (preview) ctx.setLineDash([5, 4]);
+    ctx.globalAlpha = preview ? 0.65 : 1;
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    if (hasBend) ctx.quadraticCurveTo(cxv, cyv, x2, y2); else ctx.lineTo(x2, y2);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - hl * Math.cos(ang - 0.4), y2 - hl * Math.sin(ang - 0.4));
+    ctx.lineTo(x2 - hl * Math.cos(ang + 0.4), y2 - hl * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
+    if (tacticMode === 'move' && !preview) {
+      ctx.globalAlpha = 0.85; ctx.fillStyle = '#fff';
+      ctx.strokeStyle = 'rgba(255,220,0,0.9)'; ctx.lineWidth = 1.5;
+      [[x1, y1], [x2, y2]].forEach(([hx, hy]) => {
+        ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+      let bhx, bhy;
+      if (hasBend) { bhx = 0.25 * x1 + 0.5 * cxv + 0.25 * x2; bhy = 0.25 * y1 + 0.5 * cyv + 0.25 * y2; }
+      else { bhx = (x1 + x2) / 2; bhy = (y1 + y2) / 2; }
+      ctx.globalAlpha = hasBend ? 0.95 : 0.55;
+      ctx.fillStyle = hasBend ? 'rgba(255,220,0,0.95)' : '#fff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(bhx, bhy, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const fx = hasBend ? cxv : x1, fy = hasBend ? cyv : y1;
+      const ang2 = Math.atan2(y2 - fy, x2 - fx);
+      const bx = x2 + 12 * Math.cos(ang2 + Math.PI / 2), by = y2 + 12 * Math.sin(ang2 + Math.PI / 2);
+      ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(220,40,40,0.95)';
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(bx - 3, by - 3); ctx.lineTo(bx + 3, by + 3);
+      ctx.moveTo(bx + 3, by - 3); ctx.lineTo(bx - 3, by + 3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+  c.arrows.forEach(a => arrow(a.x1, a.y1, a.x2, a.y2, false, a.cx, a.cy));
+  if (tacticMode === 'drag' && dragActive && dragCurrent) arrow(dragCurrent.x1, dragCurrent.y1, dragCurrent.x2, dragCurrent.y2, true);
+  if (tacticMode === 'click' && clickStart && dragCurrent) arrow(clickStart.x, clickStart.y, dragCurrent.x2, dragCurrent.y2, true);
+  if (clickStart) {
+    const cx = clickStart.x / 100 * w, cy = clickStart.y / 100 * h;
+    ctx.save(); ctx.strokeStyle = 'rgba(255,220,0,0.9)'; ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function toggleZoneLine(idx) {
+  const c = editor.current;
+  const sl = document.getElementById('slider-zone-' + idx);
+  if (c.zoneLines[idx] !== null) {
+    c.zoneLines[idx] = null;
+    if (sl) sl.disabled = true;
+  } else {
+    c.zoneLines[idx] = ZONES[idx].defaultY;
+    if (sl) { sl.disabled = false; sl.value = Math.round(ZONES[idx].defaultY); }
+  }
+  updateTacticsCanvasClass();
+  drawTactics();
+}
+function moveZoneLine(idx, val) {
+  const c = editor.current;
+  if (c.zoneLines[idx] === null) return;
+  c.zoneLines[idx] = parseFloat(val);
+  drawTactics();
+}
+function clearArrows() {
+  editor.current.arrows = [];
+  clickStart = null; dragCurrent = null; dragActive = false; movingIdx = null;
+  updateTacticsCanvasClass(); drawTactics();
+}
+function clearTactics() {
+  const c = editor.current;
+  c.arrows = [];
+  c.zoneLines = [null, null];
+  [0, 1].forEach(i => {
+    const chk = document.getElementById('chk-zone-' + i);
+    const sl  = document.getElementById('slider-zone-' + i);
+    if (chk) chk.checked = false;
+    if (sl)  sl.disabled = true;
+  });
+  setTacticMode(null);
+}
+
+// Ball
+function toggleBall() {
+  const c = editor.current;
+  c.ballVisible = !c.ballVisible;
+  const btn = document.getElementById('btn-ball');
+  if (btn) btn.classList.toggle('active', c.ballVisible);
+  renderBall();
+}
+function renderBall() {
+  const el = document.getElementById('ball-el');
+  if (!el) return;
+  const c = editor.current;
+  if (!c.ballVisible) { el.classList.remove('visible'); el.innerHTML = ''; return; }
+  el.classList.add('visible');
+  el.style.left = c.ballPos.x + '%';
+  el.style.top  = c.ballPos.y + '%';
+  const size = 48, disp = 16;
+  let cnv = el.querySelector('canvas');
+  if (!cnv) {
+    cnv = document.createElement('canvas');
+    cnv.width = size; cnv.height = size;
+    cnv.style.width = disp + 'px'; cnv.style.height = disp + 'px';
+    el.appendChild(cnv);
+  }
+  drawSoccerBall(cnv.getContext('2d'), size);
+}
+function pentagonPath(ctx, cx, cy, r, rot) {
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = rot + i * (2 * Math.PI / 5);
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+function drawSoccerBall(ctx, s) {
+  const cx = s / 2, cy = s / 2, r = s / 2 - 1.5;
+  ctx.clearRect(0, 0, s, s);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.lineWidth = Math.max(1, s * 0.035); ctx.strokeStyle = '#111'; ctx.stroke();
+  const centerR = r * 0.26;
+  pentagonPath(ctx, cx, cy, centerR, -Math.PI / 2);
+  ctx.fillStyle = '#111'; ctx.fill();
+  const outerDist = r * 0.78, outerR = r * 0.24;
+  for (let i = 0; i < 5; i++) {
+    const a = Math.PI / 2 + i * (2 * Math.PI / 5);
+    const ox = cx + outerDist * Math.cos(a), oy = cy + outerDist * Math.sin(a);
+    pentagonPath(ctx, ox, oy, outerR, a);
+    ctx.fillStyle = '#111'; ctx.fill();
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(cx - r * 0.38, cy - r * 0.42, r * 0.18, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+}
+function initBall() {
+  const el = document.getElementById('ball-el');
+  const pitch = document.getElementById('pitch');
+  if (!el || !pitch || el.dataset.inited === '1') return;
+  el.dataset.inited = '1';
+  let dr = false, sx = 0, sy = 0, bx = 0, by = 0;
+  el.addEventListener('pointerdown', (e) => {
+    if (!editor?.canEdit) return;
+    e.preventDefault(); e.stopPropagation();
+    const c = editor.current;
+    dr = true; sx = e.clientX; sy = e.clientY; bx = c.ballPos.x; by = c.ballPos.y;
+    el.setPointerCapture?.(e.pointerId);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dr) return;
+    const c = editor.current;
+    const r = pitch.getBoundingClientRect();
+    c.ballPos.x = Math.min(98, Math.max(2, bx + ((e.clientX - sx) / r.width) * 100));
+    c.ballPos.y = Math.min(98, Math.max(2, by + ((e.clientY - sy) / r.height) * 100));
+    el.style.left = c.ballPos.x + '%';
+    el.style.top  = c.ballPos.y + '%';
+  });
+  const end = () => { dr = false; };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
 }
 
 // Kick off
