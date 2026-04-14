@@ -1,5 +1,5 @@
 // Interpro Blues — Web app
-// Slice 1: auth + teams + squad management
+// Slices 1 & 2: auth + teams + squad + lineup editor
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -11,7 +11,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const appEl = document.getElementById('app');
 const userBar = document.getElementById('user-bar');
 
-// Position groups (ported from Electron app)
+// ---------- Constants ----------
 const POSITION_GROUPS = {
   Goalkeepers: [['GK','Goalkeeper']],
   Defenders: [['RB','Right Back'],['LB','Left Back'],['CB','Centre Back'],['RWB','Right Wing Back'],['LWB','Left Wing Back']],
@@ -19,6 +19,18 @@ const POSITION_GROUPS = {
   Forwards: [['RW','Right Winger'],['LW','Left Winger'],['SS','Second Striker'],['CF','Centre Forward'],['ST','Striker']]
 };
 
+// Preset formations — positions are [x%, y%] on the pitch (y=0 is top / attacking end)
+const FORMATIONS = {
+  '4-3-3':   { pos:[[50,87],[18,70],[36,70],[64,70],[82,70],[28,51],[50,51],[72,51],[18,26],[50,24],[82,26]], lbl:['GK','LB','CB','CB','RB','CM','CM','CM','LW','ST','RW'] },
+  '4-4-2':   { pos:[[50,87],[18,70],[36,70],[64,70],[82,70],[15,50],[37,50],[63,50],[85,50],[33,24],[67,24]], lbl:['GK','LB','CB','CB','RB','LM','CM','CM','RM','ST','ST'] },
+  '4-5-1':   { pos:[[50,87],[18,70],[36,70],[64,70],[82,70],[12,50],[30,50],[50,50],[70,50],[88,50],[50,20]], lbl:['GK','LB','CB','CB','RB','LM','CM','CM','CM','RM','ST'] },
+  '3-5-2':   { pos:[[50,87],[24,70],[50,70],[76,70],[12,48],[31,48],[50,48],[69,48],[88,48],[33,24],[67,24]], lbl:['GK','CB','CB','CB','LWB','CM','CM','CM','RWB','ST','ST'] },
+  '4-2-3-1': { pos:[[50,87],[18,70],[36,70],[64,70],[82,70],[33,57],[67,57],[18,38],[50,38],[82,38],[50,20]], lbl:['GK','LB','CB','CB','RB','CDM','CDM','LAM','CAM','RAM','ST'] },
+  '5-3-2':   { pos:[[50,87],[8,68],[26,68],[50,68],[74,68],[92,68],[26,48],[50,48],[74,48],[33,24],[67,24]], lbl:['GK','LB','CB','CB','CB','RB','CM','CM','CM','ST','ST'] }
+};
+const MAX_SUBS = 5;
+
+// ---------- Helpers ----------
 function groupForPos(code) {
   for (const g in POSITION_GROUPS) {
     if (POSITION_GROUPS[g].some(([c]) => c === code)) return g;
@@ -38,7 +50,34 @@ function posOptions(selected) {
   return html;
 }
 
-// Tiny hash router: #/, #/team/<id>
+function shortName(n) {
+  if (!n) return '';
+  const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '';
+  const parts = n.trim().split(/\s+/);
+  if (parts.length === 1) return cap(parts[0]);
+  return cap(parts[0]) + ' ' + parts[parts.length - 1].charAt(0).toUpperCase();
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function logAudit(teamId, entityType, entityId, action, changes) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase.from('audit_log').insert({
+    team_id: teamId,
+    user_id: user.id,
+    entity_type: entityType,
+    entity_id: entityId,
+    action,
+    changes
+  });
+}
+
+// ---------- Router ----------
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h.startsWith('team/')) return { name: 'team', teamId: h.slice(5) };
@@ -46,7 +85,6 @@ function currentRoute() {
 }
 window.addEventListener('hashchange', render);
 
-// --- Top-level render ---
 async function render() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
@@ -69,7 +107,7 @@ supabase.auth.onAuthStateChange((event) => {
   render();
 });
 
-// --- Auth view ---
+// ---------- Auth ----------
 function renderAuth() {
   appEl.innerHTML = `
     <div class="card">
@@ -134,7 +172,6 @@ function renderAuth() {
   };
 }
 
-// --- User bar ---
 function renderUserBar(user) {
   userBar.innerHTML = `
     <span>${escapeHtml(user.email)}</span>
@@ -145,7 +182,7 @@ function renderUserBar(user) {
   };
 }
 
-// --- Teams home ---
+// ---------- Teams home ----------
 async function renderTeamsHome(user) {
   appEl.innerHTML = `<p class="loading">Loading your teams…</p>`;
 
@@ -178,7 +215,6 @@ async function renderTeamsHome(user) {
       <h2>Your teams</h2>
       ${teamsHtml}
     </div>
-
     <div class="card">
       <h2>Create a new team</h2>
       <p class="muted">You'll be the admin of this team.</p>
@@ -199,15 +235,11 @@ async function renderTeamsHome(user) {
     if (!name) return;
 
     const { data: team, error: tErr } = await supabase
-      .from('teams')
-      .insert({ name, created_by: user.id })
-      .select()
-      .single();
+      .from('teams').insert({ name, created_by: user.id }).select().single();
     if (tErr) { errEl.textContent = tErr.message; return; }
 
     const { error: mErr } = await supabase
-      .from('team_members')
-      .insert({ team_id: team.id, user_id: user.id, role: 'admin' });
+      .from('team_members').insert({ team_id: team.id, user_id: user.id, role: 'admin' });
     if (mErr) { errEl.textContent = mErr.message; return; }
 
     location.hash = `#/team/${team.id}`;
@@ -218,17 +250,21 @@ async function renderTeamsHome(user) {
   });
 }
 
-// --- Team dashboard (squad management for slice 1) ---
+// ---------- Team dashboard ----------
+let activeTab = 'squad';
 let currentFilter = 'All';
+
+// In-memory editor state for lineups tab
+let editor = null; // { team, canEdit, players, lineups, current: { id?, name, opponent, game_date, formation, slots, subs } }
 
 async function renderTeamDashboard(user, teamId) {
   appEl.innerHTML = `<p class="loading">Loading team…</p>`;
 
-  // Fetch team + membership role + players in parallel
-  const [teamRes, memberRes, playersRes] = await Promise.all([
+  const [teamRes, memberRes, playersRes, lineupsRes] = await Promise.all([
     supabase.from('teams').select('id, name').eq('id', teamId).single(),
     supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', user.id).maybeSingle(),
-    supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name')
+    supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
+    supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -239,12 +275,10 @@ async function renderTeamDashboard(user, teamId) {
   const role = memberRes.data?.role || 'viewer';
   const canEdit = role === 'admin' || role === 'coach';
   const players = playersRes.data || [];
+  const lineups = lineupsRes.data || [];
 
   appEl.innerHTML = `
-    <div class="breadcrumb">
-      <a href="#" onclick="event.preventDefault();location.hash=''">← Your teams</a>
-    </div>
-
+    <div class="breadcrumb"><a href="#" onclick="event.preventDefault();location.hash=''">← Your teams</a></div>
     <div class="card">
       <div class="team-header">
         <div>
@@ -252,20 +286,34 @@ async function renderTeamDashboard(user, teamId) {
           <div class="muted">Role: ${role}</div>
         </div>
       </div>
-
       <div class="tabs-row">
-        <button class="tab-btn active" data-tab="squad">Squad</button>
-        <button class="tab-btn" disabled title="Coming in next slice">Lineups</button>
-        <button class="tab-btn" disabled title="Coming in next slice">Plays</button>
+        <button class="tab-btn ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
+        <button class="tab-btn ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
+        <button class="tab-btn" disabled title="Coming soon">Plays</button>
       </div>
     </div>
-
     <div id="tab-content"></div>
   `;
 
-  renderSquadTab(team, canEdit, players);
+  appEl.querySelectorAll('.tab-btn[data-tab]').forEach(b => {
+    b.onclick = () => {
+      activeTab = b.dataset.tab;
+      renderTeamDashboard(user, teamId);
+    };
+  });
+
+  if (activeTab === 'squad') {
+    renderSquadTab(team, canEdit, players);
+  } else if (activeTab === 'lineups') {
+    editor = {
+      team, canEdit, players, lineups,
+      current: newLineupState()
+    };
+    renderLineupsTab();
+  }
 }
 
+// ---------- Squad tab ----------
 function renderSquadTab(team, canEdit, players) {
   const tabEl = document.getElementById('tab-content');
 
@@ -340,21 +388,14 @@ function renderSquadTab(team, canEdit, players) {
           ${grid}
         </div>
       </div>
-      <div class="squad-side">
-        ${filterHtml}
-      </div>
+      <div class="squad-side">${filterHtml}</div>
     </div>
   `;
 
-  // Filter buttons
   tabEl.querySelectorAll('.filter-btn').forEach(b => {
-    b.onclick = () => {
-      currentFilter = b.dataset.filter;
-      renderSquadTab(team, canEdit, players);
-    };
+    b.onclick = () => { currentFilter = b.dataset.filter; renderSquadTab(team, canEdit, players); };
   });
 
-  // Add player
   if (canEdit) {
     document.getElementById('add-player-form').onsubmit = async (e) => {
       e.preventDefault();
@@ -366,14 +407,10 @@ function renderSquadTab(team, canEdit, players) {
       if (!name) return;
 
       const { data: inserted, error } = await supabase
-        .from('players')
-        .insert({ team_id: team.id, name, number })
-        .select()
-        .single();
+        .from('players').insert({ team_id: team.id, name, number }).select().single();
       if (error) { errEl.textContent = error.message; return; }
 
       await logAudit(team.id, 'player', inserted.id, 'create', { name, number });
-
       players.push(inserted);
       players.sort((a, b) => (a.number ?? 999) - (b.number ?? 999));
       document.getElementById('ap-name').value = '';
@@ -382,7 +419,6 @@ function renderSquadTab(team, canEdit, players) {
     };
   }
 
-  // Field edits (change event) — debounce-free, trigger on blur/change
   tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
     const pid = cardEl.dataset.player;
     cardEl.querySelectorAll('[data-field]').forEach(input => {
@@ -394,20 +430,15 @@ function renderSquadTab(team, canEdit, players) {
         const oldValue = player ? player[field] : null;
         if (oldValue === value) return;
 
-        const { error } = await supabase
-          .from('players')
-          .update({ [field]: value })
-          .eq('id', pid);
+        const { error } = await supabase.from('players').update({ [field]: value }).eq('id', pid);
         if (error) { alert('Save failed: ' + error.message); input.value = oldValue ?? ''; return; }
 
         if (player) player[field] = value;
         await logAudit(team.id, 'player', pid, 'update', { field, from: oldValue, to: value });
 
-        // Light visual confirmation
         input.classList.add('saved');
         setTimeout(() => input.classList.remove('saved'), 600);
 
-        // Re-render if number or position changed (affects sort/filter/badge)
         if (field === 'number' || field === 'position') {
           players.sort((a, b) => (a.number ?? 999) - (b.number ?? 999));
           renderSquadTab(team, canEdit, players);
@@ -431,23 +462,433 @@ function renderSquadTab(team, canEdit, players) {
   });
 }
 
-async function logAudit(teamId, entityType, entityId, action, changes) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-  await supabase.from('audit_log').insert({
-    team_id: teamId,
-    user_id: user.id,
-    entity_type: entityType,
-    entity_id: entityId,
-    action,
-    changes
-  });
+// ---------- Lineups tab ----------
+function newLineupState() {
+  return {
+    id: null,
+    name: '',
+    opponent: '',
+    game_date: '',
+    formation: '4-3-3',
+    slots: {},   // { slotIndex: playerId }
+    subs: []     // [playerId]
+  };
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
+function renderLineupsTab() {
+  const tabEl = document.getElementById('tab-content');
+  const { team, canEdit, players, lineups, current } = editor;
+
+  const formationBtns = Object.keys(FORMATIONS).map(f =>
+    `<button class="f-btn ${current.formation === f ? 'active' : ''}" data-formation="${f}">${f}</button>`
+  ).join('');
+
+  // Players used in current lineup
+  const usedIds = new Set([...Object.values(current.slots), ...current.subs].filter(Boolean));
+  const availablePlayers = players.filter(p => !usedIds.has(p.id));
+
+  const paletteHtml = availablePlayers.length
+    ? availablePlayers.map(p => chipHtml(p, 'palette')).join('')
+    : `<p class="muted" style="padding:0.5rem">All players on the pitch or subs.</p>`;
+
+  const lineupsListHtml = lineups.length
+    ? lineups.map(l => `
+        <div class="lineup-item ${current.id === l.id ? 'active' : ''}" data-lineup="${l.id}">
+          <div class="lineup-name">${escapeHtml(l.name)}</div>
+          <div class="lineup-meta">
+            ${l.opponent ? 'vs ' + escapeHtml(l.opponent) : ''}
+            ${l.game_date ? ' · ' + formatDate(l.game_date) : ''}
+            ${l.data?.formation ? ' · ' + l.data.formation : ''}
+          </div>
+          ${canEdit ? `<button class="lineup-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
+        </div>
+      `).join('')
+    : `<p class="muted" style="padding:0.75rem">No saved lineups yet.</p>`;
+
+  tabEl.innerHTML = `
+    <div class="lineup-layout">
+      <aside class="lineup-side">
+        <div class="card">
+          <h3 style="margin-top:0">Saved lineups</h3>
+          <div class="lineup-list">${lineupsListHtml}</div>
+          ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.75rem">+ New lineup</button>` : ''}
+        </div>
+      </aside>
+
+      <div class="lineup-main">
+        <div class="card">
+          <div class="lineup-meta-form">
+            <div>
+              <label>Lineup name</label>
+              <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
+            </div>
+            <div>
+              <label>Opponent</label>
+              <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
+            </div>
+            <div>
+              <label>Game date</label>
+              <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+            </div>
+          </div>
+          <div class="formation-row">
+            <label style="width:auto;margin-right:0.5rem">Formation:</label>
+            <div class="f-btns">${formationBtns}</div>
+          </div>
+          <div class="lineup-actions">
+            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save changes' : 'Save lineup'}</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
+            <div id="save-msg" class="muted" style="margin-left:auto"></div>
+          </div>
+        </div>
+
+        <div class="card pitch-card">
+          <div class="pitch" id="pitch"></div>
+          <div class="subs-bar">
+            <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
+            <div class="subs-row" id="subs-row"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0">Available players</h3>
+          <div class="palette" id="palette">${paletteHtml}</div>
+          ${canEdit ? `<p class="muted" style="font-size:0.8rem;margin-top:0.5rem">Drag a player onto a pitch position or the subs bar. Drag here to remove from lineup.</p>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderPitch();
+  renderSubsBar();
+  wireLineupEvents();
+}
+
+function chipHtml(player, context) {
+  const num = player.number ?? '';
+  return `
+    <div class="chip ${context === 'palette' ? 'chip-palette' : ''}"
+         draggable="${editor.canEdit ? 'true' : 'false'}"
+         data-player-id="${player.id}">
+      <div class="chip-inner">
+        ${num !== '' ? `<div class="chip-num">${num}</div>` : ''}
+        <div class="chip-name">${escapeHtml(shortName(player.name))}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPitch() {
+  const pitch = document.getElementById('pitch');
+  const { current, players } = editor;
+  const formation = FORMATIONS[current.formation];
+  if (!formation) { pitch.innerHTML = ''; return; }
+
+  const pById = id => players.find(p => p.id === id);
+
+  pitch.innerHTML = formation.pos.map(([x, y], i) => {
+    const pid = current.slots[i];
+    const p = pid ? pById(pid) : null;
+    const label = formation.lbl[i] || '';
+    return `
+      <div class="slot ${p ? 'filled' : ''}"
+           style="left:${x}%; top:${y}%"
+           data-slot="${i}">
+        ${p
+          ? `<div class="chip chip-slot" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-slot="${i}">
+              <div class="chip-inner">
+                ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+              </div>
+            </div>`
+          : `<div class="slot-label">${label}</div>`
+        }
+        <div class="slot-pos-lbl">${label}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSubsBar() {
+  const row = document.getElementById('subs-row');
+  const { current, players } = editor;
+  const pById = id => players.find(p => p.id === id);
+
+  const cells = [];
+  for (let i = 0; i < MAX_SUBS; i++) {
+    const pid = current.subs[i];
+    const p = pid ? pById(pid) : null;
+    cells.push(`
+      <div class="sub-slot ${p ? 'filled' : ''}" data-sub="${i}">
+        ${p
+          ? `<div class="chip chip-sub" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-sub="${i}">
+              <div class="chip-inner">
+                ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+              </div>
+            </div>`
+          : `<div class="sub-empty">+</div>`
+        }
+      </div>
+    `);
+  }
+  row.innerHTML = cells.join('');
+}
+
+function wireLineupEvents() {
+  const { canEdit, team, lineups } = editor;
+  const tabEl = document.getElementById('tab-content');
+
+  // Formation buttons
+  tabEl.querySelectorAll('[data-formation]').forEach(b => {
+    b.onclick = () => {
+      if (!canEdit) return;
+      editor.current.formation = b.dataset.formation;
+      // Drop any slotted players beyond the new formation's slot count
+      const newCount = FORMATIONS[editor.current.formation].pos.length;
+      Object.keys(editor.current.slots).forEach(k => {
+        if (parseInt(k) >= newCount) delete editor.current.slots[k];
+      });
+      renderLineupsTab();
+    };
+  });
+
+  // Meta inputs
+  const nameEl = document.getElementById('l-name');
+  const oppEl = document.getElementById('l-opponent');
+  const dateEl = document.getElementById('l-date');
+  if (nameEl) nameEl.oninput = e => { editor.current.name = e.target.value; };
+  if (oppEl)  oppEl.oninput  = e => { editor.current.opponent = e.target.value; };
+  if (dateEl) dateEl.oninput = e => { editor.current.game_date = e.target.value; };
+
+  // Buttons
+  const newBtn = document.getElementById('new-lineup-btn');
+  if (newBtn) newBtn.onclick = () => {
+    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+    editor.current = newLineupState();
+    renderLineupsTab();
+  };
+
+  const clearBtn = document.getElementById('clear-pitch');
+  if (clearBtn) clearBtn.onclick = () => {
+    editor.current.slots = {};
+    editor.current.subs = [];
+    renderLineupsTab();
+  };
+
+  const saveBtn = document.getElementById('save-lineup');
+  if (saveBtn) saveBtn.onclick = saveLineup;
+
+  // Click saved lineup to load
+  tabEl.querySelectorAll('[data-lineup]').forEach(el => {
+    el.onclick = (ev) => {
+      if (ev.target.closest('[data-del-lineup]')) return;
+      const id = el.dataset.lineup;
+      const l = lineups.find(x => x.id === id);
+      if (!l) return;
+      if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+      editor.current = {
+        id: l.id,
+        name: l.name || '',
+        opponent: l.opponent || '',
+        game_date: l.game_date || '',
+        formation: l.data?.formation || '4-3-3',
+        slots: { ...(l.data?.slots || {}) },
+        subs: [...(l.data?.subs || [])]
+      };
+      renderLineupsTab();
+    };
+  });
+
+  // Delete saved lineup
+  tabEl.querySelectorAll('[data-del-lineup]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.delLineup;
+      const l = lineups.find(x => x.id === id);
+      if (!l) return;
+      if (!confirm(`Delete lineup "${l.name}"?`)) return;
+      const { error } = await supabase.from('lineups').delete().eq('id', id);
+      if (error) { alert('Delete failed: ' + error.message); return; }
+      await logAudit(team.id, 'lineup', id, 'delete', { name: l.name });
+      const idx = lineups.findIndex(x => x.id === id);
+      if (idx >= 0) lineups.splice(idx, 1);
+      if (editor.current.id === id) editor.current = newLineupState();
+      renderLineupsTab();
+    };
+  });
+
+  if (canEdit) wireDragAndDrop();
+}
+
+function wireDragAndDrop() {
+  const tabEl = document.getElementById('tab-content');
+
+  // Make all chips draggable
+  tabEl.querySelectorAll('.chip[draggable="true"]').forEach(chip => {
+    chip.addEventListener('dragstart', (e) => {
+      const pid = chip.dataset.playerId;
+      const fromSlot = chip.dataset.fromSlot;
+      const fromSub  = chip.dataset.fromSub;
+      const payload = { playerId: pid, fromSlot: fromSlot ?? null, fromSub: fromSub ?? null };
+      e.dataTransfer.setData('application/json', JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'move';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+  });
+
+  // Drop targets: slots, sub-slots, palette
+  const makeDropTarget = (el, handler) => {
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      const raw = e.dataTransfer.getData('application/json');
+      if (!raw) return;
+      let payload;
+      try { payload = JSON.parse(raw); } catch { return; }
+      handler(payload);
+    });
+  };
+
+  tabEl.querySelectorAll('[data-slot]').forEach(slotEl => {
+    const idx = parseInt(slotEl.dataset.slot, 10);
+    makeDropTarget(slotEl, (payload) => handleDropToSlot(idx, payload));
+  });
+  tabEl.querySelectorAll('[data-sub]').forEach(subEl => {
+    const idx = parseInt(subEl.dataset.sub, 10);
+    makeDropTarget(subEl, (payload) => handleDropToSub(idx, payload));
+  });
+  const palette = document.getElementById('palette');
+  if (palette) makeDropTarget(palette, (payload) => handleDropToPalette(payload));
+}
+
+function removeFromSource(payload) {
+  const { current } = editor;
+  if (payload.fromSlot !== null && payload.fromSlot !== undefined) {
+    delete current.slots[parseInt(payload.fromSlot)];
+  } else if (payload.fromSub !== null && payload.fromSub !== undefined) {
+    current.subs[parseInt(payload.fromSub)] = undefined;
+  }
+}
+
+function handleDropToSlot(slotIdx, payload) {
+  const { current } = editor;
+  const targetPid = current.slots[slotIdx];
+
+  // If dropping from another slot and target occupied → swap
+  if (payload.fromSlot !== null && payload.fromSlot !== undefined) {
+    const fromIdx = parseInt(payload.fromSlot);
+    if (fromIdx === slotIdx) return;
+    if (targetPid) {
+      current.slots[fromIdx] = targetPid;
+    } else {
+      delete current.slots[fromIdx];
+    }
+    current.slots[slotIdx] = payload.playerId;
+    renderLineupsTab();
+    return;
+  }
+
+  // From sub or palette: if slot occupied, bump occupant back to palette
+  removeFromSource(payload);
+  current.slots[slotIdx] = payload.playerId;
+  renderLineupsTab();
+}
+
+function handleDropToSub(subIdx, payload) {
+  const { current } = editor;
+  const subsFilled = current.subs.filter(Boolean).length;
+  const targetPid = current.subs[subIdx];
+
+  // Swap with another sub
+  if (payload.fromSub !== null && payload.fromSub !== undefined) {
+    const fromIdx = parseInt(payload.fromSub);
+    if (fromIdx === subIdx) return;
+    current.subs[fromIdx] = targetPid;
+    current.subs[subIdx] = payload.playerId;
+    renderLineupsTab();
+    return;
+  }
+
+  // From slot or palette — if empty and at cap, refuse
+  if (!targetPid && subsFilled >= MAX_SUBS) {
+    alert(`Max ${MAX_SUBS} subs.`);
+    return;
+  }
+  removeFromSource(payload);
+  current.subs[subIdx] = payload.playerId;
+  renderLineupsTab();
+}
+
+function handleDropToPalette(payload) {
+  removeFromSource(payload);
+  renderLineupsTab();
+}
+
+function hasUnsaved() {
+  // Rough check: any slots or subs populated, or meta fields entered, and no id
+  const c = editor.current;
+  if (!c) return false;
+  if (c.id) return false; // saved lineups may have pending edits but don't prompt aggressively
+  return Object.keys(c.slots).length > 0 || c.subs.some(Boolean) || c.name || c.opponent;
+}
+
+async function saveLineup() {
+  const { team, lineups, current } = editor;
+  const msgEl = document.getElementById('save-msg');
+  msgEl.textContent = '';
+  const name = current.name.trim();
+  if (!name) { msgEl.textContent = 'Name is required'; msgEl.className = 'error'; return; }
+
+  const payload = {
+    team_id: team.id,
+    name,
+    opponent: current.opponent.trim() || null,
+    game_date: current.game_date || null,
+    data: {
+      formation: current.formation,
+      slots: current.slots,
+      subs: current.subs
+    },
+    updated_at: new Date().toISOString()
+  };
+
+  if (current.id) {
+    // Update
+    const { data, error } = await supabase.from('lineups').update(payload).eq('id', current.id).select().single();
+    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    const idx = lineups.findIndex(l => l.id === current.id);
+    if (idx >= 0) lineups[idx] = data;
+    await logAudit(team.id, 'lineup', data.id, 'update', { name });
+  } else {
+    // Insert
+    const { data: { user } } = await supabase.auth.getUser();
+    payload.created_by = user.id;
+    const { data, error } = await supabase.from('lineups').insert(payload).select().single();
+    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    lineups.unshift(data);
+    editor.current.id = data.id;
+    await logAudit(team.id, 'lineup', data.id, 'create', { name });
+  }
+
+  msgEl.textContent = '✓ Saved';
+  msgEl.className = 'ok';
+  setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
+  renderLineupsTab();
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // Kick off
