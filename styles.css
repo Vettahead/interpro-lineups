@@ -364,10 +364,72 @@ button.link {
   gap: 1rem;
   align-items: start;
 }
-.lineup-layout.plays-layout {
-  grid-template-columns: 240px minmax(0, 1fr);
-}
 .lineup-center-wide .card { max-width: 620px; }
+
+/* Collapsible cards (native <details>/<summary>) */
+details.card.collapsible { padding: 0; overflow: hidden; }
+details.card.collapsible > summary.card-title {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+details.card.collapsible > summary.card-title::-webkit-details-marker { display: none; }
+details.card.collapsible > summary.card-title .chev {
+  font-size: 0.9rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+details.card.collapsible[open] > summary.card-title .chev { transform: rotate(180deg); }
+details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
+
+/* Formation button column variant (right sidebar) */
+.f-btns.f-btns-col { flex-direction: column; gap: 0.3rem; }
+.f-btns.f-btns-col .f-btn { width: 100%; text-align: left; position: relative; }
+.f-btn-custom { border-left: 3px solid var(--blue-2) !important; }
+.f-btn .f-del {
+  float: right;
+  margin-left: 0.5rem;
+  color: #c33;
+  font-weight: bold;
+  padding: 0 0.2rem;
+}
+.f-btn .f-del:hover { color: #900; }
+
+/* Formation edit mode — position circles (not player chips) */
+.pitch-editing-formation .slots-layer { pointer-events: auto; }
+.pitch-editing-formation .tactics-canvas { display: none; }
+.slot.slot-edit {
+  width: 56px;
+  height: 56px;
+  margin-left: -28px;
+  margin-top: -28px;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 5;
+}
+.slot.slot-edit.dragging { cursor: grabbing; opacity: 0.85; }
+.slot.slot-edit .fe-label {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(46, 125, 50, 0.55);
+  border: 3px solid #f4e04d;
+  color: #fff;
+  font-weight: bold;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
 .lineup-center { display: flex; flex-direction: column; align-items: center; min-width: 0; }
 .lineup-center .card { width: 100%; max-width: 540px; margin-bottom: 0.75rem; }
 .lineup-left, .lineup-right { display: flex; flex-direction: column; gap: 0; }
