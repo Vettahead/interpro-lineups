@@ -270,11 +270,13 @@ let editor = null; // { team, canEdit, players, lineups, current: { id?, name, o
 async function renderTeamDashboard(user, teamId) {
   appEl.innerHTML = `<p class="loading">Loading team…</p>`;
 
-  const [teamRes, memberRes, playersRes, lineupsRes] = await Promise.all([
+  const [teamRes, memberRes, playersRes, lineupsRes, playsRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('id, name').eq('id', teamId).single(),
     supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', user.id).maybeSingle(),
     supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
-    supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
+    supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }),
+    supabase.from('plays').select('*').eq('team_id', teamId).order('created_at', { ascending: false }),
+    supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true })
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -286,6 +288,8 @@ async function renderTeamDashboard(user, teamId) {
   const canEdit = role === 'admin' || role === 'coach';
   const players = playersRes.data || [];
   const lineups = lineupsRes.data || [];
+  const plays = playsRes.data || [];
+  const customFormations = formationsRes.data || [];
 
   // Populate blue header with team info + tabs
   const titleEl = document.getElementById('header-title');
@@ -303,7 +307,7 @@ async function renderTeamDashboard(user, teamId) {
     tabsEl.innerHTML = `
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
-      <button class="h-tab" disabled title="Coming soon">Plays</button>
+      <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
     `;
     tabsEl.querySelectorAll('.h-tab[data-tab]').forEach(b => {
       b.onclick = () => {
@@ -319,10 +323,18 @@ async function renderTeamDashboard(user, teamId) {
     renderSquadTab(team, canEdit, players);
   } else if (activeTab === 'lineups') {
     editor = {
-      team, canEdit, players, lineups,
+      mode: 'lineup',
+      team, canEdit, players, lineups, plays, customFormations,
       current: newLineupState()
     };
     renderLineupsTab();
+  } else if (activeTab === 'plays') {
+    editor = {
+      mode: 'play',
+      team, canEdit, players, lineups, plays, customFormations,
+      current: newPlayState()
+    };
+    renderPlaysTab();
   }
 }
 
@@ -521,6 +533,20 @@ function newLineupState() {
   };
 }
 
+function newPlayState() {
+  return {
+    id: null,
+    name: '',
+    formation: '4-3-3',
+    slots: {},            // always empty for plays (no players)
+    subs: [],             // always empty for plays
+    arrows: [],
+    zoneLines: [null, null],
+    ballVisible: false,
+    ballPos: { x: 50, y: 50 }
+  };
+}
+
 // Tactics zones config
 const ZONES = [
   { label: 'Press', color: '#ffeb3b', defaultY: 30 },
@@ -542,7 +568,7 @@ let draggingLinePct = 0;
 
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
-  const { team, canEdit, players, lineups, current } = editor;
+  const { team, canEdit, players, lineups, plays, current } = editor;
 
   const formationBtns = Object.keys(FORMATIONS).map(f =>
     `<button class="f-btn ${current.formation === f ? 'active' : ''}" data-formation="${f}">${f}</button>`
@@ -596,7 +622,8 @@ function renderLineupsTab() {
             <input type="range" id="slider-zone-1" min="5" max="92" value="${current.zoneLines[1] ?? ZONES[1].defaultY}" ${current.zoneLines[1] === null ? 'disabled' : ''} />
           </div>
           <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
-          <button class="btn-full" id="clear-tactics" style="margin-bottom:0">✕ Clear all tactics</button>
+          <button class="btn-full" id="clear-tactics">✕ Clear all tactics</button>
+          <button class="btn-full" id="load-from-play" style="margin-bottom:0" ${plays.length ? '' : 'disabled'}>↓ Load from play…</button>
         </div>
         ` : ''}
 
@@ -981,6 +1008,58 @@ function wireTacticsUI() {
   if (clA) clA.onclick = () => clearArrows();
   const clT = document.getElementById('clear-tactics');
   if (clT) clT.onclick = () => clearTactics();
+  const lfp = document.getElementById('load-from-play');
+  if (lfp) lfp.onclick = () => openLoadFromPlay();
+}
+
+function openLoadFromPlay() {
+  const { plays, current } = editor;
+  if (!plays || !plays.length) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  const items = plays.map(p => `
+    <div class="picker-item" data-play-id="${p.id}">
+      <div class="picker-num">▶</div>
+      <div class="picker-name">${escapeHtml(p.name)}</div>
+      <div class="picker-pos">${escapeHtml(p.data?.formation || '')}</div>
+    </div>
+  `).join('');
+  overlay.innerHTML = `
+    <div class="picker-modal">
+      <div class="picker-header">
+        <strong>Load from play</strong>
+        <button class="picker-close" data-action="close">✕</button>
+      </div>
+      <div class="picker-body">
+        <p class="muted" style="margin:0 0 0.5rem">This replaces the current formation and tactics. Players on the pitch are kept where they fit.</p>
+        <div class="picker-list">${items}</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-action=close]').onclick = close;
+  overlay.querySelectorAll('[data-play-id]').forEach(el => {
+    el.onclick = () => {
+      const p = plays.find(x => x.id === el.dataset.playId);
+      if (!p) return close();
+      const d = p.data || {};
+      current.formation = d.formation || current.formation;
+      current.arrows = (d.arrows || []).map(a => ({ ...a }));
+      current.zoneLines = [...(d.zoneLines || [null, null])];
+      current.ballVisible = !!d.ballVisible;
+      current.ballPos = { ...(d.ballPos || { x: 50, y: 50 }) };
+      // Drop any slotted players beyond new formation's slot count
+      const newCount = FORMATIONS[current.formation]?.pos.length || 0;
+      Object.keys(current.slots).forEach(k => {
+        if (parseInt(k) >= newCount) delete current.slots[k];
+      });
+      tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
+      close();
+      renderLineupsTab();
+    };
+  });
 }
 
 function wireDragAndDrop() {
@@ -1562,6 +1641,212 @@ function initBall() {
   const end = () => { dr = false; };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
+}
+
+// ---------- Plays tab ----------
+function renderPlaysTab() {
+  const tabEl = document.getElementById('tab-content');
+  const { team, canEdit, plays, current } = editor;
+
+  const formationBtns = Object.keys(FORMATIONS).map(f =>
+    `<button class="f-btn ${current.formation === f ? 'active' : ''}" data-formation="${f}">${f}</button>`
+  ).join('');
+
+  const playsListHtml = plays.length
+    ? plays.map(p => `
+        <div class="lineup-item ${current.id === p.id ? 'active' : ''}" data-play="${p.id}">
+          <div class="lineup-name">${escapeHtml(p.name)}</div>
+          <div class="lineup-meta">${p.data?.formation ? p.data.formation : ''}</div>
+          ${canEdit ? `<button class="lineup-del" data-del-play="${p.id}" title="Delete">✕</button>` : ''}
+        </div>
+      `).join('')
+    : `<p class="muted" style="padding:0.75rem">No saved plays yet.</p>`;
+
+  tabEl.innerHTML = `
+    <div class="lineup-layout plays-layout">
+      <aside class="lineup-left">
+        ${canEdit ? `
+        <div class="card">
+          <h3 class="card-title">Tactics</h3>
+          <div class="tactic-btns">
+            <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
+            <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
+            <button class="tactic-btn ${tacticMode === 'drag' ? 'active' : ''}" data-tactic-mode="drag">↗ Drag</button>
+            <button class="tactic-btn ${current.ballVisible ? 'active' : ''}" id="btn-ball">⚽ Ball</button>
+          </div>
+          <div id="tactic-info" class="tactic-info">Pick a mode to edit tactics.</div>
+          <div class="zone-row">
+            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ffeb3b"></span>Press
+              <input type="checkbox" id="chk-zone-0" ${current.zoneLines[0] !== null ? 'checked' : ''} />
+            </label>
+            <input type="range" id="slider-zone-0" min="5" max="92" value="${current.zoneLines[0] ?? ZONES[0].defaultY}" ${current.zoneLines[0] === null ? 'disabled' : ''} />
+          </div>
+          <div class="zone-row">
+            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ff7043"></span>Def
+              <input type="checkbox" id="chk-zone-1" ${current.zoneLines[1] !== null ? 'checked' : ''} />
+            </label>
+            <input type="range" id="slider-zone-1" min="5" max="92" value="${current.zoneLines[1] ?? ZONES[1].defaultY}" ${current.zoneLines[1] === null ? 'disabled' : ''} />
+          </div>
+          <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
+          <button class="btn-full" id="clear-tactics" style="margin-bottom:0">✕ Clear all tactics</button>
+        </div>
+        ` : ''}
+
+        <div class="card">
+          <h3 class="card-title">Play details</h3>
+          <label>Name</label>
+          <input type="text" id="p-name" value="${escapeHtml(current.name)}" placeholder="e.g. High press from goal kick" ${canEdit ? '' : 'disabled'} />
+          <div class="lineup-actions" style="margin-top:0.5rem">
+            ${canEdit ? `<button class="primary" id="save-play">${current.id ? 'Save' : 'Save play'}</button>` : ''}
+            ${canEdit ? `<button class="btn-secondary" id="new-play-btn">New</button>` : ''}
+          </div>
+          <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">Saved plays</h3>
+          <div class="lineup-list">${playsListHtml}</div>
+        </div>
+      </aside>
+
+      <div class="lineup-center lineup-center-wide">
+        <div class="card formation-card">
+          <h3 class="card-title">Formation</h3>
+          <div class="f-btns">${formationBtns}</div>
+        </div>
+        <div class="card pitch-card">
+          <div class="pitch" id="pitch">
+            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="slots-layer"></div>
+            <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+            <div class="ball-el" id="ball-el"></div>
+          </div>
+          <p class="muted" style="margin:0.5rem 0 0;font-size:0.8rem;text-align:center">Plays are tactical templates — no players. Use them from the Lineup editor via "Load from play".</p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderPitch();
+  wirePlayEvents();
+  initTacticsCanvas();
+  initBall();
+  sizeTacticsCanvas();
+  drawTactics();
+  renderBall();
+  updateTacticsCanvasClass();
+}
+
+function wirePlayEvents() {
+  const { canEdit, team, plays } = editor;
+  const tabEl = document.getElementById('tab-content');
+
+  tabEl.querySelectorAll('[data-formation]').forEach(b => {
+    b.onclick = () => {
+      if (!canEdit) return;
+      editor.current.formation = b.dataset.formation;
+      renderPlaysTab();
+    };
+  });
+
+  const nameEl = document.getElementById('p-name');
+  if (nameEl) nameEl.oninput = e => { editor.current.name = e.target.value; };
+
+  const newBtn = document.getElementById('new-play-btn');
+  if (newBtn) newBtn.onclick = () => {
+    const c = editor.current;
+    const unsaved = !c.id && (c.name || c.arrows.length || c.ballVisible || c.zoneLines.some(z => z !== null));
+    if (unsaved && !confirm('Discard current unsaved play?')) return;
+    editor.current = newPlayState();
+    tacticMode = null;
+    renderPlaysTab();
+  };
+
+  const saveBtn = document.getElementById('save-play');
+  if (saveBtn) saveBtn.onclick = savePlay;
+
+  tabEl.querySelectorAll('[data-play]').forEach(el => {
+    el.onclick = (ev) => {
+      if (ev.target.closest('[data-del-play]')) return;
+      const id = el.dataset.play;
+      const p = plays.find(x => x.id === id);
+      if (!p) return;
+      editor.current = {
+        id: p.id,
+        name: p.name || '',
+        formation: p.data?.formation || '4-3-3',
+        slots: {},
+        subs: [],
+        arrows: (p.data?.arrows || []).map(a => ({ ...a })),
+        zoneLines: [...(p.data?.zoneLines || [null, null])],
+        ballVisible: !!p.data?.ballVisible,
+        ballPos: { ...(p.data?.ballPos || { x: 50, y: 50 }) }
+      };
+      tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
+      renderPlaysTab();
+    };
+  });
+
+  tabEl.querySelectorAll('[data-del-play]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.delPlay;
+      const p = plays.find(x => x.id === id);
+      if (!p) return;
+      if (!confirm(`Delete play "${p.name}"?`)) return;
+      const { error } = await supabase.from('plays').delete().eq('id', id);
+      if (error) { alert('Delete failed: ' + error.message); return; }
+      await logAudit(team.id, 'play', id, 'delete', { name: p.name });
+      const idx = plays.findIndex(x => x.id === id);
+      if (idx >= 0) plays.splice(idx, 1);
+      if (editor.current.id === id) editor.current = newPlayState();
+      renderPlaysTab();
+    };
+  });
+
+  if (canEdit) wireTacticsUI();
+}
+
+async function savePlay() {
+  const { team, plays, current } = editor;
+  const msgEl = document.getElementById('save-msg');
+  msgEl.textContent = '';
+  const name = current.name.trim();
+  if (!name) { msgEl.textContent = 'Name is required'; msgEl.className = 'error'; return; }
+
+  const payload = {
+    team_id: team.id,
+    name,
+    data: {
+      formation: current.formation,
+      arrows: current.arrows,
+      zoneLines: current.zoneLines,
+      ballVisible: current.ballVisible,
+      ballPos: current.ballPos
+    },
+    updated_at: new Date().toISOString()
+  };
+
+  if (current.id) {
+    const { data, error } = await supabase.from('plays').update(payload).eq('id', current.id).select().single();
+    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    const idx = plays.findIndex(p => p.id === current.id);
+    if (idx >= 0) plays[idx] = data;
+    await logAudit(team.id, 'play', data.id, 'update', { name });
+  } else {
+    const { data: { user } } = await supabase.auth.getUser();
+    payload.created_by = user.id;
+    const { data, error } = await supabase.from('plays').insert(payload).select().single();
+    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    plays.unshift(data);
+    editor.current.id = data.id;
+    await logAudit(team.id, 'play', data.id, 'create', { name });
+  }
+
+  msgEl.textContent = '✓ Saved';
+  msgEl.className = 'ok';
+  setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
+  renderPlaysTab();
 }
 
 // Kick off
