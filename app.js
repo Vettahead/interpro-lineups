@@ -429,7 +429,7 @@ async function renderParentView(lineupId, opts = {}) {
     op: lineup.opponent, gd: lineup.game_date, mt: lineup.match_type, ha: lineup.home_away,
     ko: lineup.kickoff_time, ar: lineup.arrival_time, nt: lineup.notes,
     ln: lineup.location_name, lp: lineup.location_postcode, llat: lineup.location_lat, llng: lineup.location_lng,
-    pub: lineup.published,
+    pub: lineup.published, st: lineup.lineup_status,
     tn: team.name, tg: team.home_ground_name, tp: team.home_ground_postcode, tlat: team.home_ground_lat, tlng: team.home_ground_lng,
     pl: players.map(p => [p.id, p.name, p.number]).sort()
   });
@@ -479,6 +479,20 @@ async function renderParentView(lineupId, opts = {}) {
   const teamName = escapeHtml(team.name || '');
   const oppName  = escapeHtml(lineup.opponent || 'TBD');
 
+  const status = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
+  const isAvailabilityMode = status === 'availability';
+
+  // Fetch current availability responses (anon-readable) so we can prefill
+  let availability = [];
+  if (isAvailabilityMode || status === 'published') {
+    const { data: avail } = await supabase
+      .from('player_availability')
+      .select('*')
+      .eq('lineup_id', lineupId);
+    availability = avail || [];
+  }
+  const availByPlayer = Object.fromEntries(availability.map(a => [a.player_id, a]));
+
   appEl.innerHTML = `
     <div class="parent-view">
       <div class="pv-header">
@@ -513,6 +527,7 @@ async function renderParentView(lineupId, opts = {}) {
         </div>
       ` : ''}
 
+      ${isAvailabilityMode ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : `
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
@@ -522,7 +537,7 @@ async function renderParentView(lineupId, opts = {}) {
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
         </div>
         <div class="pv-subs" id="fix-subs" style="margin-top:0.5rem"></div>
-      </div>
+      </div>`}
 
       <div class="pv-footer">
         <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
@@ -531,7 +546,11 @@ async function renderParentView(lineupId, opts = {}) {
     </div>
   `;
 
-  renderFixturePitch(lineup);
+  if (isAvailabilityMode) {
+    wireAvailabilityForm(lineup, players, availByPlayer);
+  } else {
+    renderFixturePitch(lineup);
+  }
 
   document.getElementById('pv-refresh')?.addEventListener('click', () => {
     _parentViewLastHash = null;
@@ -540,7 +559,7 @@ async function renderParentView(lineupId, opts = {}) {
 
   // Re-draw on resize so tactics canvas stays crisp
   window.addEventListener('resize', () => {
-    if (currentRoute().name === 'view') renderFixturePitch(lineup);
+    if (currentRoute().name === 'view' && !isAvailabilityMode) renderFixturePitch(lineup);
   }, { once: false });
 
   // Start polling (only on first / non-poll render)
@@ -551,6 +570,183 @@ async function renderParentView(lineupId, opts = {}) {
       }
       renderParentView(lineupId, { fromPoll: true }).catch(e => console.warn('poll failed', e));
     }, 15000);
+  }
+}
+
+// ---------- Parent availability form ----------
+function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
+  const sorted = [...players].sort((a, b) => {
+    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
+    if (na !== nb) return na - nb;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const rememberedName = (() => {
+    try { return localStorage.getItem('pv_responder_name') || ''; } catch { return ''; }
+  })();
+  const statusBtn = (pid, value, label, emoji) => {
+    const cur = availByPlayer[pid];
+    const active = cur && cur.status === value;
+    return `<button type="button" class="avail-btn" data-player="${pid}" data-status="${value}"
+      style="flex:1;padding:0.5rem 0.3rem;border:1px solid ${active ? '#2a7' : '#ccc'};background:${active ? '#2a7' : '#fff'};color:${active ? '#fff' : '#333'};font-size:0.8rem;cursor:pointer;border-radius:6px">
+      ${emoji} ${label}
+    </button>`;
+  };
+  const rows = sorted.map(p => {
+    const cur = availByPlayer[p.id];
+    const photoHtml = p.photo_url
+      ? `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
+      : `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
+    const lastLine = cur
+      ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.status}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
+      : `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
+    return `
+      <div class="avail-row" data-player-row="${p.id}" style="padding:0.6rem 0;border-top:1px solid #eee">
+        <div style="display:flex;gap:0.6rem;align-items:center">
+          ${photoHtml}
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
+            ${lastLine}
+          </div>
+        </div>
+        <div style="display:flex;gap:0.35rem;margin-top:0.5rem">
+          ${statusBtn(p.id, 'available',   'Available',   '✅')}
+          ${statusBtn(p.id, 'maybe',       'Maybe',       '🤔')}
+          ${statusBtn(p.id, 'unavailable', 'Unavailable', '❌')}
+        </div>
+        <input type="text" class="avail-note" data-player-note="${p.id}" value="${escapeHtml(cur?.note || '')}"
+          placeholder="Optional note (e.g. away weekend)"
+          style="margin-top:0.4rem;width:100%;padding:0.4rem;font-size:0.8rem;border:1px solid #ddd;border-radius:4px" />
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="pv-card">
+      <h3 class="pv-card-title">Availability check</h3>
+      <p class="muted" style="font-size:0.85rem;margin-top:0">Please mark availability for your player(s) for this match. The coach will use these responses to pick the squad.</p>
+      <label style="font-size:0.75rem;margin-top:0.5rem;display:block">Your name (optional)</label>
+      <input type="text" id="avail-responder" value="${escapeHtml(rememberedName)}" placeholder="e.g. Sarah (Alex's mum)"
+        style="width:100%;padding:0.45rem;font-size:0.9rem;border:1px solid #ddd;border-radius:4px" />
+      <div id="avail-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
+      <div id="avail-list" style="margin-top:0.5rem">${rows}</div>
+    </div>`;
+}
+
+function wireAvailabilityForm(lineup, players, availByPlayer) {
+  const msgEl = document.getElementById('avail-msg');
+  const responderEl = document.getElementById('avail-responder');
+  const flash = (txt, cls = 'muted') => {
+    if (!msgEl) return;
+    msgEl.textContent = txt; msgEl.className = cls;
+    setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2500);
+  };
+
+  const submit = async (playerId, status) => {
+    const responderName = (responderEl?.value || '').trim();
+    if (responderName) {
+      try { localStorage.setItem('pv_responder_name', responderName); } catch {}
+    }
+    const noteEl = document.querySelector(`[data-player-note="${playerId}"]`);
+    const note = (noteEl?.value || '').trim() || null;
+    const payload = {
+      lineup_id: lineup.id,
+      player_id: playerId,
+      status,
+      note,
+      responded_by: responderName || null,
+      responded_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase
+      .from('player_availability')
+      .upsert(payload, { onConflict: 'lineup_id,player_id' })
+      .select()
+      .single();
+    if (error) { flash('Save failed: ' + error.message, 'error'); return; }
+    availByPlayer[playerId] = data;
+    // Visually update the buttons for this row
+    document.querySelectorAll(`[data-player="${playerId}"]`).forEach(btn => {
+      const active = btn.dataset.status === status;
+      btn.style.background = active ? '#2a7' : '#fff';
+      btn.style.color = active ? '#fff' : '#333';
+      btn.style.borderColor = active ? '#2a7' : '#ccc';
+    });
+    const row = document.querySelector(`[data-player-row="${playerId}"]`);
+    const line = row?.querySelector('.muted');
+    if (line) line.textContent = `Last response: ${status}${responderName ? ' — ' + responderName : ''}`;
+    flash('✓ Saved', 'ok');
+  };
+
+  document.querySelectorAll('.avail-btn').forEach(btn => {
+    btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.status));
+  });
+
+  // Save note on blur if a status exists
+  document.querySelectorAll('.avail-note').forEach(inp => {
+    inp.addEventListener('blur', async () => {
+      const pid = inp.dataset.playerNote;
+      const cur = availByPlayer[pid];
+      if (!cur) return; // only save notes alongside an existing status
+      const note = (inp.value || '').trim() || null;
+      if ((cur.note || null) === note) return;
+      const { error } = await supabase
+        .from('player_availability')
+        .update({ note, responded_at: new Date().toISOString() })
+        .eq('lineup_id', lineup.id).eq('player_id', pid);
+      if (error) { flash('Note save failed: ' + error.message, 'error'); return; }
+      cur.note = note;
+      flash('✓ Note saved', 'ok');
+    });
+  });
+}
+
+// ---------- Coach availability responses panel ----------
+async function renderCoachAvailabilityPanel() {
+  const panelEl = document.getElementById('availability-panel');
+  if (!panelEl || !editor?.current?.id) return;
+  const lineupId = editor.current.id;
+  const { data: avail, error } = await supabase
+    .from('player_availability')
+    .select('*')
+    .eq('lineup_id', lineupId);
+  if (error) { panelEl.innerHTML = `<div class="error" style="font-size:0.75rem">${escapeHtml(error.message)}</div>`; return; }
+  const byPlayer = Object.fromEntries((avail || []).map(a => [a.player_id, a]));
+  const players = [...(editor.players || [])].sort((a, b) => {
+    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
+    if (na !== nb) return na - nb;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const tally = { available: 0, maybe: 0, unavailable: 0, none: 0 };
+  players.forEach(p => {
+    const s = byPlayer[p.id]?.status;
+    if (s === 'available' || s === 'maybe' || s === 'unavailable') tally[s]++;
+    else tally.none++;
+  });
+  const rowHtml = players.map(p => {
+    const r = byPlayer[p.id];
+    const badge = !r
+      ? `<span style="color:#888">— no reply</span>`
+      : r.status === 'available'   ? `<span style="color:#2a7">✅ available</span>`
+      : r.status === 'maybe'       ? `<span style="color:#b88800">🤔 maybe</span>`
+      : r.status === 'unavailable' ? `<span style="color:#c33">❌ unavailable</span>`
+      : escapeHtml(r.status);
+    const meta = r
+      ? `<span class="muted" style="font-size:0.7rem"> — ${r.responded_by ? escapeHtml(r.responded_by) : 'anon'}${r.note ? ' · ' + escapeHtml(r.note) : ''}</span>`
+      : '';
+    return `<div style="padding:0.25rem 0;font-size:0.8rem;border-top:1px solid #f0f0f0">
+      <strong>#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</strong> — ${badge}${meta}
+    </div>`;
+  }).join('');
+  panelEl.innerHTML = `
+    <details class="collapsible-card" ${openCards.has('coach-avail') ? 'open' : ''} data-card="coach-avail">
+      <summary style="cursor:pointer;padding:0.4rem 0.5rem;background:#f7f7f7;border-radius:4px;font-size:0.8rem;font-weight:600">
+        Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
+      </summary>
+      <div style="padding:0.4rem 0.2rem">${rowHtml || '<div class="muted" style="font-size:0.8rem;padding:0.4rem 0">No players.</div>'}</div>
+    </details>`;
+  const det = panelEl.querySelector('details');
+  if (det) {
+    det.addEventListener('toggle', () => {
+      if (det.open) openCards.add('coach-avail'); else openCards.delete('coach-avail');
+    });
   }
 }
 
@@ -1309,7 +1505,8 @@ function newLineupState() {
     arrival_time: '',       // 'HH:MM'
     notes: '',
     // publish + location
-    published: false,
+    lineup_status: 'draft', // 'draft' | 'availability' | 'published'
+    published: false,       // derived from lineup_status via DB trigger; kept for legacy reads
     location_name: '',
     location_postcode: '',
     location_lat: null,
@@ -1430,9 +1627,12 @@ function matchSummaryHtml(current, team, canEdit) {
     : (current.home_away === 'home'
         ? `<div class="muted" style="font-size:0.8rem;margin-top:0.25rem;color:#b88800">⚠ No home ground set — edit in Squad tab</div>`
         : '');
-  const pubLine = current.id && current.published
-    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
-    : (current.id ? `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>` : '');
+  const status = current.lineup_status || (current.published ? 'published' : 'draft');
+  const pubLine = !current.id ? '' :
+      status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
+    : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
+    :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
+  const shareLabel = status === 'availability' ? '🔗 Copy availability link for parents' : '🔗 Copy share link for parents';
   return `
     <div style="display:flex;flex-direction:column;gap:0.15rem">
       <div style="font-weight:600">${oppStr}</div>
@@ -1445,7 +1645,8 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
-    ${current.id && current.published ? `<button class="btn-secondary btn-full" id="copy-share-link" style="margin-top:0.35rem">🔗 Copy share link for parents</button>` : ''}
+    ${current.id && (status === 'availability' || status === 'published') ? `<button class="btn-secondary btn-full" id="copy-share-link" style="margin-top:0.35rem">${shareLabel}</button>` : ''}
+    ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
 }
@@ -1506,13 +1707,25 @@ function matchDetailsFormHtml(current, team, canEdit) {
       ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
       ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
     </div>
-    ${canEdit && current.id ? `
-      <div style="margin-top:0.5rem">
-        <button class="btn-full" id="toggle-publish" style="margin-bottom:0;${current.published ? 'background:#fff3cd;border-color:#b88800;color:#5a4400' : ''}">
-          ${current.published ? '● Published — click to unpublish' : '○ Publish (show in Fixtures)'}
-        </button>
+    ${canEdit && current.id ? (() => {
+      const s = current.lineup_status || (current.published ? 'published' : 'draft');
+      const btn = (val, label, hint) => `
+        <button type="button" class="lineup-status-btn${s === val ? ' is-active' : ''}" data-status="${val}"
+          style="flex:1;padding:0.5rem 0.4rem;border:1px solid #ccc;background:${s === val ? '#2a7' : '#fff'};color:${s === val ? '#fff' : '#333'};font-size:0.8rem;cursor:pointer;border-radius:0">
+          <div style="font-weight:600">${label}</div>
+          <div style="font-size:0.7rem;opacity:0.8;margin-top:0.1rem">${hint}</div>
+        </button>`;
+      return `
+      <div style="margin-top:0.75rem">
+        <div class="muted" style="font-size:0.75rem;margin-bottom:0.25rem">Parent visibility</div>
+        <div id="lineup-status-seg" style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid #ccc">
+          ${btn('draft',        'Draft',        'Only coaches')}
+          ${btn('availability', 'Availability', 'Ask parents')}
+          ${btn('published',    'Published',    'Show lineup')}
+        </div>
       </div>
-    ` : ''}
+      `;
+    })() : ''}
     <div id="md-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
   `;
 }
@@ -1628,24 +1841,29 @@ function wireMatchDetailsFields(closeModal) {
     if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
   };
 
-  const pubBtn = overlay.querySelector('#toggle-publish');
-  if (pubBtn) pubBtn.onclick = async () => {
-    if (!editor.current.id) return;
-    const nextPublished = !editor.current.published;
-    if (nextPublished && !editor.current.game_date) {
-      alert('Set a Game date before publishing.'); return;
-    }
-    const { data, error } = await supabase.from('lineups')
-      .update({ published: nextPublished, published_at: nextPublished ? new Date().toISOString() : null })
-      .eq('id', editor.current.id).select().single();
-    if (error) { alert('Publish failed: ' + error.message); return; }
-    editor.current.published = data.published;
-    editor.current.published_at = data.published_at;
-    const idx = editor.lineups.findIndex(l => l.id === data.id);
-    if (idx >= 0) editor.lineups[idx] = data;
-    await logAudit(editor.team.id, 'lineup', data.id, nextPublished ? 'publish' : 'unpublish', {});
-    rerenderBody();
-  };
+  overlay.querySelectorAll('.lineup-status-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (!editor.current.id) return;
+      const nextStatus = btn.dataset.status;
+      const prevStatus = editor.current.lineup_status || (editor.current.published ? 'published' : 'draft');
+      if (nextStatus === prevStatus) return;
+      if (nextStatus !== 'draft' && !editor.current.game_date) {
+        alert('Set a Game date before publishing.'); return;
+      }
+      const { data, error } = await supabase.from('lineups')
+        .update({ lineup_status: nextStatus })
+        .eq('id', editor.current.id).select().single();
+      if (error) { alert('Status change failed: ' + error.message); return; }
+      editor.current.lineup_status = data.lineup_status;
+      editor.current.published = data.published;
+      editor.current.published_at = data.published_at;
+      const idx = editor.lineups.findIndex(l => l.id === data.id);
+      if (idx >= 0) editor.lineups[idx] = data;
+      await logAudit(editor.team.id, 'lineup', data.id, 'status:' + nextStatus, { from: prevStatus });
+      rerenderBody();
+      renderLineupsTab();
+    };
+  });
 
   const saveBtn = overlay.querySelector('#save-lineup');
   if (saveBtn) saveBtn.onclick = async () => {
@@ -1811,6 +2029,12 @@ function renderLineupsTab() {
 
   // Auto-save any changes once a published lineup is open
   scheduleAutosaveIfPublished();
+
+  // Coach-facing availability responses panel (only when in availability/published mode)
+  const curStatus = current?.lineup_status || (current?.published ? 'published' : 'draft');
+  if (current?.id && (curStatus === 'availability' || curStatus === 'published')) {
+    renderCoachAvailabilityPanel();
+  }
 }
 
 function chipHtml(player, context) {
@@ -2202,6 +2426,7 @@ function wireLineupEvents() {
         ballVisible: !!l.data?.ballVisible,
         ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) },
         published: !!l.published,
+        lineup_status: l.lineup_status || (l.published ? 'published' : 'draft'),
         location_name: l.location_name || '',
         location_postcode: l.location_postcode || '',
         location_lat: l.location_lat ?? null,
@@ -3005,8 +3230,7 @@ async function saveLineupWithMsg(msgEl) {
     kickoff_time: current.kickoff_time || null,
     arrival_time: current.arrival_time || null,
     notes: (current.notes || '').trim() || null,
-    published: !!current.published,
-    published_at: current.published ? (current.published_at || new Date().toISOString()) : null,
+    lineup_status: current.lineup_status || (current.published ? 'published' : 'draft'),
     location_name: (locName || '').trim() || null,
     location_postcode: (locPost || '').trim().toUpperCase() || null,
     location_lat: locLat ?? null,
@@ -3840,7 +4064,8 @@ function renderFixturesTab() {
   // Published lineups are visible to everyone; coaches can flip a toggle to also see drafts.
   const list = lineups.filter(l => {
     if (!l.game_date) return false;
-    return canEdit && _fixturesUi.showDrafts ? true : !!l.published;
+    const parentVisible = !!l.published || l.lineup_status === 'availability';
+    return canEdit && _fixturesUi.showDrafts ? true : parentVisible;
   });
   list.sort((a, b) => (a.game_date || '').localeCompare(b.game_date || ''));
 
@@ -3915,7 +4140,7 @@ function renderFixturesTab() {
     ? upcomingList.map(l => `
         <div class="lineup-item ${selected && l.id === selected.id ? 'active' : ''}" data-fix="${l.id}">
           <div class="lineup-name">${escapeHtml(l.opponent || '—')} ${l.home_away === 'away' ? '(A)' : '(H)'}</div>
-          <div class="lineup-meta">${formatDate(l.game_date)}${l.location_postcode ? ' · ' + escapeHtml(l.location_postcode) : ''}${canEdit && !l.published ? ' · <em>draft</em>' : ''}</div>
+          <div class="lineup-meta">${formatDate(l.game_date)}${l.location_postcode ? ' · ' + escapeHtml(l.location_postcode) : ''}${canEdit && !l.published ? (l.lineup_status === 'availability' ? ' · <em>availability</em>' : ' · <em>draft</em>') : ''}</div>
         </div>
       `).join('')
     : `<p class="muted" style="padding:0.5rem 0;font-size:0.85rem">No upcoming games.</p>`;
@@ -4104,7 +4329,7 @@ function wireFixtureEvents() {
   tabEl.querySelectorAll('[data-game-date]').forEach(btn => {
     btn.onclick = () => {
       const iso = btn.dataset.gameDate;
-      const match = editor.lineups.find(l => l.game_date === iso && (l.published || _fixturesUi.showDrafts));
+      const match = editor.lineups.find(l => l.game_date === iso && (l.published || l.lineup_status === 'availability' || _fixturesUi.showDrafts));
       if (match) { _fixturesUi.selectedLineupId = match.id; renderFixturesTab(); }
     };
   });
