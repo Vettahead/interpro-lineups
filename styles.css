@@ -529,10 +529,11 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 
 /* Pitch */
 .pitch-card { padding: 0.75rem; width: 100%; max-width: 540px; }
+/* aspect-ratio matches SVG viewBox 70x100 so circles stay round */
 .pitch {
   position: relative;
   width: 100%;
-  aspect-ratio: 7 / 9;
+  aspect-ratio: 7 / 10;
   margin: 0 auto;
   background:
     repeating-linear-gradient(
@@ -620,7 +621,7 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 .pv-pitch {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1.35;
+  aspect-ratio: 7 / 10;
   background: linear-gradient(135deg, #2e7d32, #1b5e20);
   border-radius: 8px;
   overflow: hidden;

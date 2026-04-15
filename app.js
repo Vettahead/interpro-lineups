@@ -516,7 +516,7 @@ async function renderParentView(lineupId, opts = {}) {
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
-          <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
           <canvas class="tactics-canvas" id="fix-tactics"></canvas>
           <div class="pv-slots" id="fix-slots"></div>
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
@@ -1697,7 +1697,7 @@ function renderLineupsTab() {
       <div class="lineup-center">
         <div class="card pitch-card">
           <div class="pitch" id="pitch">
-            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
             <div class="slots-layer" id="slots-layer"></div>
             <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
             <div class="ball-el" id="ball-el"></div>
@@ -1805,35 +1805,37 @@ function renderPitch() {
 
 // Kept as fallback helper (not currently called, but left in case)
 function pitchSvgHtml() {
-  return `<svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${pitchSvgInner()}</svg>`;
+  return `<svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>`;
 }
 
 // Inner SVG markup (pitch lines) — placed inside the outer <svg> in render
+// SVG uses viewBox "0 0 70 100" so it matches the container's 7:10 aspect ratio.
+// With matching aspects the SVG renders 1:1 — circles stay round, lines stay square.
 function pitchSvgInner() {
   return `
       <!-- perimeter -->
-      <rect x="1" y="1" width="98" height="98" fill="none" stroke="white" stroke-width="0.5" opacity="0.7"/>
+      <rect x="1" y="1" width="68" height="98" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
       <!-- halfway line -->
-      <line x1="1" y1="50" x2="99" y2="50" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <line x1="1" y1="50" x2="69" y2="50" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- centre circle + spot -->
-      <circle cx="50" cy="50" r="9" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
-      <circle cx="50" cy="50" r="0.6" fill="white" opacity="0.8"/>
+      <circle cx="35" cy="50" r="9" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
+      <circle cx="35" cy="50" r="0.6" fill="white" opacity="0.8"/>
       <!-- top penalty area -->
-      <rect x="18" y="1" width="64" height="16" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <rect x="13" y="1" width="44" height="14" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- top goal area -->
-      <rect x="34" y="1" width="32" height="6" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <rect x="24" y="1" width="22" height="5" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- top penalty spot -->
-      <circle cx="50" cy="11" r="0.6" fill="white" opacity="0.8"/>
+      <circle cx="35" cy="10" r="0.6" fill="white" opacity="0.8"/>
       <!-- top penalty arc -->
-      <path d="M 41 17 A 9 9 0 0 0 59 17" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <path d="M 26 15 A 9 9 0 0 0 44 15" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- bottom penalty area -->
-      <rect x="18" y="83" width="64" height="16" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <rect x="13" y="85" width="44" height="14" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- bottom goal area -->
-      <rect x="34" y="93" width="32" height="6" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <rect x="24" y="94" width="22" height="5" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
       <!-- bottom penalty spot -->
-      <circle cx="50" cy="89" r="0.6" fill="white" opacity="0.8"/>
+      <circle cx="35" cy="90" r="0.6" fill="white" opacity="0.8"/>
       <!-- bottom penalty arc -->
-      <path d="M 41 83 A 9 9 0 0 1 59 83" fill="none" stroke="white" stroke-width="0.4" opacity="0.7"/>
+      <path d="M 26 85 A 9 9 0 0 1 44 85" fill="none" stroke="white" stroke-width="0.35" opacity="0.7"/>
   `;
 }
 
@@ -3380,7 +3382,7 @@ function renderPlaysTab() {
         <div class="plays-main-inner">
           <div class="plays-preview">
             <div class="pv-pitch" id="pv-pitch">
-              <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
               <canvas class="tactics-canvas" id="pv-tactics"></canvas>
               <div class="pv-slots" id="pv-slots"></div>
               <div class="pv-ball" id="pv-ball" style="display:none"></div>
@@ -3703,7 +3705,7 @@ function renderFixturesTab() {
       ${headline}
       ${selected ? `
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
-          <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
           <canvas class="tactics-canvas" id="fix-tactics"></canvas>
           <div class="pv-slots" id="fix-slots"></div>
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
