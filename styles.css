@@ -602,6 +602,22 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 .chip.selected { outline: 3px solid #ffd54f; outline-offset: 2px; box-shadow: 0 0 0 4px rgba(255,213,79,0.35), 0 2px 4px rgba(0,0,0,0.25); }
 .chip, .chip * { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
 .chip * { pointer-events: none !important; }
+
+/* Custom formation builder modal */
+.cfb-modal .picker-body { padding: 1rem 1.25rem 1.25rem; }
+.cfb-table { width: 100%; border-collapse: collapse; margin-top: 0.25rem; font-size: 0.85rem; }
+.cfb-table th { text-align: left; padding: 0.25rem 0.35rem; font-weight: 600; color: #64748b; font-size: 0.75rem; }
+.cfb-table td { padding: 0.25rem 0.35rem; }
+.cfb-num, .cfb-lbl { width: 100%; padding: 0.3rem 0.45rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 4px; }
+.cfb-num { max-width: 60px; }
+.cfb-mini { padding: 0.15rem 0.5rem; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px; background: #f1f5f9; cursor: pointer; }
+.cfb-mini:disabled { opacity: 0.4; cursor: default; }
+.cfb-del { color: #b91c1c; border-color: #fecaca; }
+
+/* Possession pills */
+.pill { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; vertical-align: middle; margin-left: 4px; }
+.pill-in  { background: #dcfce7; color: #166534; }
+.pill-out { background: #fee2e2; color: #991b1b; }
 .chip-ghost { box-shadow: 0 6px 16px rgba(0,0,0,0.4) !important; }
 .chip-inner {
   display: flex;

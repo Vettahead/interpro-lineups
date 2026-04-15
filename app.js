@@ -537,10 +537,15 @@ function newLineupState() {
 }
 
 function newPlayState() {
+  const base = FORMATIONS['4-3-3'];
   return {
     id: null,
     name: '',
+    description: '',
+    possession: 'in',     // 'in' | 'out'
     formation: '4-3-3',
+    pos: base.pos.map(p => [...p]),   // per-play dot positions
+    lbl: [...base.lbl],               // per-play labels
     slots: {},            // always empty for plays (no players)
     subs: [],             // always empty for plays
     arrows: [],
@@ -1112,6 +1117,151 @@ function wireTacticsUI() {
   if (clT) clT.onclick = () => clearTactics();
   const lfp = document.getElementById('load-from-play');
   if (lfp) lfp.onclick = () => openLoadFromPlay();
+}
+
+// Auto-generate dot positions from rows (back to front, GK at bottom).
+// rows = [{ players: N, label: 'DEF' }, ...]  (GK added implicitly at front)
+function generateFormationFromRows(rows) {
+  const pos = [];
+  const lbl = [];
+  // GK
+  pos.push([50, 87]);
+  lbl.push('GK');
+  const n = rows.length;
+  // Distribute row Y positions from y=70 (nearest GK) up to y=22 (forward line)
+  const yStart = 70, yEnd = 22;
+  rows.forEach((row, i) => {
+    const y = n === 1 ? 50 : yStart - ((yStart - yEnd) * (i / (n - 1)));
+    const m = Math.max(1, row.players | 0);
+    const margin = 15;
+    const usable = 100 - margin * 2;
+    for (let k = 0; k < m; k++) {
+      const x = m === 1 ? 50 : margin + (usable * (k / (m - 1)));
+      pos.push([x, Math.round(y * 10) / 10]);
+      lbl.push((row.label || '').toUpperCase().slice(0, 5));
+    }
+  });
+  return { pos, lbl };
+}
+
+function openFormationBuilder(onSaved) {
+  const { team } = editor;
+  // Default rows: 4 DEF, 3 MID, 3 FWD (back to front)
+  const state = {
+    name: 'Custom',
+    rows: [
+      { players: 4, label: 'DEF' },
+      { players: 3, label: 'MID' },
+      { players: 3, label: 'FWD' }
+    ]
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+
+  function render() {
+    const rowsHtml = state.rows.map((r, i) => `
+      <tr data-row="${i}">
+        <td>
+          <button class="cfb-mini" data-up="${i}" ${i === 0 ? 'disabled' : ''} title="Move back">↑</button>
+          <button class="cfb-mini" data-down="${i}" ${i === state.rows.length - 1 ? 'disabled' : ''} title="Move forward">↓</button>
+        </td>
+        <td><input type="number" min="1" max="6" value="${r.players}" data-players="${i}" class="cfb-num" /></td>
+        <td><input type="text" maxlength="5" value="${escapeHtml(r.label)}" data-label="${i}" class="cfb-lbl" /></td>
+        <td><button class="cfb-mini cfb-del" data-del="${i}" title="Remove row">✕</button></td>
+      </tr>
+    `).join('');
+
+    overlay.innerHTML = `
+      <div class="picker-modal cfb-modal">
+        <div class="picker-header">
+          <strong>Custom formation builder</strong>
+          <button class="picker-close" data-action="close">✕</button>
+        </div>
+        <div class="picker-body">
+          <label>Name</label>
+          <input type="text" id="cfb-name" value="${escapeHtml(state.name)}" placeholder="e.g. 4-3-3 high" />
+          <p class="muted" style="margin:0.75rem 0 0.35rem;font-size:0.8rem">Rows — back to front, ↑↓ to reorder. GK is added automatically.</p>
+          <table class="cfb-table">
+            <thead><tr><th></th><th>Players</th><th>Label</th><th></th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <button class="btn-full cfb-add" id="cfb-add-row" style="margin-top:0.5rem">+ Add row</button>
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end">
+            <button class="btn-secondary" data-action="close">Cancel</button>
+            <button class="primary" id="cfb-save">Save formation</button>
+          </div>
+          <div id="cfb-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+        </div>
+      </div>
+    `;
+
+    overlay.querySelectorAll('[data-action=close]').forEach(b => b.onclick = close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    overlay.querySelector('#cfb-name').oninput = e => { state.name = e.target.value; };
+    overlay.querySelectorAll('[data-players]').forEach(inp => {
+      inp.oninput = e => {
+        const i = parseInt(inp.dataset.players);
+        const n = Math.max(1, Math.min(6, parseInt(e.target.value) || 1));
+        state.rows[i].players = n;
+      };
+    });
+    overlay.querySelectorAll('[data-label]').forEach(inp => {
+      inp.oninput = e => {
+        const i = parseInt(inp.dataset.label);
+        state.rows[i].label = e.target.value.toUpperCase().slice(0, 5);
+      };
+    });
+    overlay.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
+      const i = parseInt(b.dataset.up);
+      if (i === 0) return;
+      [state.rows[i - 1], state.rows[i]] = [state.rows[i], state.rows[i - 1]];
+      render();
+    });
+    overlay.querySelectorAll('[data-down]').forEach(b => b.onclick = () => {
+      const i = parseInt(b.dataset.down);
+      if (i === state.rows.length - 1) return;
+      [state.rows[i + 1], state.rows[i]] = [state.rows[i], state.rows[i + 1]];
+      render();
+    });
+    overlay.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      const i = parseInt(b.dataset.del);
+      state.rows.splice(i, 1);
+      render();
+    });
+    overlay.querySelector('#cfb-add-row').onclick = () => {
+      state.rows.push({ players: 1, label: 'MID' });
+      render();
+    };
+    overlay.querySelector('#cfb-save').onclick = async () => {
+      const msg = overlay.querySelector('#cfb-msg');
+      msg.textContent = '';
+      const name = (state.name || '').trim();
+      if (!name) { msg.textContent = 'Give the formation a name.'; msg.className = 'error'; return; }
+      if (FORMATIONS[name]) { msg.textContent = `"${name}" is a preset name. Pick a different name.`; msg.className = 'error'; return; }
+      if (editor.customFormations.some(c => c.name === name)) {
+        msg.textContent = `"${name}" already exists.`; msg.className = 'error'; return;
+      }
+      if (!state.rows.length) { msg.textContent = 'Add at least one row.'; msg.className = 'error'; return; }
+      const total = 1 + state.rows.reduce((s, r) => s + (r.players | 0), 0);
+      if (total < 7 || total > 11) {
+        msg.textContent = `Total players = ${total}. Should be 7–11 (incl. GK).`; msg.className = 'error'; return;
+      }
+      const { pos, lbl } = generateFormationFromRows(state.rows);
+      const { data, error } = await supabase.from('formations')
+        .insert({ team_id: team.id, name, data: { pos, lbl } })
+        .select().single();
+      if (error) { msg.textContent = 'Save failed: ' + error.message; msg.className = 'error'; return; }
+      editor.customFormations.push(data);
+      await logAudit(team.id, 'formation', data.id, 'create', { name });
+      close();
+      if (onSaved) onSaved(name);
+    };
+  }
+  render();
 }
 
 function openLoadFromPlay() {
@@ -1827,6 +1977,13 @@ function renderPlaysTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, plays, customFormations, current } = editor;
 
+  // Ensure current has pos/lbl (loaded plays may not)
+  if (!current.pos || !current.lbl) {
+    const base = getFormation(current.formation) || FORMATIONS['4-3-3'];
+    current.pos = base.pos.map(p => [...p]);
+    current.lbl = [...base.lbl];
+  }
+
   const FORMS = allFormations(customFormations);
   const formationBtns = Object.keys(FORMS).map(f => {
     const cid = FORMS[f]._customId;
@@ -1834,16 +1991,16 @@ function renderPlaysTab() {
   }).join('');
 
   const playsListHtml = plays.length
-    ? plays.map(p => `
+    ? plays.map(p => {
+        const poss = p.data?.possession === 'out' ? '<span class="pill pill-out">Out</span>' : '<span class="pill pill-in">In</span>';
+        return `
         <div class="lineup-item ${current.id === p.id ? 'active' : ''}" data-play="${p.id}">
-          <div class="lineup-name">${escapeHtml(p.name)}</div>
+          <div class="lineup-name">${escapeHtml(p.name)} ${poss}</div>
           <div class="lineup-meta">${p.data?.formation ? escapeHtml(p.data.formation) : ''}</div>
           ${canEdit ? `<button class="lineup-del" data-del-play="${p.id}" title="Delete">✕</button>` : ''}
-        </div>
-      `).join('')
+        </div>`;
+      }).join('')
     : `<p class="muted" style="padding:0.75rem">No saved plays yet.</p>`;
-
-  const editing = !!formationEdit;
 
   tabEl.innerHTML = `
     <div class="lineup-layout">
@@ -1875,10 +2032,18 @@ function renderPlaysTab() {
         ${collapsibleCard('play-details', 'Play details', `
           <label>Name</label>
           <input type="text" id="p-name" value="${escapeHtml(current.name)}" placeholder="e.g. High press from goal kick" ${canEdit ? '' : 'disabled'} />
+          <label style="margin-top:0.5rem">Possession</label>
+          <select id="p-possession" ${canEdit ? '' : 'disabled'}>
+            <option value="in" ${current.possession === 'in' ? 'selected' : ''}>In possession</option>
+            <option value="out" ${current.possession === 'out' ? 'selected' : ''}>Out of possession</option>
+          </select>
+          <label style="margin-top:0.5rem">Description</label>
+          <textarea id="p-description" rows="3" placeholder="Optional notes for the coach / parents" ${canEdit ? '' : 'disabled'}>${escapeHtml(current.description || '')}</textarea>
           <div class="lineup-actions" style="margin-top:0.5rem">
             ${canEdit ? `<button class="primary" id="save-play">${current.id ? 'Save' : 'Save play'}</button>` : ''}
             ${canEdit ? `<button class="btn-secondary" id="new-play-btn">New</button>` : ''}
           </div>
+          <p class="muted" style="font-size:0.75rem;margin:0.5rem 0 0">Drag dots on the pitch to reposition. Tap a dot to rename its label.</p>
           <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
         `)}
 
@@ -1889,24 +2054,25 @@ function renderPlaysTab() {
 
       <div class="lineup-center">
         <div class="card pitch-card">
-          <div class="pitch ${editing ? 'pitch-editing-formation' : ''}" id="pitch">
+          <div class="pitch pitch-editing-formation" id="pitch">
             <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
             <div class="slots-layer" id="slots-layer"></div>
             <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
             <div class="ball-el" id="ball-el"></div>
           </div>
-          <p class="muted" style="margin:0.5rem 0 0;font-size:0.8rem;text-align:center">${editing ? 'Editing formation — drag dots, click labels to rename.' : 'Plays are tactical templates — no players. Use them from the Lineup editor via "Load from play".'}</p>
         </div>
       </div>
 
       <aside class="lineup-right">
-        ${collapsibleCard('play-formation', editing ? 'Edit formation' : 'Formation', formationCardHtml(canEdit, formationBtns))}
+        ${collapsibleCard('play-formation', 'Formation', `
+          <div class="f-btns f-btns-col">${formationBtns}</div>
+          ${canEdit ? `<button class="btn-full" id="new-formation-btn" style="margin-top:0.5rem;margin-bottom:0">+ New formation</button>` : ''}
+        `)}
       </aside>
     </div>
   `;
 
-  if (editing) renderFormationEditor(renderPlaysTab);
-  else renderPitch();
+  renderPlayDots(renderPlaysTab);
   wirePlayEvents();
   initTacticsCanvas();
   initBall();
@@ -1914,6 +2080,68 @@ function renderPlaysTab() {
   drawTactics();
   renderBall();
   updateTacticsCanvasClass();
+}
+
+// Render dots from current.pos/lbl — drag to reposition, tap to rename label
+function renderPlayDots(rerender) {
+  const slotsLayer = document.getElementById('slots-layer');
+  if (!slotsLayer) return;
+  const { current, canEdit } = editor;
+  const pos = current.pos || [];
+  const lbl = current.lbl || [];
+  slotsLayer.innerHTML = pos.map(([x, y], i) => `
+    <div class="slot slot-edit" style="left:${x}%; top:${y}%" data-pd-slot="${i}">
+      <div class="fe-label">${escapeHtml(lbl[i] || '')}</div>
+    </div>
+  `).join('');
+
+  if (!canEdit) return;
+  const pitch = document.getElementById('pitch');
+
+  slotsLayer.querySelectorAll('[data-pd-slot]').forEach(el => {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.pdSlot);
+      const rect = pitch.getBoundingClientRect();
+      const startX = current.pos[idx][0];
+      const startY = current.pos[idx][1];
+      const origX = e.clientX, origY = e.clientY;
+      let moved = false;
+      const DRAG_THRESHOLD = 4;
+      el.classList.add('dragging');
+
+      const move = (ev) => {
+        if (!moved) {
+          if (Math.abs(ev.clientX - origX) < DRAG_THRESHOLD &&
+              Math.abs(ev.clientY - origY) < DRAG_THRESHOLD) return;
+          moved = true;
+        }
+        const dx = (ev.clientX - origX) / rect.width * 100;
+        const dy = (ev.clientY - origY) / rect.height * 100;
+        const nx = Math.max(2, Math.min(98, startX + dx));
+        const ny = Math.max(2, Math.min(98, startY + dy));
+        current.pos[idx] = [nx, ny];
+        el.style.left = nx + '%';
+        el.style.top = ny + '%';
+      };
+      const up = () => {
+        el.classList.remove('dragging');
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        if (!moved) {
+          const next = prompt('Label:', current.lbl[idx] || '');
+          if (next === null) return;
+          current.lbl[idx] = next.trim().toUpperCase().slice(0, 5);
+          if (rerender) rerender();
+        }
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    });
+  });
 }
 
 // Render slot dots from formationEdit state; attach drag handlers
@@ -2024,7 +2252,15 @@ function wirePlayEvents() {
     b.onclick = (ev) => {
       if (ev.target.closest('[data-del-formation]')) return;
       if (!canEdit) return;
-      editor.current.formation = b.dataset.formation;
+      const name = b.dataset.formation;
+      const f = getFormation(name);
+      if (!f) return;
+      // Switching formation resets the play's dots to that formation's layout.
+      if (editor.current.pos && editor.current.pos.length &&
+          !confirm(`Switch to ${name}? This resets dot positions.`)) return;
+      editor.current.formation = name;
+      editor.current.pos = f.pos.map(p => [...p]);
+      editor.current.lbl = [...f.lbl];
       renderPlaysTab();
     };
   });
@@ -2046,15 +2282,33 @@ function wirePlayEvents() {
     };
   });
 
-  if (canEdit) wireFormationEdit(renderPlaysTab);
+  // + New formation → open modal form
+  const newFormBtn = document.getElementById('new-formation-btn');
+  if (newFormBtn) newFormBtn.onclick = () => {
+    openFormationBuilder((name) => {
+      const f = getFormation(name);
+      if (f) {
+        editor.current.formation = name;
+        editor.current.pos = f.pos.map(p => [...p]);
+        editor.current.lbl = [...f.lbl];
+      }
+      renderPlaysTab();
+    });
+  };
 
   const nameEl = document.getElementById('p-name');
   if (nameEl) nameEl.oninput = e => { editor.current.name = e.target.value; };
 
+  const possEl = document.getElementById('p-possession');
+  if (possEl) possEl.onchange = e => { editor.current.possession = e.target.value; };
+
+  const descEl = document.getElementById('p-description');
+  if (descEl) descEl.oninput = e => { editor.current.description = e.target.value; };
+
   const newBtn = document.getElementById('new-play-btn');
   if (newBtn) newBtn.onclick = () => {
     const c = editor.current;
-    const unsaved = !c.id && (c.name || c.arrows.length || c.ballVisible || c.zoneLines.some(z => z !== null));
+    const unsaved = !c.id && (c.name || c.description || c.arrows.length || c.ballVisible || c.zoneLines.some(z => z !== null));
     if (unsaved && !confirm('Discard current unsaved play?')) return;
     editor.current = newPlayState();
     tacticMode = null;
@@ -2070,16 +2324,28 @@ function wirePlayEvents() {
       const id = el.dataset.play;
       const p = plays.find(x => x.id === id);
       if (!p) return;
+      const d = p.data || {};
+      // If saved dots exist use them; else fall back to the named formation
+      let pos = Array.isArray(d.pos) ? d.pos.map(a => [...a]) : null;
+      let lbl = Array.isArray(d.lbl) ? [...d.lbl] : null;
+      if (!pos || !lbl) {
+        const f = getFormation(d.formation || '4-3-3') || FORMATIONS['4-3-3'];
+        pos = f.pos.map(a => [...a]);
+        lbl = [...f.lbl];
+      }
       editor.current = {
         id: p.id,
         name: p.name || '',
-        formation: p.data?.formation || '4-3-3',
+        description: d.description || '',
+        possession: d.possession || 'in',
+        formation: d.formation || '4-3-3',
+        pos, lbl,
         slots: {},
         subs: [],
-        arrows: (p.data?.arrows || []).map(a => ({ ...a })),
-        zoneLines: [...(p.data?.zoneLines || [null, null])],
-        ballVisible: !!p.data?.ballVisible,
-        ballPos: { ...(p.data?.ballPos || { x: 50, y: 50 }) }
+        arrows: (d.arrows || []).map(a => ({ ...a })),
+        zoneLines: [...(d.zoneLines || [null, null])],
+        ballVisible: !!d.ballVisible,
+        ballPos: { ...(d.ballPos || { x: 50, y: 50 }) }
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       renderPlaysTab();
@@ -2105,7 +2371,7 @@ function wirePlayEvents() {
 
   wireCollapsibles(tabEl);
 
-  if (canEdit && !formationEdit) wireTacticsUI();
+  if (canEdit) wireTacticsUI();
 }
 
 async function saveCustomFormation(rerender) {
@@ -2182,10 +2448,14 @@ async function savePlay() {
     name,
     data: {
       formation: current.formation,
+      pos: current.pos,
+      lbl: current.lbl,
       arrows: current.arrows,
       zoneLines: current.zoneLines,
       ballVisible: current.ballVisible,
-      ballPos: current.ballPos
+      ballPos: current.ballPos,
+      description: current.description || '',
+      possession: current.possession || 'in'
     },
     updated_at: new Date().toISOString()
   };
