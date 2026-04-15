@@ -5073,23 +5073,65 @@ async function highlightMyChildrenOnPitch(lineup, players) {
     });
   });
 
+  // Plain-English role descriptions keyed by common position abbreviations
+  const POSITION_BLURB = {
+    GK: 'goalkeeper — last line of defence, commanding the box',
+    SW: 'sweeper — reading the game behind the defence',
+    CB: 'centre back — organising the defence and winning aerial duels',
+    DEF: 'defender — shielding the goal and winning the ball back',
+    LB: 'left back — defending the left flank and pushing forward in attack',
+    RB: 'right back — defending the right flank and pushing forward in attack',
+    LWB: 'left wing back — up and down the left side all game',
+    RWB: 'right wing back — up and down the right side all game',
+    DM: 'defensive midfielder — the engine room, breaking up play',
+    CM: 'central midfielder — linking defence and attack',
+    MID: 'midfielder — linking defence and attack',
+    AM: 'attacking midfielder — creating chances between the lines',
+    LM: 'left midfielder — driving down the left',
+    RM: 'right midfielder — driving down the right',
+    LW: 'left winger — taking on defenders and delivering crosses',
+    RW: 'right winger — taking on defenders and delivering crosses',
+    ST: 'striker — leading the line and finishing chances',
+    CF: 'centre forward — leading the line and finishing chances',
+    FWD: 'forward — leading the line and finishing chances',
+    SS: 'second striker — supporting the forward and causing chaos'
+  };
+
+  const arriveStr = lineup.arrival_time || '';
+  const koStr = lineup.kickoff_time || '';
+  const timeBits = [];
+  if (arriveStr) timeBits.push(`arrive <strong>${escapeHtml(arriveStr)}</strong>`);
+  if (koStr) timeBits.push(`kick-off <strong>${escapeHtml(koStr)}</strong>`);
+  const timeLine = timeBits.length
+    ? `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">Reminder: ${timeBits.join(' · ')}.</div>`
+    : '';
+
   // Build the notice copy
   const firstName = n => (n || '').split(/\s+/)[0] || 'Your child';
   const lines = entries.map(({ player, role, position }) => {
     const name = escapeHtml(firstName(player.name));
     if (role === 'slot') {
-      return `<div style="margin:0.2rem 0"><strong>${name}</strong> is starting at <strong>${escapeHtml(position)}</strong> ⚽</div>`;
+      const posKey = (position || '').toUpperCase().replace(/[^A-Z]/g, '');
+      const blurb = POSITION_BLURB[posKey] || '';
+      const shirt = player.number != null ? ` in shirt <strong>#${player.number}</strong>` : '';
+      return `
+        <div style="margin:0.25rem 0">
+          <strong>${name}</strong> is in the starting XI at <strong>${escapeHtml(position)}</strong>${shirt} ⚽
+          ${blurb ? `<div class="muted" style="font-size:0.8rem;margin-top:0.15rem">The ${escapeHtml(blurb)}.</div>` : ''}
+          <div style="font-size:0.8rem;margin-top:0.15rem">Go get 'em! 💪</div>
+        </div>`;
     }
     if (role === 'sub') {
-      return `<div style="margin:0.2rem 0"><strong>${name}</strong> is on the bench today. The coaches do their best to rotate minutes, but we can't promise equal playing time every match — thanks for your understanding and support 💛</div>`;
+      return `<div style="margin:0.25rem 0"><strong>${name}</strong> is on the bench today and will come on when the coaches make changes. They do their best to rotate minutes across the season, but we can't promise equal playing time every match — thanks for your support 💛</div>`;
     }
-    return `<div style="margin:0.2rem 0"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
+    return `<div style="margin:0.25rem 0"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
   }).join('');
 
   noticeEl.innerHTML = `
     <div class="pv-card" style="border-left:4px solid #f4c430;background:#fffbea">
       <div style="font-size:0.75rem;font-weight:700;color:#8a6a00;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.3rem">Your squad</div>
       ${lines}
+      ${timeLine}
     </div>`;
 }
 
