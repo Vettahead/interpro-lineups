@@ -427,8 +427,6 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 .slot.slot-edit {
   width: 56px;
   height: 56px;
-  margin-left: -28px;
-  margin-top: -28px;
   cursor: grab;
   pointer-events: auto;
   touch-action: none;
@@ -588,6 +586,101 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   white-space: nowrap;
   text-shadow: 0 1px 2px rgba(0,0,0,0.6);
   pointer-events: none;
+}
+
+/* Edit positions mode — yellow draggable handles */
+.slot.slot-pos-edit { cursor: grab; z-index: 5; }
+.pos-handle {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 220, 0, 0.95);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  touch-action: none;
+  cursor: grab;
+}
+.pos-handle:active { cursor: grabbing; }
+.pos-edit-label {
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0,0,0,0.55);
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: text;
+  user-select: none;
+}
+
+/* Plays tab — read-only preview pitch */
+.pv-pitch {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1.35;
+  background: linear-gradient(135deg, #2e7d32, #1b5e20);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pv-slots { position: absolute; inset: 0; pointer-events: none; }
+.pv-slot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+}
+.pv-chip {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: #fff;
+  color: #0a2a4a;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-size: 0.62rem; font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  border: 2px solid rgba(255,255,255,0.85);
+  line-height: 1;
+  text-align: center;
+  padding: 2px;
+}
+.pv-chip.pv-empty {
+  background: transparent;
+  border: 2px dashed rgba(255,255,255,0.5);
+  color: rgba(255,255,255,0.75);
+}
+.pv-chip-num { font-size: 0.7rem; }
+.pv-chip-name { font-size: 0.55rem; overflow: hidden; max-width: 40px; white-space: nowrap; text-overflow: ellipsis; }
+.pv-pos-lbl {
+  position: absolute;
+  bottom: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.58rem;
+  color: rgba(255,255,255,0.85);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  white-space: nowrap;
+}
+.pv-ball {
+  position: absolute;
+  width: 18px; height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff 55%, #222 100%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.pv-subs {
+  display: flex; gap: 0.35rem; margin-top: 0.5rem; flex-wrap: wrap;
+}
+.pv-sub {
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  color: #0a2a4a;
 }
 
 /* Chip */

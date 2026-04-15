@@ -327,7 +327,15 @@ async function renderTeamDashboard(user, teamId) {
     renderSquadTab(team, canEdit, players);
   } else if (activeTab === 'lineups') {
     const base = newLineupState();
-    const current = _pendingLineupLoad ? { ...base, ..._pendingLineupLoad, id: null } : base;
+    let current;
+    if (_pendingLineupLoad) {
+      current = { ...base, ..._pendingLineupLoad, id: null };
+      // If play provided custom pos/lbl, stash onto current
+      if (_pendingLineupLoad.pos) current.pos = _pendingLineupLoad.pos.map(p => [...p]);
+      if (_pendingLineupLoad.lbl) current.lbl = [..._pendingLineupLoad.lbl];
+    } else {
+      current = base;
+    }
     _pendingLineupLoad = null;
     editor = {
       mode: 'lineup',
@@ -618,6 +626,10 @@ let draggingLineIdx = null;
 let draggingLineStartY = 0;
 let draggingLinePct = 0;
 
+// Edit positions mode (session-only custom pos/lbl overrides)
+let _posEditMode = false;
+let _posDrag = null; // { idx, ox, oy } — offsets captured on pointerdown
+
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, players, lineups, plays, customFormations, current } = editor;
@@ -717,6 +729,17 @@ function renderLineupsTab() {
       <aside class="lineup-right">
         ${collapsibleCard('lineup-formation', 'Formation', `
           <div class="f-btns f-btns-col">${formationBtns}</div>
+          ${canEdit ? `
+            <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+              ${_posEditMode
+                ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
+                   <button class="btn-full" id="pos-edit-save">💾 Save as formation…</button>
+                   <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
+                   <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
+                : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
+              }
+            </div>
+          ` : ''}
         `)}
         ${collapsibleCard('lineup-players', 'Available players', `
           <div class="palette" id="palette">${paletteHtml}</div>
@@ -759,25 +782,34 @@ function renderPitch() {
   if (!formation) { slotsLayer.innerHTML = ''; return; }
 
   const pById = id => players.find(p => p.id === id);
+  // Session-custom overrides (from Edit positions mode or loaded play)
+  const pos = (Array.isArray(current.pos) && current.pos.length === formation.pos.length) ? current.pos : formation.pos;
+  const lbl = (Array.isArray(current.lbl) && current.lbl.length === formation.lbl.length) ? current.lbl : formation.lbl;
 
-  const slotsHtml = formation.pos.map(([x, y], i) => {
+  const editMode = !!_posEditMode;
+
+  const slotsHtml = pos.map(([x, y], i) => {
     const pid = current.slots[i];
     const p = pid ? pById(pid) : null;
-    const label = formation.lbl[i] || '';
+    const label = lbl[i] || '';
+    const editCls = editMode ? ' slot-pos-edit' : '';
     return `
-      <div class="slot ${p ? 'filled' : ''}"
+      <div class="slot ${p ? 'filled' : ''}${editCls}"
            style="left:${x}%; top:${y}%"
            data-slot="${i}">
-        ${p
-          ? `<div class="chip chip-slot" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-slot="${i}">
-              <div class="chip-inner">
-                ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
-                <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
-              </div>
-            </div>`
-          : `<div class="slot-label">${label}</div>`
+        ${editMode
+          ? `<div class="pos-handle" data-pos-handle="${i}" title="Drag to reposition"></div>
+             <div class="pos-edit-label" data-pos-label="${i}">${escapeHtml(label)}</div>`
+          : (p
+              ? `<div class="chip chip-slot" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-slot="${i}">
+                  <div class="chip-inner">
+                    ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                    <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+                  </div>
+                </div>`
+              : `<div class="slot-label">${label}</div>`)
         }
-        <div class="slot-pos-lbl">${label}</div>
+        ${!editMode ? `<div class="slot-pos-lbl">${label}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -854,6 +886,10 @@ function wireLineupEvents() {
     b.onclick = () => {
       if (!canEdit) return;
       editor.current.formation = b.dataset.formation;
+      // Changing formation resets any session-custom positions
+      delete editor.current.pos;
+      delete editor.current.lbl;
+      _posEditMode = false;
       // Drop any slotted players beyond the new formation's slot count
       const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
       Object.keys(editor.current.slots).forEach(k => {
@@ -955,11 +991,110 @@ function wireLineupEvents() {
     };
   });
 
+  // Edit positions toggle
+  const posToggle = document.getElementById('pos-edit-toggle');
+  if (posToggle) posToggle.onclick = () => {
+    const f = getFormation(editor.current.formation);
+    if (!f) return;
+    if (!Array.isArray(editor.current.pos)) editor.current.pos = f.pos.map(p => [...p]);
+    if (!Array.isArray(editor.current.lbl)) editor.current.lbl = [...f.lbl];
+    _posEditMode = true;
+    renderLineupsTab();
+  };
+
+  const posDone = document.getElementById('pos-edit-done');
+  if (posDone) posDone.onclick = () => {
+    _posEditMode = false;
+    renderLineupsTab();
+  };
+
+  const posCancel = document.getElementById('pos-edit-cancel');
+  if (posCancel) posCancel.onclick = () => {
+    // Revert to formation defaults for this session
+    delete editor.current.pos;
+    delete editor.current.lbl;
+    _posEditMode = false;
+    renderLineupsTab();
+  };
+
+  const posSave = document.getElementById('pos-edit-save');
+  if (posSave) posSave.onclick = async () => {
+    const baseName = editor.current.formation;
+    const suggested = baseName + ' (custom)';
+    const name = prompt('Save as custom formation — name:', suggested);
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const payload = {
+      team_id: editor.team.id,
+      name: trimmed,
+      data: {
+        pos: editor.current.pos.map(p => [...p]),
+        lbl: [...editor.current.lbl]
+      }
+    };
+    const { data, error } = await supabase.from('formations').insert(payload).select().single();
+    if (error) { alert('Save failed: ' + error.message); return; }
+    editor.customFormations = editor.customFormations || [];
+    editor.customFormations.unshift(data);
+    await logAudit(editor.team.id, 'formation', data.id, 'create', { name: trimmed, from: 'edit-positions' });
+    editor.current.formation = trimmed;
+    delete editor.current.pos;
+    delete editor.current.lbl;
+    _posEditMode = false;
+    renderLineupsTab();
+  };
+
+  if (canEdit && _posEditMode) wirePositionEditing();
+
   wireCollapsibles(tabEl);
 
-  if (canEdit) wireDragAndDrop();
-  if (canEdit) wireTacticsUI();
-  if (canEdit) wirePicker();
+  if (canEdit && !_posEditMode) wireDragAndDrop();
+  if (canEdit && !_posEditMode) wireTacticsUI();
+  if (canEdit && !_posEditMode) wirePicker();
+}
+
+function wirePositionEditing() {
+  const pitch = document.getElementById('pitch');
+  if (!pitch) return;
+
+  pitch.querySelectorAll('[data-pos-handle]').forEach(h => {
+    h.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const idx = parseInt(h.dataset.posHandle, 10);
+      _posDrag = { idx };
+      h.setPointerCapture(e.pointerId);
+    });
+    h.addEventListener('pointermove', (e) => {
+      if (!_posDrag || _posDrag.idx !== parseInt(h.dataset.posHandle, 10)) return;
+      const rect = pitch.getBoundingClientRect();
+      const x = Math.max(1, Math.min(99, ((e.clientX - rect.left) / rect.width) * 100));
+      const y = Math.max(1, Math.min(99, ((e.clientY - rect.top) / rect.height) * 100));
+      editor.current.pos[_posDrag.idx] = [x, y];
+      const slot = pitch.querySelector(`.slot[data-slot="${_posDrag.idx}"]`);
+      if (slot) { slot.style.left = x + '%'; slot.style.top = y + '%'; }
+    });
+    const finish = (e) => {
+      if (!_posDrag) return;
+      try { h.releasePointerCapture(e.pointerId); } catch {}
+      _posDrag = null;
+    };
+    h.addEventListener('pointerup', finish);
+    h.addEventListener('pointercancel', finish);
+  });
+
+  // Double-click a label to rename it
+  pitch.querySelectorAll('[data-pos-label]').forEach(lab => {
+    lab.addEventListener('dblclick', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const idx = parseInt(lab.dataset.posLabel, 10);
+      const current = editor.current.lbl[idx] || '';
+      const next = prompt('Label (e.g. CB, CM, ST):', current);
+      if (next === null) return;
+      editor.current.lbl[idx] = next.trim().toUpperCase().slice(0, 4);
+      renderLineupsTab();
+    });
+  });
 }
 
 // Track <details> open/close into collapsedCards so state survives rerenders
@@ -2096,7 +2231,7 @@ function renderPlaysTab() {
 
   tabEl.innerHTML = `
     <div style="display:flex;flex:1;gap:1rem;padding:1rem;overflow:hidden;min-height:0">
-      <aside style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem">
+      <aside style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem">
         <div class="card">
           <h4 style="margin:0 0 0.5rem">Saved plays</h4>
           <select id="plays-filter" style="width:100%;margin-bottom:0.5rem">
@@ -2107,16 +2242,143 @@ function renderPlaysTab() {
           <div class="lineup-list" style="max-height:60vh;overflow-y:auto">${listHtml}</div>
         </div>
       </aside>
-      <section style="flex:1;min-width:0;overflow-y:auto">
-        <div class="card">${detailHtml}</div>
-        <p class="muted" style="font-size:0.8rem;margin-top:0.75rem">
-          Plays are created on the <strong>Lineup</strong> tab — set up the pitch, then click <strong>★ Save as play…</strong>.
-        </p>
+      <section style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;gap:1rem;flex:1;min-height:0;overflow:hidden">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:0.5rem;overflow-y:auto">
+            <div class="pv-pitch" id="pv-pitch">
+              <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+              <canvas class="tactics-canvas" id="pv-tactics"></canvas>
+              <div class="pv-slots" id="pv-slots"></div>
+              <div class="pv-ball" id="pv-ball" style="display:none"></div>
+            </div>
+            <div class="pv-subs" id="pv-subs"></div>
+          </div>
+          <div style="width:300px;flex-shrink:0;overflow-y:auto">
+            <div class="card">${detailHtml}</div>
+            <p class="muted" style="font-size:0.78rem;margin-top:0.5rem">
+              Plays are created on the <strong>Lineup</strong> tab — set up the pitch, then click <strong>★ Save as play…</strong>.
+            </p>
+          </div>
+        </div>
       </section>
     </div>
   `;
 
+  if (selected) renderPlayPreview(selected);
   wirePlayEvents();
+}
+
+// Render a saved play into the Plays-tab preview pitch (read-only).
+function renderPlayPreview(play) {
+  const d = play.data || {};
+  const formation = getFormation(d.formation) || FORMATIONS['4-3-3'];
+  const pos = (Array.isArray(d.pos) && d.pos.length === formation.pos.length) ? d.pos : formation.pos;
+  const lbl = (Array.isArray(d.lbl) && d.lbl.length === formation.lbl.length) ? d.lbl : formation.lbl;
+  const slots = d.slots || {};
+  const subs = Array.isArray(d.subs) ? d.subs : [];
+  const players = editor.players || [];
+  const pById = id => players.find(p => p.id === id);
+
+  const slotsLayer = document.getElementById('pv-slots');
+  if (slotsLayer) {
+    slotsLayer.innerHTML = pos.map(([x, y], i) => {
+      const pid = slots[i];
+      const p = pid ? pById(pid) : null;
+      const label = lbl[i] || '';
+      const chipInner = p
+        ? `<div class="pv-chip">
+             ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
+             <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+           </div>`
+        : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
+      return `
+        <div class="pv-slot" style="left:${x}%; top:${y}%">
+          ${chipInner}
+          <div class="pv-pos-lbl">${escapeHtml(label)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Subs bar
+  const subsBar = document.getElementById('pv-subs');
+  if (subsBar) {
+    const items = subs.filter(Boolean).map(pid => {
+      const p = pById(pid);
+      if (!p) return '';
+      return `<div class="pv-sub">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
+    }).join('');
+    subsBar.innerHTML = items ? `<div class="muted" style="font-size:0.75rem;margin-right:0.35rem">Subs:</div>${items}` : '';
+  }
+
+  // Ball
+  const ball = document.getElementById('pv-ball');
+  if (ball) {
+    if (d.ballVisible && d.ballPos) {
+      ball.style.display = '';
+      ball.style.left = (d.ballPos.x ?? 50) + '%';
+      ball.style.top = (d.ballPos.y ?? 50) + '%';
+    } else {
+      ball.style.display = 'none';
+    }
+  }
+
+  // Arrows + zone lines on preview canvas
+  const tc = document.getElementById('pv-tactics');
+  if (tc) {
+    const host = document.getElementById('pv-pitch');
+    // Size canvas to host
+    const rect = host.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    tc.width = Math.max(1, Math.round(rect.width * dpr));
+    tc.height = Math.max(1, Math.round(rect.height * dpr));
+    tc.style.width = rect.width + 'px';
+    tc.style.height = rect.height + 'px';
+    const ctx = tc.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Zone lines
+    (d.zoneLines || [null, null]).forEach((y, i) => {
+      if (y === null || y === undefined) return;
+      const z = ZONES[i], py = y / 100 * h;
+      ctx.save();
+      ctx.setLineDash([10, 7]);
+      ctx.strokeStyle = z.color; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = z.color; ctx.globalAlpha = 0.92;
+      ctx.fillRect(w - 46, py - 13, 42, 16);
+      ctx.fillStyle = '#000'; ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(z.label, w - 25, py - 5);
+      ctx.restore();
+    });
+
+    // Arrows
+    (d.arrows || []).forEach(a => {
+      const x1 = a.x1 / 100 * w, y1 = a.y1 / 100 * h;
+      const x2 = a.x2 / 100 * w, y2 = a.y2 / 100 * h;
+      const hasBend = (typeof a.cx === 'number' && typeof a.cy === 'number');
+      const cxv = hasBend ? a.cx / 100 * w : 0;
+      const cyv = hasBend ? a.cy / 100 * h : 0;
+      const len = Math.hypot(x2 - x1, y2 - y1); if (len < 4) return;
+      const ang = hasBend ? Math.atan2(y2 - cyv, x2 - cxv) : Math.atan2(y2 - y1, x2 - x1);
+      const hl = Math.min(20, len * 0.38);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,220,0,0.95)';
+      ctx.fillStyle = 'rgba(255,220,0,0.95)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      if (hasBend) ctx.quadraticCurveTo(cxv, cyv, x2, y2); else ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - hl * Math.cos(ang - 0.4), y2 - hl * Math.sin(ang - 0.4));
+      ctx.lineTo(x2 - hl * Math.cos(ang + 0.4), y2 - hl * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+  }
 }
 
 function wirePlayEvents() {
@@ -2154,7 +2416,9 @@ function wirePlayEvents() {
       arrows: (d.arrows || []).map(a => ({ ...a })),
       zoneLines: [...(d.zoneLines || [null, null])],
       ballVisible: !!d.ballVisible,
-      ballPos: { ...(d.ballPos || { x: 50, y: 50 }) }
+      ballPos: { ...(d.ballPos || { x: 50, y: 50 }) },
+      pos: Array.isArray(d.pos) ? d.pos.map(r => [...r]) : null,
+      lbl: Array.isArray(d.lbl) ? [...d.lbl] : null
     };
     tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
     // Switch tab by simulating a click on the Lineups tab header
