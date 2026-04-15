@@ -664,13 +664,18 @@ async function renderParentView(lineupId, opts = {}) {
       ${showPitch ? `
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
-        <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
-          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
-          <div class="pv-slots" id="fix-slots"></div>
-          <div class="pv-ball" id="fix-ball" style="display:none"></div>
+        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0 auto;max-width:540px">
+          <div class="pitch" id="fix-pitch">
+            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="fix-slots-layer"></div>
+            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+            <div class="ball-el" id="fix-ball" style="display:none"></div>
+          </div>
+          <div class="subs-bar">
+            <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
+            <div class="subs-row" id="fix-subs-row"></div>
+          </div>
         </div>
-        <div class="pv-subs" id="fix-subs" style="margin-top:0.5rem"></div>
       </div>` : ''}
 
       <div class="pv-footer">
@@ -4960,13 +4965,18 @@ function renderFixturesTab() {
             ${selStatus === 'availability' ? '◐ Availability mode — parents only see the form, not this pitch.' : '○ Draft — not visible to parents yet.'}
           </div>
         ` : ''}
-        <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
-          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
-          <div class="pv-slots" id="fix-slots"></div>
-          <div class="pv-ball" id="fix-ball" style="display:none"></div>
+        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:540px">
+          <div class="pitch" id="fix-pitch">
+            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="fix-slots-layer"></div>
+            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+            <div class="ball-el" id="fix-ball" style="display:none"></div>
+          </div>
+          <div class="subs-bar">
+            <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
+            <div class="subs-row" id="fix-subs-row"></div>
+          </div>
         </div>
-        <div class="pv-subs" id="fix-subs"></div>
       ` : ''}
     </div>
   `;
@@ -5008,59 +5018,58 @@ function renderFixturePitch(lineup) {
   const players = editor.players || [];
   const pById = id => players.find(p => p.id === id);
 
-  const slotsLayer = document.getElementById('fix-slots');
+  // Render slots using the same markup as the Lineups page (.slot / .chip-slot)
+  const slotsLayer = document.getElementById('fix-slots-layer');
   if (slotsLayer) {
     slotsLayer.innerHTML = pos.map(([x, y], i) => {
       const pid = slots[i];
       const p = pid ? pById(pid) : null;
       const label = lbl[i] || '';
-      const chipInner = p
-        ? `<div class="pv-chip-wrap">
-             <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
-               ${p.photo_url ? '' : `${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}<div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>`}
+      const inner = p
+        ? `<div class="chip-wrap">
+             <div class="chip chip-slot ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+               ${p.photo_url ? '' : `<div class="chip-inner">
+                 ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                 <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+               </div>`}
              </div>
-             ${p.photo_url ? `<div class="pv-chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
+             ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
            </div>`
-        : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
+        : `<div class="slot-label">${escapeHtml(label)}</div>`;
       return `
-        <div class="pv-slot" style="left:${x}%; top:${y}%">
-          ${chipInner}
-          <div class="pv-pos-lbl">${escapeHtml(label)}</div>
-        </div>
-      `;
+        <div class="slot ${p ? 'filled' : ''}" style="left:${x}%; top:${y}%">
+          ${inner}
+          <div class="slot-pos-lbl">${escapeHtml(label)}</div>
+        </div>`;
     }).join('');
   }
 
-  const subsBar = document.getElementById('fix-subs');
-  if (subsBar) {
-    const filled = subs.filter(Boolean);
-    if (filled.length) {
-      const cells = filled.map(pid => {
-        const p = pById(pid);
-        if (!p) return '';
-        return `
-          <div class="sub-slot filled" data-player-id="${p.id}">
-            <div class="chip-wrap">
-              <div class="chip chip-sub ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
-                ${p.photo_url ? '' : `<div class="chip-inner">
-                  ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
-                  <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
-                </div>`}
-              </div>
-              ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
-            </div>
-          </div>`;
-      }).join('');
-      subsBar.innerHTML = `
-        <div class="subs-bar" style="margin-top:0.5rem">
-          <div class="subs-label">SUBSTITUTES (${filled.length})</div>
-          <div class="subs-row">${cells}</div>
-        </div>`;
-      subsBar.style.display = '';
-    } else {
-      subsBar.innerHTML = '';
-      subsBar.style.display = 'none';
+  // Render subs using the same .subs-row / .sub-slot markup — all MAX_SUBS cells (filled + empty)
+  const subsRow = document.getElementById('fix-subs-row');
+  const subsLabel = document.getElementById('fix-subs-label');
+  if (subsRow) {
+    const filledCount = subs.filter(Boolean).length;
+    const cells = [];
+    for (let i = 0; i < MAX_SUBS; i++) {
+      const pid = subs[i];
+      const p = pid ? pById(pid) : null;
+      cells.push(`
+        <div class="sub-slot ${p ? 'filled' : ''}" data-sub="${i}">
+          ${p
+            ? `<div class="chip-wrap">
+                 <div class="chip chip-sub ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+                   ${p.photo_url ? '' : `<div class="chip-inner">
+                     ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                     <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+                   </div>`}
+                 </div>
+                 ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
+               </div>`
+            : `<div class="sub-empty">+</div>`}
+        </div>`);
     }
+    subsRow.innerHTML = cells.join('');
+    if (subsLabel) subsLabel.textContent = `SUBSTITUTES (${filledCount}/${MAX_SUBS})`;
   }
 
   const ball = document.getElementById('fix-ball');
