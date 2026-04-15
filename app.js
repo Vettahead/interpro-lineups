@@ -123,7 +123,8 @@ async function logAudit(teamId, entityType, entityId, action, changes) {
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h.startsWith('team/')) return { name: 'team', teamId: h.slice(5) };
-  if (h.startsWith('view/')) return { name: 'view', lineupId: h.slice(5) };
+  if (h.startsWith('view/'))  return { name: 'view',  lineupId: h.slice(5),  mode: 'match' };
+  if (h.startsWith('avail/')) return { name: 'view',  lineupId: h.slice(6),  mode: 'avail' };
   return { name: 'home' };
 }
 window.addEventListener('hashchange', render);
@@ -141,7 +142,7 @@ async function render() {
   if (preRoute.name === 'view') {
     resetHeader();
     userBar.innerHTML = '';
-    await renderParentView(preRoute.lineupId);
+    await renderParentView(preRoute.lineupId, { mode: preRoute.mode });
     return;
   }
 
@@ -159,6 +160,8 @@ async function render() {
 
   // Prompt to set a password if they don't have one yet (common after magic-link invites)
   maybePromptSetPassword(session.user);
+  // Prompt to set a display name if the profile row is missing one
+  maybePromptDisplayName(session.user).catch(err => console.warn('display-name prompt failed', err));
 
   const route = currentRoute();
   if (route.name === 'team') {
@@ -189,19 +192,21 @@ function maybePromptSetPassword(user) {
   overlay.innerHTML = `
     <div class="picker-modal">
       <div class="picker-header">
-        <strong>Set your password</strong>
+        <strong>Welcome — finish setting up</strong>
       </div>
       <div class="picker-body">
         <p class="muted" style="margin:0 0 0.75rem;font-size:0.9rem">
-          Welcome! Before you continue, set a password so you can log in from any device.
+          Set a password so you can log in from any device, and a display name so other coaches and parents know who you are.
         </p>
-        <label>New password (min 8 characters)</label>
+        <label>Your name</label>
+        <input type="text" id="pw-name" autocomplete="name" placeholder="e.g. Chris Edwards" />
+        <label style="margin-top:0.5rem">New password (min 8 characters)</label>
         <input type="password" id="pw-new" autocomplete="new-password" />
         <label style="margin-top:0.5rem">Confirm password</label>
         <input type="password" id="pw-confirm" autocomplete="new-password" />
         <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end">
           <button class="btn-secondary" data-action="signout">Sign out</button>
-          <button class="primary" id="pw-save">Save password & continue</button>
+          <button class="primary" id="pw-save">Save & continue</button>
         </div>
         <div id="pw-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
       </div>
@@ -224,20 +229,90 @@ function maybePromptSetPassword(user) {
   };
   overlay.querySelector('#pw-save').onclick = async () => {
     const msg = overlay.querySelector('#pw-msg');
+    const name = (overlay.querySelector('#pw-name').value || '').trim();
     const pw = overlay.querySelector('#pw-new').value || '';
     const pw2 = overlay.querySelector('#pw-confirm').value || '';
+    if (name.length < 2) { msg.textContent = 'Please enter your name.'; msg.className = 'error'; return; }
     if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; msg.className = 'error'; return; }
     if (pw !== pw2) { msg.textContent = 'Passwords do not match.'; msg.className = 'error'; return; }
     msg.textContent = 'Saving…'; msg.className = 'muted';
     const { error } = await supabase.auth.updateUser({
       password: pw,
-      data: { password_set: true }
+      data: { password_set: true, full_name: name }
     });
     if (error) { msg.textContent = 'Failed: ' + error.message; msg.className = 'error'; return; }
-    msg.textContent = '✓ Password saved.'; msg.className = 'ok';
+    // Mirror to profiles row so other coaches see the name immediately
+    await supabase.from('profiles').upsert({ id: user.id, email: user.email, full_name: name }, { onConflict: 'id' });
+    msg.textContent = '✓ Saved.'; msg.className = 'ok';
     setTimeout(close, 700);
   };
-  setTimeout(() => overlay.querySelector('#pw-new')?.focus(), 20);
+  setTimeout(() => overlay.querySelector('#pw-name')?.focus(), 20);
+}
+
+// For users who already have a password but never set a display name
+// (e.g. early signups before the name field was required). Blocking modal,
+// dismiss only by entering a name or signing out.
+async function maybePromptDisplayName(user) {
+  if (!user) return;
+  // Don't stack with the password modal
+  if (document.querySelector('.picker-overlay[data-pw-prompt]')) return;
+  if (document.querySelector('.picker-overlay[data-name-prompt]')) return;
+  // user_metadata can populate quickly — short-circuit if it already has a name
+  const metaName = (user.user_metadata?.full_name || '').trim();
+  // Look up the profiles row
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', user.id)
+    .maybeSingle();
+  const profName = (prof?.full_name || '').trim();
+  if (profName.length >= 2) return; // already set
+  // If only metadata has it, mirror it to profiles and we're done
+  if (metaName.length >= 2) {
+    await supabase.from('profiles').upsert({ id: user.id, email: user.email, full_name: metaName }, { onConflict: 'id' });
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  overlay.setAttribute('data-name-prompt', '1');
+  overlay.innerHTML = `
+    <div class="picker-modal">
+      <div class="picker-header"><strong>Add your name</strong></div>
+      <div class="picker-body">
+        <p class="muted" style="margin:0 0 0.75rem;font-size:0.9rem">
+          We need a display name so other coaches and parents know who you are. This shows up next to your name in team messages.
+        </p>
+        <label>Your name</label>
+        <input type="text" id="dn-name" autocomplete="name" placeholder="e.g. Chris Edwards" />
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end">
+          <button class="btn-secondary" data-action="signout">Sign out</button>
+          <button class="primary" id="dn-save">Save</button>
+        </div>
+        <div id="dn-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) e.stopPropagation(); });
+  const blockKeys = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); } };
+  document.addEventListener('keydown', blockKeys, true);
+  const close = () => { document.removeEventListener('keydown', blockKeys, true); overlay.remove(); };
+
+  overlay.querySelector('[data-action=signout]').onclick = async () => { await supabase.auth.signOut(); close(); };
+  overlay.querySelector('#dn-save').onclick = async () => {
+    const msg = overlay.querySelector('#dn-msg');
+    const name = (overlay.querySelector('#dn-name').value || '').trim();
+    if (name.length < 2) { msg.textContent = 'Please enter your name.'; msg.className = 'error'; return; }
+    msg.textContent = 'Saving…'; msg.className = 'muted';
+    const { error: e1 } = await supabase.auth.updateUser({ data: { full_name: name } });
+    if (e1) { msg.textContent = 'Failed: ' + e1.message; msg.className = 'error'; return; }
+    const { error: e2 } = await supabase.from('profiles').upsert({ id: user.id, email: user.email, full_name: name }, { onConflict: 'id' });
+    if (e2) { msg.textContent = 'Failed: ' + e2.message; msg.className = 'error'; return; }
+    msg.textContent = '✓ Saved.'; msg.className = 'ok';
+    setTimeout(close, 700);
+  };
+  setTimeout(() => overlay.querySelector('#dn-name')?.focus(), 20);
 }
 
 // Look up and claim any pending invites for this user's email.
@@ -285,8 +360,8 @@ function renderAuth() {
       <h2 id="auth-title">Log in</h2>
       <form id="auth-form">
         <div id="name-field" style="display:none">
-          <label>Full name</label>
-          <input type="text" id="full_name" />
+          <label>Your name</label>
+          <input type="text" id="full_name" autocomplete="name" placeholder="e.g. Chris Edwards" />
         </div>
         <label>Email</label>
         <input type="email" id="email" required />
@@ -330,11 +405,16 @@ function renderAuth() {
     const full_name = document.getElementById('full_name')?.value.trim();
 
     if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({
+      if (!full_name || full_name.length < 2) { errEl.textContent = 'Please enter your name.'; return; }
+      const { data, error } = await supabase.auth.signUp({
         email, password,
         options: { data: { full_name } }
       });
       if (error) { errEl.textContent = error.message; return; }
+      // Mirror to profiles row so coach lists pick it up immediately
+      if (data?.user?.id) {
+        await supabase.from('profiles').upsert({ id: data.user.id, email, full_name }, { onConflict: 'id' });
+      }
       okEl.textContent = 'Account created. You can log in now.';
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -523,11 +603,15 @@ async function renderParentView(lineupId, opts = {}) {
   const oppName  = escapeHtml(lineup.opponent || 'TBD');
 
   const status = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
-  const isAvailabilityMode = status === 'availability';
+  const viewMode = opts.mode === 'avail' ? 'avail' : 'match';
+  // Show availability form only on the 'avail' route, and only when the lineup is collecting availability or already published
+  const showAvailability = viewMode === 'avail' && (status === 'availability' || status === 'published');
+  // Show pitch only on the 'match' route, and only when published
+  const showPitch = viewMode === 'match' && status === 'published';
 
   // Fetch current availability responses (anon-readable) so we can prefill
   let availability = [];
-  if (isAvailabilityMode || status === 'published') {
+  if (showAvailability) {
     const { data: avail } = await supabase
       .from('player_availability')
       .select('*')
@@ -571,9 +655,13 @@ async function renderParentView(lineupId, opts = {}) {
         </div>
       ` : ''}
 
-      ${(isAvailabilityMode || status === 'published') ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
+      ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
 
-      ${status === 'published' ? `
+      ${viewMode === 'avail' && status === 'draft' ? `
+        <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
+      ` : ''}
+
+      ${showPitch ? `
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
@@ -592,16 +680,16 @@ async function renderParentView(lineupId, opts = {}) {
     </div>
   `;
 
-  if (isAvailabilityMode || status === 'published') {
+  if (showAvailability) {
     wireAvailabilityForm(lineup, players, availByPlayer);
   }
-  if (status === 'published') {
+  if (showPitch) {
     renderFixturePitch(lineup);
   }
 
   document.getElementById('pv-refresh')?.addEventListener('click', () => {
     _parentViewLastHash = null;
-    renderParentView(lineupId);
+    renderParentView(lineupId, { mode: viewMode });
   });
 
   document.getElementById('pv-add-cal')?.addEventListener('click', () => {
@@ -622,7 +710,7 @@ async function renderParentView(lineupId, opts = {}) {
 
   // Re-draw on resize so tactics canvas stays crisp
   window.addEventListener('resize', () => {
-    if (currentRoute().name === 'view' && status === 'published') renderFixturePitch(lineup);
+    if (currentRoute().name === 'view' && showPitch) renderFixturePitch(lineup);
   }, { once: false });
 
   // Start polling (only on first / non-poll render)
@@ -631,7 +719,7 @@ async function renderParentView(lineupId, opts = {}) {
       if (currentRoute().name !== 'view') {
         clearInterval(_parentViewPoll); _parentViewPoll = null; return;
       }
-      renderParentView(lineupId, { fromPoll: true }).catch(e => console.warn('poll failed', e));
+      renderParentView(lineupId, { fromPoll: true, mode: viewMode }).catch(e => console.warn('poll failed', e));
     }, 15000);
   }
 }
@@ -1966,6 +2054,81 @@ function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
 }
 
+// ---------- WhatsApp message builder ----------
+// Produces the canned "new match added" message Chris pastes into the team chat.
+// Pulls coach names from profiles for the "message X or Y" sign-off.
+async function buildWhatsAppMessage(current, team) {
+  const opp = (current.opponent || 'TBC').trim();
+  const haLbl = current.home_away === 'away' ? 'Away' : 'Home';
+  const teamName = team?.name || 'Team';
+  const dateStr = current.game_date ? formatDate(current.game_date) : 'TBC';
+  const ko = current.kickoff_time || 'TBC';
+  const arr = current.arrival_time || 'TBC';
+  const v = effectiveVenue(current, team);
+  const venueLine = (v.name || v.postcode)
+    ? `${v.name || ''}${v.name && v.postcode ? ' · ' : ''}${v.postcode || ''}`
+    : 'TBC';
+  // Map URL: prefer lat/lng, fall back to postcode, then venue name
+  let mapsUrl = '';
+  if (v.lat != null && v.lng != null) {
+    mapsUrl = `https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`;
+  } else if (v.postcode) {
+    mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.postcode)}`;
+  } else if (v.name) {
+    mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.name)}`;
+  }
+
+  const base = location.origin + location.pathname;
+  const availUrl = `${base}#/avail/${current.id}`;
+  const matchUrl = `${base}#/view/${current.id}`;
+
+  // Look up coach + admin names from profiles
+  let coachNames = [];
+  if (team?.id) {
+    const { data: members } = await supabase
+      .from('team_members')
+      .select('user_id, role')
+      .eq('team_id', team.id)
+      .in('role', ['admin', 'coach']);
+    const ids = (members || []).map(m => m.user_id);
+    if (ids.length) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', ids);
+      coachNames = (profs || [])
+        .map(p => (p.full_name || '').trim() || (p.email ? p.email.split('@')[0] : ''))
+        .filter(Boolean);
+    }
+  }
+  const coachList = coachNames.length
+    ? coachNames.map(n => `*${n}*`).join(' or ')
+    : '*your coach*';
+
+  return [
+    'Hey all 👋',
+    '',
+    `New match added — *${teamName} vs ${opp}* (${haLbl})`,
+    `📅 ${dateStr}`,
+    `🚌 Be there for *${arr}* for warm-ups & team talk`,
+    `⚽ Kick off *${ko}*`,
+    `📍 ${venueLine}`,
+    mapsUrl ? `🗺️ ${mapsUrl}` : null,
+    '',
+    'Two links — tap whichever you need:',
+    '',
+    '🟡 *Availability*',
+    availUrl,
+    '',
+    '🟢 *Match info*',
+    matchUrl,
+    '',
+    `The Availability link asks for your child's *parent code* the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
+    '',
+    'Cheers!'
+  ].filter(l => l !== null).join('\n');
+}
+
 // ---------- Match details (summary + modal) ----------
 function effectiveVenue(current, team) {
   if (current.home_away === 'home' && team) {
@@ -2019,8 +2182,9 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-availability-link" style="${availStyle}" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>🔗 Copy availability link for parents</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-lineup-link" style="${lineupStyle}" ${draftDisabled ? 'disabled title="Switch to Show lineup to share"' : ''}>🔗 Copy match link for parents</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-availability-link" style="${availStyle}" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>🔗 Availability link</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-lineup-link" style="${lineupStyle}" ${draftDisabled ? 'disabled title="Switch to Show lineup to share"' : ''}>🔗 Match link</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-whatsapp" style="margin-top:0.35rem;background:#25D366;color:#fff;border:none;font-weight:600" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup first"' : ''}>💬 Copy WhatsApp message</button>` : ''}
     ${current.id && current.game_date ? `<button class="btn-full" id="add-to-calendar" style="margin-top:0.35rem;background:#fff;color:var(--text);border:1px solid var(--border);font-weight:500">📅 Add to calendar</button>` : ''}
     ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state.</div>` : ''}
     ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
@@ -2901,11 +3065,11 @@ function wireLineupEvents() {
   if (openMdBtn) openMdBtn.onclick = openMatchDetailsModal;
 
   // Copy share links for parents (availability + match)
-  const copyShareUrl = async (label) => {
+  const copyShareUrl = async (label, route) => {
     const id = editor?.current?.id;
     if (!id) return;
     const base = location.origin + location.pathname;
-    const shareUrl = `${base}#/view/${id}`;
+    const shareUrl = `${base}#/${route}/${id}`;
     const msg = document.getElementById('save-msg');
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -2917,11 +3081,24 @@ function wireLineupEvents() {
     setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
   };
   const availBtn = document.getElementById('copy-availability-link');
-  if (availBtn) availBtn.onclick = () => copyShareUrl('Availability link');
+  if (availBtn) availBtn.onclick = () => copyShareUrl('Availability link', 'avail');
   const matchBtn = document.getElementById('copy-lineup-link');
-  if (matchBtn) matchBtn.onclick = () => copyShareUrl('Match link');
+  if (matchBtn) matchBtn.onclick = () => copyShareUrl('Match link', 'view');
   const calBtn = document.getElementById('add-to-calendar');
   if (calBtn) calBtn.onclick = () => downloadLineupIcs(editor.current, editor.team, editor.current.id);
+  const waBtn = document.getElementById('copy-whatsapp');
+  if (waBtn) waBtn.onclick = async () => {
+    const msg = document.getElementById('save-msg');
+    try {
+      const text = await buildWhatsAppMessage(editor.current, editor.team);
+      await navigator.clipboard.writeText(text);
+      if (msg) { msg.textContent = '✓ WhatsApp message copied — paste into the team chat'; msg.className = 'ok'; }
+    } catch (e) {
+      console.warn('whatsapp build failed', e);
+      if (msg) { msg.textContent = 'Failed: ' + (e.message || 'could not build message'); msg.className = 'error'; }
+    }
+    setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 4000);
+  };
 
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
