@@ -4945,19 +4945,19 @@ function renderFixturesTab() {
 
   tabEl.innerHTML = `
     <div class="fixtures-single">
-      <div style="display:flex;flex-direction:column;gap:0.5rem;max-width:560px;margin-bottom:1rem">
+      <div style="display:flex;flex-direction:column;gap:0.35rem;max-width:560px;margin-bottom:0.5rem">
         ${collapsibleCard('fix-calendar', 'Calendar', calendarBody)}
         ${collapsibleCard('fix-upcoming', 'Matches', upcomingBody)}
       </div>
       ${headline}
       ${selected && canEdit ? `
-        <div class="fix-share-wrap" style="max-width:560px;margin:0 0 0.75rem">
+        <div class="fix-share-wrap" style="max-width:560px;margin:0 0 0.4rem">
           <button class="primary btn-full" id="fix-share-link" style="background:var(--blue-2);color:#fff;border:none;padding:0.65rem 0.8rem;font-weight:600">${selShareLabel}</button>
           <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">${selShareable ? '' : '⚠ Lineup is in Draft — link won\'t work for parents until you switch to Availability or Show lineup.'}</div>
         </div>
       ` : ''}
       ${selected && canEdit && selShareable ? `
-        <div id="fix-availability-panel" style="max-width:560px;margin-bottom:0.75rem"></div>
+        <div id="fix-availability-panel" style="max-width:560px;margin-bottom:0.4rem"></div>
       ` : ''}
       ${selected ? `
         ${selStatus !== 'published' ? `
