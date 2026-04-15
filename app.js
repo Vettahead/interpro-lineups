@@ -2064,9 +2064,9 @@ function _icsAddMinutes(dateStr, timeStr, mins) {
   const pad = n => String(n).padStart(2, '0');
   return `${dt.getUTCFullYear()}${pad(dt.getUTCMonth()+1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}00`;
 }
-function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
+function _buildCalendarPayload(lineupOrCurrent, team, lineupId) {
   const c = lineupOrCurrent;
-  if (!c.game_date) { alert('No game date set — open Arrange match and add one first.'); return; }
+  if (!c.game_date) return null;
   const v = effectiveVenue(c, team);
   const opponent = (c.opponent || '').trim() || 'match';
   const ko = c.kickoff_time || '';
@@ -2085,6 +2085,7 @@ function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
     locParts ? `Venue: ${locParts}` : '',
     (c.notes || '').trim() ? `Notes: ${c.notes.trim()}` : ''
   ].filter(Boolean).join('\n');
+  const summary = `${teamName} vs ${opponent} (${haLbl})`;
   const uid = `lineup-${lineupId || c.id || Date.now()}@interpro`;
   const ics = [
     'BEGIN:VCALENDAR',
@@ -2097,20 +2098,109 @@ function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
     `DTSTAMP:${stamp}`,
     `DTSTART;TZID=Europe/London:${dtStart}`,
     `DTEND;TZID=Europe/London:${dtEnd}`,
-    `SUMMARY:${_icsEscape(`${teamName} vs ${opponent} (${haLbl})`)}`,
+    `SUMMARY:${_icsEscape(summary)}`,
     `LOCATION:${_icsEscape(locParts)}`,
     `DESCRIPTION:${_icsEscape(desc)}`,
     'END:VEVENT',
     'END:VCALENDAR'
   ].join('\r\n');
-  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  return { ics, summary, desc, locParts, dtStart, dtEnd, teamName, opponent, gameDate: c.game_date };
+}
+
+// Convert YYYYMMDDTHHMMSS (London local) → UTC YYYYMMDDTHHMMSSZ for Google Calendar URL
+function _londonLocalToUtcStamp(local) {
+  // local: '20260419T100000'
+  const Y = +local.slice(0,4), M = +local.slice(4,6), D = +local.slice(6,8);
+  const h = +local.slice(9,11), m = +local.slice(11,13);
+  // Determine BST offset: UK BST runs last Sun March → last Sun October
+  const lastSun = (y, mo) => { const d = new Date(Date.UTC(y, mo, 0)); return d.getUTCDate() - d.getUTCDay(); };
+  const bstStart = Date.UTC(Y, 2, lastSun(Y, 3), 1); // last Sun March 01:00 UTC
+  const bstEnd   = Date.UTC(Y, 9, lastSun(Y,10), 1); // last Sun October 01:00 UTC
+  const localAsUtc = Date.UTC(Y, M-1, D, h, m);
+  const offsetHours = (localAsUtc >= bstStart && localAsUtc < bstEnd) ? 1 : 0;
+  const dt = new Date(localAsUtc - offsetHours * 3600 * 1000);
+  const p = n => String(n).padStart(2,'0');
+  return `${dt.getUTCFullYear()}${p(dt.getUTCMonth()+1)}${p(dt.getUTCDate())}T${p(dt.getUTCHours())}${p(dt.getUTCMinutes())}00Z`;
+}
+
+function _googleCalendarUrl(payload) {
+  const s = _londonLocalToUtcStamp(payload.dtStart);
+  const e = _londonLocalToUtcStamp(payload.dtEnd);
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: payload.summary,
+    dates: `${s}/${e}`,
+    details: payload.desc,
+    location: payload.locParts || '',
+    ctz: 'Europe/London'
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function _downloadIcs(payload) {
+  const blob = new Blob([payload.ics], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${teamName.replace(/[^\w-]+/g,'_')}-vs-${opponent.replace(/[^\w-]+/g,'_')}-${c.game_date}.ics`;
+  a.download = `${payload.teamName.replace(/[^\w-]+/g,'_')}-vs-${payload.opponent.replace(/[^\w-]+/g,'_')}-${payload.gameDate}.ics`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+}
+
+// iOS / Safari: opening the ics inline triggers the native "Add to Calendar" prompt
+function _openIcsInline(payload) {
+  const blob = new Blob([payload.ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  // Use location assignment (best for iOS Safari → Calendar.app hand-off)
+  window.location.href = url;
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
+  const payload = _buildCalendarPayload(lineupOrCurrent, team, lineupId);
+  if (!payload) { alert('No game date set — open Arrange match and add one first.'); return; }
+
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Mac') && 'ontouchend' in document);
+  const isAndroid = /Android/.test(ua);
+
+  // Show chooser modal — "just works" on every platform with one tap
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:360px;width:92vw">
+      <div class="map-modal-header">
+        <strong>Add to calendar</strong>
+        <button class="btn-secondary" id="cal-close" type="button">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:1rem;display:flex;flex-direction:column;gap:0.5rem">
+        <button class="primary btn-full" id="cal-google" type="button">📆 Google Calendar</button>
+        <button class="btn-full" id="cal-apple" type="button">🍎 Apple Calendar${isIOS ? ' (default on this device)' : ''}</button>
+        <button class="btn-full" id="cal-outlook" type="button">📧 Outlook / Download .ics</button>
+        <p class="muted" style="font-size:0.75rem;margin:0.5rem 0 0">
+          ${isIOS ? 'On iPhone/iPad, Apple Calendar will open with the event ready to save.'
+                  : isAndroid ? 'On Android, Google Calendar opens the event — tap Save.'
+                  : 'On a PC, pick your preferred calendar. Outlook/Apple users get a .ics file that opens in the default calendar app.'}
+        </p>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#cal-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#cal-google').onclick = () => {
+    window.open(_googleCalendarUrl(payload), '_blank', 'noopener');
+    close();
+  };
+  overlay.querySelector('#cal-apple').onclick = () => {
+    close();
+    _openIcsInline(payload);
+  };
+  overlay.querySelector('#cal-outlook').onclick = () => {
+    _downloadIcs(payload);
+    close();
+  };
 }
 
 // ---------- WhatsApp message builder ----------
