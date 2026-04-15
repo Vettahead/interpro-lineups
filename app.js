@@ -462,6 +462,8 @@ async function renderTeamDashboard(user, teamId) {
     tabsEl.querySelectorAll('.h-tab[data-tab]').forEach(b => {
       b.onclick = () => {
         activeTab = b.dataset.tab;
+        // Reset card open/closed state so every tab visit starts clean
+        openCards.clear();
         renderTeamDashboard(user, teamId);
       };
     });
@@ -855,9 +857,10 @@ function getFormation(name) {
   return null;
 }
 
-// Collapsible card wrapper (uses <details> so browser handles state)
+// Collapsible card wrapper (uses <details> so browser handles state).
+// All cards start closed by default; user toggling them persists during session.
 function collapsibleCard(id, title, bodyHtml) {
-  const open = !collapsedCards.has(id);
+  const open = openCards.has(id);
   return `
     <details class="card collapsible" data-card="${id}" ${open ? 'open' : ''}>
       <summary class="card-title">${escapeHtml(title)}<span class="chev">▾</span></summary>
@@ -878,8 +881,9 @@ function allFormations(customFormations) {
   return out;
 }
 
-// Collapsed-card state keyed by tab+card-id, persists across renders
-const collapsedCards = new Set();
+// Open-card state keyed by card-id, persists across renders within the session.
+// Cards start closed by default; clicking a card adds it to this set.
+const openCards = new Set();
 
 // Formation-edit transient state
 let formationEdit = null; // { baseName, name, pos: [[x,y],...], lbl: [...], editingId: null }
@@ -1658,13 +1662,13 @@ function wirePositionEditing() {
   });
 }
 
-// Track <details> open/close into collapsedCards so state survives rerenders
+// Track <details> open/close into openCards so state survives rerenders
 function wireCollapsibles(root) {
   root.querySelectorAll('details.collapsible[data-card]').forEach(d => {
     d.addEventListener('toggle', () => {
       const id = d.dataset.card;
-      if (d.open) collapsedCards.delete(id);
-      else collapsedCards.add(id);
+      if (d.open) openCards.add(id);
+      else openCards.delete(id);
     });
   });
 }
@@ -2912,8 +2916,8 @@ function renderPlaysTab() {
   })() : `<p class="muted" style="padding:0.5rem 0">Select a play on the left.</p>`;
 
   tabEl.innerHTML = `
-    <div style="display:flex;flex:1;gap:1rem;padding:1rem;overflow:hidden;min-height:0">
-      <aside style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem">
+    <div class="plays-layout">
+      <aside class="plays-side">
         <div class="card">
           <h4 style="margin:0 0 0.5rem">Saved plays</h4>
           <select id="plays-filter" style="width:100%;margin-bottom:0.5rem">
@@ -2924,9 +2928,9 @@ function renderPlaysTab() {
           <div class="lineup-list" style="max-height:60vh;overflow-y:auto">${listHtml}</div>
         </div>
       </aside>
-      <section style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
-        <div style="display:flex;gap:1rem;flex:1;min-height:0;overflow:hidden">
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:0.5rem;overflow-y:auto">
+      <section class="plays-main">
+        <div class="plays-main-inner">
+          <div class="plays-preview">
             <div class="pv-pitch" id="pv-pitch">
               <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
               <canvas class="tactics-canvas" id="pv-tactics"></canvas>
@@ -2935,7 +2939,7 @@ function renderPlaysTab() {
             </div>
             <div class="pv-subs" id="pv-subs"></div>
           </div>
-          <div style="width:300px;flex-shrink:0;overflow-y:auto">
+          <div class="plays-details">
             <div class="card">${detailHtml}</div>
             <p class="muted" style="font-size:0.78rem;margin-top:0.5rem">
               Plays are created on the <strong>Lineup</strong> tab — set up the pitch, then click <strong>★ Save as play…</strong>.
@@ -3224,8 +3228,8 @@ function renderFixturesTab() {
     : '';
 
   tabEl.innerHTML = `
-    <div style="display:flex;gap:1rem;padding:1rem;flex:1;min-height:0;overflow:hidden">
-      <aside style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:0.75rem;overflow-y:auto">
+    <div class="fixtures-layout">
+      <aside class="fixtures-side">
         <div class="card" style="padding:0.5rem">
           <div class="cal-header">
             <button class="cal-nav" id="cal-prev" aria-label="Previous month">‹</button>
@@ -3250,7 +3254,7 @@ function renderFixturesTab() {
         </div>
       </aside>
 
-      <section style="flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto">
+      <section class="fixtures-main">
         ${headline}
         ${selected ? `
           <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
