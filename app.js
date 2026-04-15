@@ -701,18 +701,58 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
   });
 }
 
-// ---------- Coach availability responses panel ----------
+// ---------- Coach availability responses panel (button + modal) ----------
 async function renderCoachAvailabilityPanel(opts = {}) {
   const containerId = opts.containerId || 'availability-panel';
   const lineupId = opts.lineupId || editor?.current?.id;
-  const cardKey = opts.cardKey || 'coach-avail';
   const panelEl = document.getElementById(containerId);
   if (!panelEl || !lineupId) return;
+  // Fetch just for the tally so the button shows a meaningful summary.
+  const { data: avail, error } = await supabase
+    .from('player_availability')
+    .select('player_id,status')
+    .eq('lineup_id', lineupId);
+  if (error) { panelEl.innerHTML = `<div class="error" style="font-size:0.75rem">${escapeHtml(error.message)}</div>`; return; }
+  const byPlayer = Object.fromEntries((avail || []).map(a => [a.player_id, a]));
+  const players = (editor.players || []);
+  const tally = { available: 0, maybe: 0, unavailable: 0, none: 0 };
+  players.forEach(p => {
+    const s = byPlayer[p.id]?.status;
+    if (s === 'available' || s === 'maybe' || s === 'unavailable') tally[s]++;
+    else tally.none++;
+  });
+  panelEl.innerHTML = `
+    <button type="button" class="btn-full" id="${containerId}-open" style="text-align:left;padding:0.5rem 0.6rem;font-size:0.85rem;margin-bottom:0">
+      📋 Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
+    </button>`;
+  panelEl.querySelector(`#${containerId}-open`).onclick = () => openAvailabilityModal(lineupId);
+}
+
+async function openAvailabilityModal(lineupId) {
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:520px;height:auto;max-height:90vh">
+      <div class="map-modal-header">
+        <strong>Availability responses</strong>
+        <button class="btn-secondary" id="avm-close" type="button">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:0.8rem;overflow-y:auto" id="avm-body">
+        <div class="muted" style="padding:0.5rem">Loading…</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#avm-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const bodyEl = overlay.querySelector('#avm-body');
   const { data: avail, error } = await supabase
     .from('player_availability')
     .select('*')
     .eq('lineup_id', lineupId);
-  if (error) { panelEl.innerHTML = `<div class="error" style="font-size:0.75rem">${escapeHtml(error.message)}</div>`; return; }
+  if (error) { bodyEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; return; }
   const byPlayer = Object.fromEntries((avail || []).map(a => [a.player_id, a]));
   const players = [...(editor.players || [])].sort((a, b) => {
     const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
@@ -727,32 +767,32 @@ async function renderCoachAvailabilityPanel(opts = {}) {
   });
   const rowHtml = players.map(p => {
     const r = byPlayer[p.id];
+    const photo = p.photo_url
+      ? `<div style="width:32px;height:32px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
+      : `<div style="width:32px;height:32px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:600;color:#666;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
     const badge = !r
       ? `<span style="color:#888">— no reply</span>`
-      : r.status === 'available'   ? `<span style="color:#2a7">✅ available</span>`
-      : r.status === 'maybe'       ? `<span style="color:#b88800">🤔 maybe</span>`
-      : r.status === 'unavailable' ? `<span style="color:#c33">❌ unavailable</span>`
+      : r.status === 'available'   ? `<span style="color:#2a7;font-weight:600">✅ Available</span>`
+      : r.status === 'maybe'       ? `<span style="color:#b88800;font-weight:600">🤔 Maybe</span>`
+      : r.status === 'unavailable' ? `<span style="color:#c33;font-weight:600">❌ Unavailable</span>`
       : escapeHtml(r.status);
     const meta = r
-      ? `<span class="muted" style="font-size:0.7rem"> — ${r.responded_by ? escapeHtml(r.responded_by) : 'anon'}${r.note ? ' · ' + escapeHtml(r.note) : ''}</span>`
+      ? `<div class="muted" style="font-size:0.72rem;margin-top:0.15rem">${r.responded_by ? escapeHtml(r.responded_by) : 'anon'}${r.note ? ' · ' + escapeHtml(r.note) : ''}${r.responded_at ? ' · ' + new Date(r.responded_at).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : ''}</div>`
       : '';
-    return `<div style="padding:0.25rem 0;font-size:0.8rem;border-top:1px solid #f0f0f0">
-      <strong>#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</strong> — ${badge}${meta}
+    return `<div style="display:flex;gap:0.6rem;align-items:center;padding:0.5rem 0;border-top:1px solid #f0f0f0">
+      ${photo}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:0.9rem"><strong>#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</strong> — ${badge}</div>
+        ${meta}
+      </div>
     </div>`;
   }).join('');
-  panelEl.innerHTML = `
-    <details class="collapsible-card" ${openCards.has(cardKey) ? 'open' : ''} data-card="${cardKey}">
-      <summary style="cursor:pointer;padding:0.4rem 0.5rem;background:#f7f7f7;border-radius:4px;font-size:0.8rem;font-weight:600">
-        Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
-      </summary>
-      <div style="padding:0.4rem 0.2rem">${rowHtml || '<div class="muted" style="font-size:0.8rem;padding:0.4rem 0">No players.</div>'}</div>
-    </details>`;
-  const det = panelEl.querySelector('details');
-  if (det) {
-    det.addEventListener('toggle', () => {
-      if (det.open) openCards.add(cardKey); else openCards.delete(cardKey);
-    });
-  }
+  bodyEl.innerHTML = `
+    <div style="padding:0.5rem 0.2rem 0.75rem;border-bottom:1px solid #eee;font-size:0.85rem">
+      <strong>Tally:</strong> ✅ ${tally.available} available · 🤔 ${tally.maybe} maybe · ❌ ${tally.unavailable} unavailable · — ${tally.none} no reply
+    </div>
+    ${rowHtml || '<div class="muted" style="padding:0.75rem">No players in squad.</div>'}
+  `;
 }
 
 // ---------- Team dashboard ----------
@@ -1637,7 +1677,7 @@ function matchSummaryHtml(current, team, canEdit) {
       status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
     : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
     :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
-  const shareLabel = status === 'availability' ? '🔗 Copy availability link for parents' : '🔗 Copy share link for parents';
+  const shareLabel = '🔗 Copy availability link for parents';
   return `
     <div style="display:flex;flex-direction:column;gap:0.15rem">
       <div style="font-weight:600">${oppStr}</div>
@@ -2036,11 +2076,55 @@ function renderLineupsTab() {
   // Auto-save any changes once a published lineup is open
   scheduleAutosaveIfPublished();
 
-  // Coach-facing availability responses panel (only when in availability/published mode)
+  // Coach-facing availability responses panel + chip decorations (when in availability/published mode)
   const curStatus = current?.lineup_status || (current?.published ? 'published' : 'draft');
   if (current?.id && (curStatus === 'availability' || curStatus === 'published')) {
     renderCoachAvailabilityPanel();
+    ensureAvailabilityForLineup(current.id).then(() => applyAvailabilityDecorations());
+  } else {
+    editor.availability = {};
+    applyAvailabilityDecorations(); // clears any stale rings
   }
+}
+
+// Fetch + cache availability per lineup id. Only re-fetches when the lineup changes.
+async function ensureAvailabilityForLineup(lineupId) {
+  if (!lineupId) { editor.availability = {}; return; }
+  if (editor._availabilityFor === lineupId && editor.availability) return;
+  editor._availabilityFor = lineupId;
+  const { data, error } = await supabase
+    .from('player_availability')
+    .select('player_id,status')
+    .eq('lineup_id', lineupId);
+  if (error) { console.warn('availability fetch failed', error); editor.availability = {}; return; }
+  editor.availability = Object.fromEntries((data || []).map(a => [a.player_id, a.status]));
+}
+
+// Apply/refresh gold/red/maybe markers on every chip in the current tab.
+function applyAvailabilityDecorations() {
+  const map = editor?.availability || {};
+  document.querySelectorAll('[data-player-id]').forEach(chip => {
+    const pid = chip.dataset.playerId;
+    const s = map[pid];
+    // Clear previous decoration
+    chip.style.boxShadow = '';
+    chip.style.outline = '';
+    const existingBadge = chip.querySelector('.avail-badge');
+    if (existingBadge) existingBadge.remove();
+    if (!s) return;
+    if (s === 'available') {
+      chip.style.boxShadow = '0 0 0 3px #d4af37'; // gold ring
+    } else if (s === 'unavailable') {
+      chip.style.boxShadow = '0 0 0 3px #c0392b'; // red ring
+    } else if (s === 'maybe') {
+      const badge = document.createElement('div');
+      badge.className = 'avail-badge';
+      badge.textContent = '?';
+      badge.style.cssText = 'position:absolute;top:-8px;right:-8px;width:18px;height:18px;border-radius:50%;background:#b88800;color:#fff;font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,0.35);z-index:2;pointer-events:none';
+      if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
+      chip.appendChild(badge);
+    }
+  });
 }
 
 function chipHtml(player, context) {
@@ -4185,7 +4269,7 @@ function renderFixturesTab() {
 
   const selStatus = selected ? (selected.lineup_status || (selected.published ? 'published' : 'draft')) : 'draft';
   const selShareable = selected && (selStatus === 'availability' || selStatus === 'published');
-  const selShareLabel = selStatus === 'availability' ? '🔗 Copy availability link for parents' : '🔗 Copy share link for parents';
+  const selShareLabel = '🔗 Copy availability link for parents';
   const showLineup = selStatus === 'published'; // hide pitch for availability/draft (in fixtures)
 
   tabEl.innerHTML = `
