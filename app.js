@@ -3271,28 +3271,52 @@ function wireLineupEvents() {
   const posSave = document.getElementById('pos-edit-save');
   if (posSave) posSave.onclick = async () => {
     const baseName = editor.current.formation;
-    const suggested = baseName + ' (custom)';
-    const name = prompt('Save as custom formation — name:', suggested);
-    if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const payload = {
-      team_id: editor.team.id,
-      name: trimmed,
-      data: {
-        pos: editor.current.pos.map(p => [...p]),
-        lbl: [...editor.current.lbl]
-      }
+    const currentFormation = getFormation(baseName);
+    const existingCustomId = currentFormation && currentFormation._customId;
+
+    let trimmed = baseName;
+    if (existingCustomId) {
+      // Update existing custom formation in place (overwrite)
+      if (!confirm(`Overwrite custom formation "${baseName}"?`)) return;
+    } else {
+      // Built-in preset — must save as new (can't overwrite presets)
+      const suggested = baseName + ' (custom)';
+      const name = prompt('Preset formations can\'t be overwritten. Save as new custom formation — name:', suggested);
+      if (!name) return;
+      trimmed = name.trim();
+      if (!trimmed) return;
+    }
+
+    const payloadData = {
+      pos: editor.current.pos.map(p => [...p]),
+      lbl: [...editor.current.lbl]
     };
-    const { data, error } = await supabase.from('formations').insert(payload).select().single();
-    if (error) { alert('Save failed: ' + error.message); return; }
-    editor.customFormations = editor.customFormations || [];
-    editor.customFormations.unshift(data);
-    await logAudit(editor.team.id, 'formation', data.id, 'create', { name: trimmed, from: 'edit-positions' });
+
+    if (existingCustomId) {
+      const { data, error } = await supabase.from('formations')
+        .update({ data: payloadData, name: trimmed })
+        .eq('id', existingCustomId)
+        .select().single();
+      if (error) { alert('Save failed: ' + error.message); return; }
+      editor.customFormations = editor.customFormations || [];
+      const idx = editor.customFormations.findIndex(cf => cf.id === existingCustomId);
+      if (idx >= 0) editor.customFormations[idx] = data;
+      await logAudit(editor.team.id, 'formation', data.id, 'update', { name: trimmed, from: 'edit-positions' });
+    } else {
+      const payload = { team_id: editor.team.id, name: trimmed, data: payloadData };
+      const { data, error } = await supabase.from('formations').insert(payload).select().single();
+      if (error) { alert('Save failed: ' + error.message); return; }
+      editor.customFormations = editor.customFormations || [];
+      editor.customFormations.unshift(data);
+      await logAudit(editor.team.id, 'formation', data.id, 'create', { name: trimmed, from: 'edit-positions' });
+    }
+
     editor.current.formation = trimmed;
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
+    // Persist formation-name change on the lineup itself
+    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
     renderLineupsTab();
   };
 
