@@ -945,11 +945,11 @@ function matchDetailsFormHtml(current, team, canEdit) {
     <div class="sc-row-2" style="margin-top:0.5rem">
       <div>
         <label>Kick off</label>
-        <input type="time" id="l-kickoff" value="${escapeHtml(current.kickoff_time || '')}" ${canEdit ? '' : 'disabled'} />
+        <input type="time" id="l-kickoff" value="${escapeHtml(current.kickoff_time || '')}" step="900" ${canEdit ? '' : 'disabled'} />
       </div>
       <div>
         <label>Team arrival</label>
-        <input type="time" id="l-arrival" value="${escapeHtml(current.arrival_time || '')}" ${canEdit ? '' : 'disabled'} />
+        <input type="time" id="l-arrival" value="${escapeHtml(current.arrival_time || '')}" step="900" ${canEdit ? '' : 'disabled'} />
       </div>
     </div>
 
@@ -1119,16 +1119,17 @@ function wireMatchDetailsFields(closeModal) {
     await saveLineupWithMsg(msgEl);
     if (!(msgEl && msgEl.className === 'ok')) return;
     // After save: prompt to fine-tune the pitch location on the map.
-    // For Home games, the location comes from the team's home ground, so only prompt if coords are missing.
-    // For Away games, always offer to fine-tune so Chris can drop the pin exactly.
+    // Seed the pin from the effective venue (for Home games this comes from the team's home ground).
+    // Fall back to a postcode lookup if we only have a postcode, then UK centre as last resort.
     const cur = editor.current;
-    const haveCoords = cur.location_lat != null && cur.location_lng != null;
+    const v = effectiveVenue(cur, editor.team);
+    const haveCoords = v.lat != null && v.lng != null;
     const shouldPrompt = cur.home_away === 'away' ? true : !haveCoords;
     if (shouldPrompt) {
-      let startLat = cur.location_lat, startLng = cur.location_lng;
-      if ((startLat == null || startLng == null) && (cur.location_postcode || '').trim()) {
+      let startLat = v.lat, startLng = v.lng;
+      if ((startLat == null || startLng == null) && (v.postcode || '').trim()) {
         try {
-          const pc = cur.location_postcode.trim().toUpperCase();
+          const pc = v.postcode.trim().toUpperCase();
           const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
           const body = await res.json();
           if (res.ok && body.status === 200 && body.result) {
