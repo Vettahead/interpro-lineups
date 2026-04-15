@@ -3227,45 +3227,45 @@ function renderFixturesTab() {
       `).join('')
     : '';
 
+  const calendarBody = `
+    <div class="cal-header">
+      <button class="cal-nav" id="cal-prev" aria-label="Previous month">‹</button>
+      <div class="cal-title">${escapeHtml(monthName)}</div>
+      <button class="cal-nav" id="cal-next" aria-label="Next month">›</button>
+    </div>
+    <div class="cal-dow">
+      ${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => `<div>${d}</div>`).join('')}
+    </div>
+    <div class="cal-grid">${cells.join('')}</div>
+  `;
+
+  const upcomingBody = `
+    <h4 style="margin:0 0 0.5rem">Upcoming</h4>
+    <div class="lineup-list">${upcomingHtml}</div>
+    ${pastHtml ? `<h4 style="margin:1rem 0 0.5rem">Recent</h4><div class="lineup-list">${pastHtml}</div>` : ''}
+    ${canEdit ? `
+      <label style="display:flex;align-items:center;gap:0.35rem;margin-top:0.75rem;font-size:0.8rem;color:#555">
+        <input type="checkbox" id="show-drafts" ${_fixturesUi.showDrafts ? 'checked' : ''}> Show draft lineups
+      </label>
+    ` : ''}
+  `;
+
   tabEl.innerHTML = `
-    <div class="fixtures-layout">
-      <aside class="fixtures-side">
-        <div class="card" style="padding:0.5rem">
-          <div class="cal-header">
-            <button class="cal-nav" id="cal-prev" aria-label="Previous month">‹</button>
-            <div class="cal-title">${escapeHtml(monthName)}</div>
-            <button class="cal-nav" id="cal-next" aria-label="Next month">›</button>
-          </div>
-          <div class="cal-dow">
-            ${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => `<div>${d}</div>`).join('')}
-          </div>
-          <div class="cal-grid">${cells.join('')}</div>
+    <div class="fixtures-single">
+      ${headline}
+      ${selected ? `
+        <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
+          <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+          <div class="pv-slots" id="fix-slots"></div>
+          <div class="pv-ball" id="fix-ball" style="display:none"></div>
         </div>
-
-        <div class="card">
-          <h4 style="margin:0 0 0.5rem">Upcoming</h4>
-          <div class="lineup-list">${upcomingHtml}</div>
-          ${pastHtml ? `<h4 style="margin:1rem 0 0.5rem">Recent</h4><div class="lineup-list">${pastHtml}</div>` : ''}
-          ${canEdit ? `
-            <label style="display:flex;align-items:center;gap:0.35rem;margin-top:0.75rem;font-size:0.8rem;color:#555">
-              <input type="checkbox" id="show-drafts" ${_fixturesUi.showDrafts ? 'checked' : ''}> Show draft lineups
-            </label>
-          ` : ''}
-        </div>
-      </aside>
-
-      <section class="fixtures-main">
-        ${headline}
-        ${selected ? `
-          <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
-            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
-            <div class="pv-slots" id="fix-slots"></div>
-            <div class="pv-ball" id="fix-ball" style="display:none"></div>
-          </div>
-          <div class="pv-subs" id="fix-subs"></div>
-        ` : ''}
-      </section>
+        <div class="pv-subs" id="fix-subs"></div>
+      ` : ''}
+      <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.5rem;max-width:560px">
+        ${collapsibleCard('fix-calendar', 'Calendar', calendarBody)}
+        ${collapsibleCard('fix-upcoming', 'Upcoming / Recent', upcomingBody)}
+      </div>
     </div>
   `;
 
