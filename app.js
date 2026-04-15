@@ -881,7 +881,7 @@ async function renderTeamDashboard(user, teamId) {
     tabsEl.innerHTML = `
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
-      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches / Lineups</button>
+      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
       <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
@@ -2018,7 +2018,7 @@ function renderLineupsTab() {
       <aside class="lineup-left">
         ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
 
-        ${collapsibleCard('lineup-saved', 'Saved lineups', `
+        ${collapsibleCard('lineup-saved', 'Matches / Lineups', `
           <div class="lineup-list">${lineupsListHtml}</div>
           ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
         `)}

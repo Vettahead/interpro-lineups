@@ -932,8 +932,8 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   .add-row { grid-template-columns: 1fr 70px auto; }
   .lineup-layout { grid-template-columns: 1fr; }
   .lineup-center { order: 1; }
-  .lineup-right  { order: 2; }
-  .lineup-left   { order: 3; }
+  .lineup-left   { order: 2; }
+  .lineup-right  { order: 3; }
   .lineup-center .card { max-width: none; }
   .slot { width: 54px; height: 54px; }
   .chip, .slot-label { width: 46px; height: 46px; }
