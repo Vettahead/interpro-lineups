@@ -554,7 +554,7 @@ async function renderParentView(lineupId, opts = {}) {
     ln: lineup.location_name, lp: lineup.location_postcode, llat: lineup.location_lat, llng: lineup.location_lng,
     pub: lineup.published, st: lineup.lineup_status,
     tn: team.name, tg: team.home_ground_name, tp: team.home_ground_postcode, tlat: team.home_ground_lat, tlng: team.home_ground_lng,
-    pl: players.map(p => [p.id, p.name, p.number]).sort()
+    pl: players.map(p => [p.id, p.name, p.number, p.position, p.photo_url]).sort()
   });
   if (opts.fromPoll && dataHash === _parentViewLastHash) return;
   _parentViewLastHash = dataHash;
@@ -1060,6 +1060,7 @@ function _lineupContentHash(c) {
   if (!c) return null;
   return JSON.stringify({
     slots: c.slots, subs: c.subs, formation: c.formation,
+    lbl: c.lbl, pos: c.pos,
     arrows: c.arrows, zoneLines: c.zoneLines,
     ballVisible: c.ballVisible, ballPos: c.ballPos,
     opponent: c.opponent, game_date: c.game_date,
@@ -3179,6 +3180,8 @@ function wireLineupEvents() {
         formation: l.data?.formation || '4-3-3',
         slots: { ...(l.data?.slots || {}) },
         subs: [...(l.data?.subs || [])],
+        lbl: Array.isArray(l.data?.lbl) ? [...l.data.lbl] : undefined,
+        pos: Array.isArray(l.data?.pos) ? l.data.pos.map(p => Array.isArray(p) ? [...p] : p) : undefined,
         arrows: (l.data?.arrows || []).map(a => ({ ...a })),
         zoneLines: [...(l.data?.zoneLines || [null, null])],
         ballVisible: !!l.data?.ballVisible,
@@ -3331,18 +3334,67 @@ function wirePositionEditing() {
     h.addEventListener('pointercancel', finish);
   });
 
-  // Double-click a label to rename it
+  // Double-click a label to change it via dropdown
   pitch.querySelectorAll('[data-pos-label]').forEach(lab => {
     lab.addEventListener('dblclick', (e) => {
       e.preventDefault(); e.stopPropagation();
       const idx = parseInt(lab.dataset.posLabel, 10);
-      const current = editor.current.lbl[idx] || '';
-      const next = prompt('Label (e.g. CB, CM, ST):', current);
-      if (next === null) return;
-      editor.current.lbl[idx] = next.trim().toUpperCase().slice(0, 4);
-      renderLineupsTab();
+      const current = (editor.current.lbl[idx] || '').toUpperCase();
+      openPositionLabelPicker(current, (next) => {
+        if (next == null) return;
+        editor.current.lbl[idx] = next.trim().toUpperCase().slice(0, 4);
+        renderLineupsTab();
+      });
     });
   });
+}
+
+// Modal dropdown for choosing a position label
+const POSITION_LABEL_OPTIONS = [
+  'GK',
+  'RB','RCB','CB','LCB','LB',
+  'RWB','LWB',
+  'CDM','DM',
+  'RM','RCM','CM','LCM','LM',
+  'CAM','AM',
+  'RW','LW',
+  'CF','ST'
+];
+function openPositionLabelPicker(current, cb) {
+  const existing = document.querySelector('.pos-label-modal-overlay');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay pos-label-modal-overlay';
+  const opts = [...POSITION_LABEL_OPTIONS];
+  if (current && !opts.includes(current)) opts.unshift(current);
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:320px">
+      <div class="map-modal-header"><strong>Position label</strong>
+        <button class="btn-secondary" id="pl-close" type="button">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:1rem">
+        <label style="display:block;margin-bottom:0.5rem;font-size:0.85rem" class="muted">Pick a label</label>
+        <select id="pl-select" style="width:100%;padding:0.5rem;font-size:1rem">
+          ${opts.map(o => `<option value="${o}"${o===current?' selected':''}>${o}</option>`).join('')}
+        </select>
+        <label style="display:block;margin:0.75rem 0 0.25rem;font-size:0.85rem" class="muted">Or type custom (max 4 chars)</label>
+        <input id="pl-custom" type="text" maxlength="4" placeholder="e.g. SS" style="width:100%;padding:0.5rem;font-size:1rem;text-transform:uppercase" />
+      </div>
+      <div class="map-modal-footer">
+        <button class="btn-secondary" id="pl-cancel" type="button">Cancel</button>
+        <button class="primary" id="pl-save" type="button">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = (val) => { overlay.remove(); cb(val); };
+  overlay.querySelector('#pl-close').onclick = () => close(null);
+  overlay.querySelector('#pl-cancel').onclick = () => close(null);
+  overlay.querySelector('#pl-save').onclick = () => {
+    const custom = overlay.querySelector('#pl-custom').value.trim();
+    const sel = overlay.querySelector('#pl-select').value;
+    close(custom || sel);
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
 }
 
 // Track <details> open/close into openCards so state survives rerenders
@@ -3999,6 +4051,8 @@ async function saveLineupWithMsg(msgEl) {
       formation: current.formation,
       slots: current.slots,
       subs: current.subs,
+      lbl: Array.isArray(current.lbl) ? [...current.lbl] : null,
+      pos: Array.isArray(current.pos) ? current.pos.map(p => Array.isArray(p) ? [...p] : p) : null,
       arrows: current.arrows,
       zoneLines: current.zoneLines,
       ballVisible: current.ballVisible,
