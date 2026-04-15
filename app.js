@@ -500,6 +500,23 @@ function renderSquadTab(team, canEdit, players) {
     ? players
     : players.filter(p => groupForPos(p.position || '') === currentFilter);
 
+  const homeGroundCard = canEdit ? `
+    <div class="card">
+      <h3 style="margin-top:0">Home ground</h3>
+      <label>Ground name</label>
+      <input type="text" id="hg-name" value="${escapeHtml(team.home_ground_name || '')}" placeholder="e.g. Interpro Sports Ground" />
+      <label>Postcode</label>
+      <div style="display:flex;gap:0.35rem">
+        <input type="text" id="hg-postcode" value="${escapeHtml(team.home_ground_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" />
+        <button class="btn-secondary" id="hg-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>
+      </div>
+      <div id="hg-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
+        ${team.home_ground_lat && team.home_ground_lng ? `✓ <a href="https://www.google.com/maps/search/?api=1&query=${team.home_ground_lat},${team.home_ground_lng}" target="_blank" rel="noopener">View on map</a>` : ''}
+      </div>
+      <button class="primary" id="hg-save" style="margin-top:0.5rem">Save home ground</button>
+    </div>
+  ` : '';
+
   const addForm = canEdit ? `
     <div class="card">
       <h3 style="margin-top:0">Add a player</h3>
@@ -574,6 +591,7 @@ function renderSquadTab(team, canEdit, players) {
   tabEl.innerHTML = `
     <div class="squad-layout">
       <div class="squad-main">
+        ${homeGroundCard}
         ${addForm}
         <div class="card">
           <h3 style="margin-top:0">Squad ${currentFilter !== 'All' ? '— ' + currentFilter : ''}</h3>
@@ -608,6 +626,56 @@ function renderSquadTab(team, canEdit, players) {
       document.getElementById('ap-name').value = '';
       document.getElementById('ap-num').value = '';
       renderSquadTab(team, canEdit, players);
+    };
+
+    // Home ground lookup
+    const hgLookupBtn = document.getElementById('hg-lookup');
+    if (hgLookupBtn) hgLookupBtn.onclick = async () => {
+      const msg = document.getElementById('hg-msg');
+      const pcEl = document.getElementById('hg-postcode');
+      const pc = (pcEl.value || '').trim().toUpperCase();
+      if (!pc) { msg.textContent = 'Enter a postcode first.'; msg.className = 'error'; return; }
+      msg.textContent = 'Looking up…'; msg.className = 'muted';
+      try {
+        const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+        const body = await res.json();
+        if (!res.ok || body.status !== 200 || !body.result) {
+          msg.textContent = 'Postcode not found.'; msg.className = 'error'; return;
+        }
+        team._pending_hg_lat = body.result.latitude;
+        team._pending_hg_lng = body.result.longitude;
+        pcEl.value = body.result.postcode;
+        const place = [body.result.parish, body.result.admin_district].filter(Boolean).join(', ');
+        msg.innerHTML = `✓ ${escapeHtml(body.result.postcode)}${place ? ' (' + escapeHtml(place) + ')' : ''} — <a href="https://www.google.com/maps/search/?api=1&query=${body.result.latitude},${body.result.longitude}" target="_blank" rel="noopener">View on map</a>`;
+        msg.className = 'ok';
+      } catch (err) {
+        msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
+      }
+    };
+
+    // Save home ground
+    const hgSaveBtn = document.getElementById('hg-save');
+    if (hgSaveBtn) hgSaveBtn.onclick = async () => {
+      const msg = document.getElementById('hg-msg');
+      const name = (document.getElementById('hg-name').value || '').trim();
+      const pc   = (document.getElementById('hg-postcode').value || '').trim().toUpperCase();
+      // Use freshly looked-up coords if present, else keep existing if postcode unchanged, else null
+      let lat = team._pending_hg_lat ?? null;
+      let lng = team._pending_hg_lng ?? null;
+      if (lat === null && pc === (team.home_ground_postcode || '').toUpperCase()) {
+        lat = team.home_ground_lat ?? null; lng = team.home_ground_lng ?? null;
+      }
+      const { data, error } = await supabase.from('teams').update({
+        home_ground_name: name || null,
+        home_ground_postcode: pc || null,
+        home_ground_lat: lat,
+        home_ground_lng: lng
+      }).eq('id', team.id).select().single();
+      if (error) { msg.textContent = 'Save failed: ' + error.message; msg.className = 'error'; return; }
+      Object.assign(team, data);
+      delete team._pending_hg_lat; delete team._pending_hg_lng;
+      msg.textContent = '✓ Saved'; msg.className = 'ok';
+      setTimeout(() => renderSquadTab(team, canEdit, players), 600);
     };
   }
 
@@ -677,6 +745,9 @@ function newLineupState() {
     zoneLines: [null, null],// [pressY%, defY%] or null
     ballVisible: false,
     ballPos: { x: 50, y: 50 },
+    // match meta
+    match_type: 'league',   // 'friendly' | 'league' | 'cup'
+    home_away: 'home',      // 'home' | 'away'
     // publish + location
     published: false,
     location_name: '',
@@ -787,17 +858,19 @@ function renderLineupsTab() {
     : `<p class="muted" style="padding:0.5rem">All players on the pitch or subs.</p>`;
 
   const lineupsListHtml = lineups.length
-    ? lineups.map(l => `
+    ? lineups.map(l => {
+        const tLbl = l.match_type === 'friendly' ? 'Friendly' : l.match_type === 'cup' ? 'Cup' : 'League';
+        const haLbl = l.home_away === 'away' ? '(A)' : '(H)';
+        const title = (l.opponent ? 'vs ' + escapeHtml(l.opponent) : '—') + ' ' + haLbl;
+        return `
         <div class="lineup-item ${current.id === l.id ? 'active' : ''}" data-lineup="${l.id}">
-          <div class="lineup-name">${escapeHtml(l.name)}</div>
+          <div class="lineup-name">${title}</div>
           <div class="lineup-meta">
-            ${l.opponent ? 'vs ' + escapeHtml(l.opponent) : ''}
-            ${l.game_date ? ' · ' + formatDate(l.game_date) : ''}
-            ${l.data?.formation ? ' · ' + l.data.formation : ''}
+            ${tLbl}${l.game_date ? ' · ' + formatDate(l.game_date) : ''}${l.data?.formation ? ' · ' + l.data.formation : ''}
           </div>
           ${canEdit ? `<button class="lineup-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
-        </div>
-      `).join('')
+        </div>`;
+      }).join('')
     : `<p class="muted" style="padding:0.75rem">No saved lineups yet.</p>`;
 
   tabEl.innerHTML = `
@@ -830,19 +903,34 @@ function renderLineupsTab() {
         `) : ''}
 
         ${collapsibleCard('lineup-details', 'Lineup details', `
-          <label>Name</label>
-          <input type="text" id="l-name" value="${escapeHtml(current.name)}" placeholder="e.g. vs Rivals" ${canEdit ? '' : 'disabled'} />
           <label>Opponent</label>
-          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
-          <label>Game date</label>
+          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" placeholder="e.g. Rivals FC" ${canEdit ? '' : 'disabled'} />
+          <div class="sc-row-2" style="margin-top:0.5rem">
+            <div>
+              <label>Match type</label>
+              <select id="l-match-type" ${canEdit ? '' : 'disabled'}>
+                <option value="friendly" ${current.match_type === 'friendly' ? 'selected' : ''}>Friendly</option>
+                <option value="league"   ${current.match_type === 'league'   ? 'selected' : ''}>League match</option>
+                <option value="cup"      ${current.match_type === 'cup'      ? 'selected' : ''}>Cup match</option>
+              </select>
+            </div>
+            <div>
+              <label>Home / Away</label>
+              <select id="l-home-away" ${canEdit ? '' : 'disabled'}>
+                <option value="home" ${current.home_away === 'home' ? 'selected' : ''}>Home</option>
+                <option value="away" ${current.home_away === 'away' ? 'selected' : ''}>Away</option>
+              </select>
+            </div>
+          </div>
+          <label style="margin-top:0.5rem">Game date</label>
           <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
 
-          <label style="margin-top:0.5rem">Venue (optional)</label>
-          <input type="text" id="l-venue-name" value="${escapeHtml(current.location_name || '')}" placeholder="e.g. Home ground" ${canEdit ? '' : 'disabled'} />
+          <label style="margin-top:0.5rem">Venue${current.home_away === 'home' ? ' (home ground)' : ' (optional)'}</label>
+          <input type="text" id="l-venue-name" value="${escapeHtml(current.location_name || '')}" placeholder="${current.home_away === 'home' ? 'Set home ground in Squad tab' : 'e.g. Away ground'}" ${canEdit && current.home_away !== 'home' ? '' : 'disabled'} />
           <label>Postcode</label>
           <div style="display:flex;gap:0.35rem">
-            <input type="text" id="l-venue-postcode" value="${escapeHtml(current.location_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit ? '' : 'disabled'} />
-            ${canEdit ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
+            <input type="text" id="l-venue-postcode" value="${escapeHtml(current.location_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit && current.home_away !== 'home' ? '' : 'disabled'} />
+            ${canEdit && current.home_away !== 'home' ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
           </div>
           <div id="l-venue-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
             ${current.location_lat && current.location_lng ? `✓ <a href="https://www.google.com/maps/search/?api=1&query=${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">View on map</a>` : ''}
@@ -1057,12 +1145,24 @@ function wireLineupEvents() {
   });
 
   // Meta inputs
-  const nameEl = document.getElementById('l-name');
   const oppEl = document.getElementById('l-opponent');
   const dateEl = document.getElementById('l-date');
-  if (nameEl) nameEl.oninput = e => { editor.current.name = e.target.value; };
+  const typeEl = document.getElementById('l-match-type');
+  const haEl = document.getElementById('l-home-away');
   if (oppEl)  oppEl.oninput  = e => { editor.current.opponent = e.target.value; };
   if (dateEl) dateEl.oninput = e => { editor.current.game_date = e.target.value; };
+  if (typeEl) typeEl.onchange = e => { editor.current.match_type = e.target.value; };
+  if (haEl)   haEl.onchange   = e => {
+    editor.current.home_away = e.target.value;
+    // If switching to Home, auto-fill from team's home ground
+    if (e.target.value === 'home' && editor.team) {
+      editor.current.location_name = editor.team.home_ground_name || '';
+      editor.current.location_postcode = editor.team.home_ground_postcode || '';
+      editor.current.location_lat = editor.team.home_ground_lat ?? null;
+      editor.current.location_lng = editor.team.home_ground_lng ?? null;
+    }
+    renderLineupsTab();
+  };
 
   // Venue inputs
   const venueNameEl = document.getElementById('l-venue-name');
@@ -1159,6 +1259,8 @@ function wireLineupEvents() {
         name: l.name || '',
         opponent: l.opponent || '',
         game_date: l.game_date || '',
+        match_type: l.match_type || 'league',
+        home_away: l.home_away || 'home',
         formation: l.data?.formation || '4-3-3',
         slots: { ...(l.data?.slots || {}) },
         subs: [...(l.data?.subs || [])],
@@ -1184,7 +1286,7 @@ function wireLineupEvents() {
       const id = btn.dataset.delLineup;
       const l = lineups.find(x => x.id === id);
       if (!l) return;
-      if (!confirm(`Delete lineup "${l.name}"?`)) return;
+      if (!confirm(`Delete lineup "${l.opponent || l.name || 'Untitled'}"?`)) return;
       const { error } = await supabase.from('lineups').delete().eq('id', id);
       if (error) { alert('Delete failed: ' + error.message); return; }
       await logAudit(team.id, 'lineup', id, 'delete', { name: l.name });
@@ -1929,27 +2031,44 @@ function hasUnsaved() {
   const c = editor.current;
   if (!c) return false;
   if (c.id) return false; // saved lineups may have pending edits but don't prompt aggressively
-  return Object.keys(c.slots).length > 0 || c.subs.some(Boolean) || c.name || c.opponent;
+  return Object.keys(c.slots).length > 0 || c.subs.some(Boolean) || c.opponent;
 }
 
 async function saveLineup() {
   const { team, lineups, current } = editor;
   const msgEl = document.getElementById('save-msg');
   msgEl.textContent = '';
-  const name = current.name.trim();
-  if (!name) { msgEl.textContent = 'Name is required'; msgEl.className = 'error'; return; }
+  const opp = (current.opponent || '').trim();
+  if (!opp) { msgEl.textContent = 'Opponent is required'; msgEl.className = 'error'; return; }
+  // Auto-derive a name for backward compat / saved list display
+  const typeLbl = current.match_type === 'friendly' ? 'Friendly'
+                : current.match_type === 'cup' ? 'Cup' : 'League';
+  const haLbl = current.home_away === 'away' ? '(A)' : '(H)';
+  const name = `${typeLbl} vs ${opp} ${haLbl}`;
+
+  // If Home, always mirror the team's current home ground
+  let locName = current.location_name, locPost = current.location_postcode,
+      locLat = current.location_lat, locLng = current.location_lng;
+  if (current.home_away === 'home' && team) {
+    locName = team.home_ground_name || '';
+    locPost = team.home_ground_postcode || '';
+    locLat = team.home_ground_lat ?? null;
+    locLng = team.home_ground_lng ?? null;
+  }
 
   const payload = {
     team_id: team.id,
     name,
-    opponent: current.opponent.trim() || null,
+    opponent: opp,
     game_date: current.game_date || null,
+    match_type: current.match_type || 'league',
+    home_away: current.home_away || 'home',
     published: !!current.published,
     published_at: current.published ? (current.published_at || new Date().toISOString()) : null,
-    location_name: current.location_name?.trim() || null,
-    location_postcode: current.location_postcode?.trim().toUpperCase() || null,
-    location_lat: current.location_lat ?? null,
-    location_lng: current.location_lng ?? null,
+    location_name: (locName || '').trim() || null,
+    location_postcode: (locPost || '').trim().toUpperCase() || null,
+    location_lat: locLat ?? null,
+    location_lng: locLng ?? null,
     data: {
       formation: current.formation,
       slots: current.slots,
@@ -2737,9 +2856,11 @@ function renderFixturesTab() {
         const upcoming = gd && gd >= new Date(todayISO);
         const prefix = upcoming ? 'Next game' : 'Last game';
         const opp = selected.opponent ? ` vs ${escapeHtml(selected.opponent)}` : '';
+        const tLbl = selected.match_type === 'friendly' ? 'Friendly' : selected.match_type === 'cup' ? 'Cup' : 'League';
+        const haLbl = selected.home_away === 'away' ? 'Away' : 'Home';
         return `
           <div style="margin-bottom:0.5rem">
-            <div class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em">${prefix}</div>
+            <div class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em">${prefix} · ${tLbl} · ${haLbl}</div>
             <h2 style="margin:0.15rem 0 0;font-size:1.4rem">${escapeHtml(dateStr)}${opp}</h2>
             ${selected.location_name || selected.location_postcode ? `
               <div style="font-size:0.9rem;margin-top:0.25rem">
@@ -2760,7 +2881,7 @@ function renderFixturesTab() {
   const upcomingHtml = upcomingList.length
     ? upcomingList.map(l => `
         <div class="lineup-item ${selected && l.id === selected.id ? 'active' : ''}" data-fix="${l.id}">
-          <div class="lineup-name">${escapeHtml(l.opponent || l.name || '—')}</div>
+          <div class="lineup-name">${escapeHtml(l.opponent || '—')} ${l.home_away === 'away' ? '(A)' : '(H)'}</div>
           <div class="lineup-meta">${formatDate(l.game_date)}${l.location_postcode ? ' · ' + escapeHtml(l.location_postcode) : ''}${canEdit && !l.published ? ' · <em>draft</em>' : ''}</div>
         </div>
       `).join('')
@@ -2769,7 +2890,7 @@ function renderFixturesTab() {
   const pastHtml = pastList.length
     ? pastList.map(l => `
         <div class="lineup-item ${selected && l.id === selected.id ? 'active' : ''}" data-fix="${l.id}" style="opacity:0.75">
-          <div class="lineup-name">${escapeHtml(l.opponent || l.name || '—')}</div>
+          <div class="lineup-name">${escapeHtml(l.opponent || '—')} ${l.home_away === 'away' ? '(A)' : '(H)'}</div>
           <div class="lineup-meta">${formatDate(l.game_date)}</div>
         </div>
       `).join('')
