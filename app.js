@@ -865,6 +865,244 @@ let draggingLinePct = 0;
 let _posEditMode = false;
 let _posDrag = null; // { idx, ox, oy } — offsets captured on pointerdown
 
+// ---------- Match details (summary + modal) ----------
+function effectiveVenue(current, team) {
+  if (current.home_away === 'home' && team) {
+    return {
+      name: team.home_ground_name || '',
+      postcode: team.home_ground_postcode || '',
+      lat: team.home_ground_lat ?? null,
+      lng: team.home_ground_lng ?? null
+    };
+  }
+  return {
+    name: current.location_name || '',
+    postcode: current.location_postcode || '',
+    lat: current.location_lat ?? null,
+    lng: current.location_lng ?? null
+  };
+}
+
+function matchSummaryHtml(current, team, canEdit) {
+  const tLbl = current.match_type === 'friendly' ? 'Friendly' : current.match_type === 'cup' ? 'Cup' : 'League';
+  const haLbl = current.home_away === 'away' ? 'Away' : 'Home';
+  const v = effectiveVenue(current, team);
+  const dateStr = current.game_date ? formatDate(current.game_date) : '—';
+  const oppStr = current.opponent ? escapeHtml(current.opponent) : '<em class="muted">No opponent set</em>';
+  const venueLine = (v.name || v.postcode)
+    ? `<div class="muted" style="font-size:0.8rem;margin-top:0.25rem">📍 ${escapeHtml(v.name || '')}${v.name && v.postcode ? ' · ' : ''}${escapeHtml(v.postcode || '')}</div>`
+    : (current.home_away === 'home'
+        ? `<div class="muted" style="font-size:0.8rem;margin-top:0.25rem;color:#b88800">⚠ No home ground set — edit in Squad tab</div>`
+        : '');
+  const pubLine = current.id && current.published
+    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
+    : (current.id ? `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>` : '');
+  return `
+    <div style="display:flex;flex-direction:column;gap:0.15rem">
+      <div style="font-weight:600">${oppStr}</div>
+      <div class="muted" style="font-size:0.8rem">${tLbl} · ${haLbl} · ${escapeHtml(dateStr)}</div>
+      ${venueLine}
+      ${pubLine}
+    </div>
+    ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 ${current.id ? 'Edit match details' : 'Arrange match'}</button>` : ''}
+    <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
+  `;
+}
+
+function matchDetailsFormHtml(current, team, canEdit) {
+  const v = effectiveVenue(current, team);
+  const homeLocked = current.home_away === 'home';
+  return `
+    <label>Opponent</label>
+    <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" placeholder="e.g. Rivals FC" ${canEdit ? '' : 'disabled'} />
+    <div class="sc-row-2" style="margin-top:0.5rem">
+      <div>
+        <label>Match type</label>
+        <select id="l-match-type" ${canEdit ? '' : 'disabled'}>
+          <option value="friendly" ${current.match_type === 'friendly' ? 'selected' : ''}>Friendly</option>
+          <option value="league"   ${current.match_type === 'league'   ? 'selected' : ''}>League match</option>
+          <option value="cup"      ${current.match_type === 'cup'      ? 'selected' : ''}>Cup match</option>
+        </select>
+      </div>
+      <div>
+        <label>Home / Away</label>
+        <select id="l-home-away" ${canEdit ? '' : 'disabled'}>
+          <option value="home" ${current.home_away === 'home' ? 'selected' : ''}>Home</option>
+          <option value="away" ${current.home_away === 'away' ? 'selected' : ''}>Away</option>
+        </select>
+      </div>
+    </div>
+    <label style="margin-top:0.5rem">Game date</label>
+    <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+
+    <label style="margin-top:0.5rem">Venue${homeLocked ? ' (from home ground)' : ' (optional)'}</label>
+    <input type="text" id="l-venue-name" value="${escapeHtml(v.name)}" placeholder="${homeLocked ? (team?.home_ground_name ? '' : 'Set home ground in Squad tab') : 'e.g. Away ground'}" ${canEdit && !homeLocked ? '' : 'disabled'} />
+    <label>Postcode</label>
+    <div style="display:flex;gap:0.35rem">
+      <input type="text" id="l-venue-postcode" value="${escapeHtml(v.postcode)}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit && !homeLocked ? '' : 'disabled'} />
+      ${canEdit && !homeLocked ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
+    </div>
+    ${canEdit && !homeLocked ? `<button class="btn-full" id="l-venue-finetune" type="button" style="margin-top:0.4rem">🗺️ Fine-tune on map</button>` : ''}
+    <div id="l-venue-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
+      ${v.lat && v.lng ? `✓ ${Number(v.lat).toFixed(5)}, ${Number(v.lng).toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${v.lat},${v.lng}" target="_blank" rel="noopener">what3words</a>` : ''}
+    </div>
+
+    <div class="lineup-actions" style="margin-top:0.75rem">
+      ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
+      ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
+    </div>
+    ${canEdit && current.id ? `
+      <div style="margin-top:0.5rem">
+        <button class="btn-full" id="toggle-publish" style="margin-bottom:0;${current.published ? 'background:#fff3cd;border-color:#b88800;color:#5a4400' : ''}">
+          ${current.published ? '● Published — click to unpublish' : '○ Publish (show in Fixtures)'}
+        </button>
+      </div>
+    ` : ''}
+    <div id="md-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+  `;
+}
+
+function openMatchDetailsModal() {
+  const { current, team, canEdit } = editor;
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:520px;height:auto;max-height:90vh">
+      <div class="map-modal-header">
+        <strong>Match details</strong>
+        <button class="btn-secondary" id="md-close" type="button">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:0.8rem;overflow-y:auto">
+        ${matchDetailsFormHtml(current, team, canEdit)}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => { overlay.remove(); renderLineupsTab(); };
+  overlay.querySelector('#md-close').onclick = close;
+  // Close on outside click
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  wireMatchDetailsFields(close);
+}
+
+function wireMatchDetailsFields(closeModal) {
+  const overlay = document.querySelector('.map-modal-overlay');
+  if (!overlay) return;
+  const bodyEl = overlay.querySelector('.map-modal-body');
+
+  const rerenderBody = () => {
+    bodyEl.innerHTML = matchDetailsFormHtml(editor.current, editor.team, editor.canEdit);
+    wireMatchDetailsFields(closeModal);
+  };
+
+  const oppEl  = overlay.querySelector('#l-opponent');
+  const typeEl = overlay.querySelector('#l-match-type');
+  const haEl   = overlay.querySelector('#l-home-away');
+  const dateEl = overlay.querySelector('#l-date');
+  if (oppEl)  oppEl.oninput   = e => { editor.current.opponent = e.target.value; };
+  if (dateEl) dateEl.oninput  = e => { editor.current.game_date = e.target.value; };
+  if (typeEl) typeEl.onchange = e => { editor.current.match_type = e.target.value; };
+  if (haEl)   haEl.onchange   = e => {
+    editor.current.home_away = e.target.value;
+    if (e.target.value === 'home' && editor.team) {
+      editor.current.location_name = editor.team.home_ground_name || '';
+      editor.current.location_postcode = editor.team.home_ground_postcode || '';
+      editor.current.location_lat = editor.team.home_ground_lat ?? null;
+      editor.current.location_lng = editor.team.home_ground_lng ?? null;
+    }
+    rerenderBody();
+  };
+
+  const venueNameEl = overlay.querySelector('#l-venue-name');
+  const venuePostEl = overlay.querySelector('#l-venue-postcode');
+  if (venueNameEl) venueNameEl.oninput = e => { editor.current.location_name = e.target.value; };
+  if (venuePostEl) venuePostEl.oninput = e => {
+    editor.current.location_postcode = e.target.value;
+    editor.current.location_lat = null;
+    editor.current.location_lng = null;
+  };
+
+  const lookupBtn = overlay.querySelector('#l-venue-lookup');
+  if (lookupBtn) lookupBtn.onclick = async () => {
+    const msg = overlay.querySelector('#l-venue-msg');
+    const pc = (editor.current.location_postcode || '').trim().toUpperCase();
+    if (!pc) { msg.textContent = 'Enter a postcode first.'; msg.className = 'error'; return; }
+    msg.textContent = 'Looking up…'; msg.className = 'muted';
+    try {
+      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+      const body = await res.json();
+      if (!res.ok || body.status !== 200 || !body.result) {
+        msg.textContent = 'Postcode not found.'; msg.className = 'error'; return;
+      }
+      editor.current.location_lat = body.result.latitude;
+      editor.current.location_lng = body.result.longitude;
+      editor.current.location_postcode = body.result.postcode;
+      if (venuePostEl) venuePostEl.value = body.result.postcode;
+      msg.innerHTML = `✓ ${escapeHtml(body.result.postcode)} — <a href="https://www.google.com/maps/search/?api=1&query=${body.result.latitude},${body.result.longitude}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${body.result.latitude},${body.result.longitude}" target="_blank" rel="noopener">what3words</a>`;
+      msg.className = 'ok';
+    } catch (err) {
+      msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
+    }
+  };
+
+  const venueFineBtn = overlay.querySelector('#l-venue-finetune');
+  if (venueFineBtn) venueFineBtn.onclick = async () => {
+    let startLat = editor.current.location_lat;
+    let startLng = editor.current.location_lng;
+    if ((startLat == null || startLng == null) && (editor.current.location_postcode || '').trim()) {
+      try {
+        const pc = editor.current.location_postcode.trim().toUpperCase();
+        const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+        const body = await res.json();
+        if (res.ok && body.status === 200 && body.result) {
+          startLat = body.result.latitude; startLng = body.result.longitude;
+        }
+      } catch {}
+    }
+    const result = await openMapPicker({ lat: startLat, lng: startLng });
+    if (!result) return;
+    editor.current.location_lat = result.lat;
+    editor.current.location_lng = result.lng;
+    const msg = overlay.querySelector('#l-venue-msg');
+    if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
+  };
+
+  const pubBtn = overlay.querySelector('#toggle-publish');
+  if (pubBtn) pubBtn.onclick = async () => {
+    if (!editor.current.id) return;
+    const nextPublished = !editor.current.published;
+    if (nextPublished && !editor.current.game_date) {
+      alert('Set a Game date before publishing.'); return;
+    }
+    const { data, error } = await supabase.from('lineups')
+      .update({ published: nextPublished, published_at: nextPublished ? new Date().toISOString() : null })
+      .eq('id', editor.current.id).select().single();
+    if (error) { alert('Publish failed: ' + error.message); return; }
+    editor.current.published = data.published;
+    editor.current.published_at = data.published_at;
+    const idx = editor.lineups.findIndex(l => l.id === data.id);
+    if (idx >= 0) editor.lineups[idx] = data;
+    await logAudit(editor.team.id, 'lineup', data.id, nextPublished ? 'publish' : 'unpublish', {});
+    rerenderBody();
+  };
+
+  const saveBtn = overlay.querySelector('#save-lineup');
+  if (saveBtn) saveBtn.onclick = async () => {
+    const msgEl = overlay.querySelector('#md-msg');
+    await saveLineupWithMsg(msgEl);
+    if (msgEl && msgEl.className === 'ok') {
+      setTimeout(closeModal, 800);
+    }
+  };
+
+  const clearBtn = overlay.querySelector('#clear-pitch');
+  if (clearBtn) clearBtn.onclick = () => {
+    editor.current.slots = {};
+    editor.current.subs = [];
+    closeModal();
+  };
+}
+
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, players, lineups, plays, customFormations, current } = editor;
@@ -928,54 +1166,7 @@ function renderLineupsTab() {
           <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
         `) : ''}
 
-        ${collapsibleCard('lineup-details', 'Lineup details', `
-          <label>Opponent</label>
-          <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" placeholder="e.g. Rivals FC" ${canEdit ? '' : 'disabled'} />
-          <div class="sc-row-2" style="margin-top:0.5rem">
-            <div>
-              <label>Match type</label>
-              <select id="l-match-type" ${canEdit ? '' : 'disabled'}>
-                <option value="friendly" ${current.match_type === 'friendly' ? 'selected' : ''}>Friendly</option>
-                <option value="league"   ${current.match_type === 'league'   ? 'selected' : ''}>League match</option>
-                <option value="cup"      ${current.match_type === 'cup'      ? 'selected' : ''}>Cup match</option>
-              </select>
-            </div>
-            <div>
-              <label>Home / Away</label>
-              <select id="l-home-away" ${canEdit ? '' : 'disabled'}>
-                <option value="home" ${current.home_away === 'home' ? 'selected' : ''}>Home</option>
-                <option value="away" ${current.home_away === 'away' ? 'selected' : ''}>Away</option>
-              </select>
-            </div>
-          </div>
-          <label style="margin-top:0.5rem">Game date</label>
-          <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
-
-          <label style="margin-top:0.5rem">Venue${current.home_away === 'home' ? ' (home ground)' : ' (optional)'}</label>
-          <input type="text" id="l-venue-name" value="${escapeHtml(current.location_name || '')}" placeholder="${current.home_away === 'home' ? 'Set home ground in Squad tab' : 'e.g. Away ground'}" ${canEdit && current.home_away !== 'home' ? '' : 'disabled'} />
-          <label>Postcode</label>
-          <div style="display:flex;gap:0.35rem">
-            <input type="text" id="l-venue-postcode" value="${escapeHtml(current.location_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit && current.home_away !== 'home' ? '' : 'disabled'} />
-            ${canEdit && current.home_away !== 'home' ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
-          </div>
-          ${canEdit && current.home_away !== 'home' ? `<button class="btn-full" id="l-venue-finetune" type="button" style="margin-top:0.4rem">🗺️ Fine-tune on map</button>` : ''}
-          <div id="l-venue-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
-            ${current.location_lat && current.location_lng ? `✓ ${Number(current.location_lat).toFixed(5)}, ${Number(current.location_lng).toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">what3words</a>` : ''}
-          </div>
-
-          <div class="lineup-actions" style="margin-top:0.5rem">
-            ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
-            ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
-          </div>
-          ${canEdit && current.id ? `
-            <div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
-              <button class="btn-full" id="toggle-publish" style="margin-bottom:0;${current.published ? 'background:#fff3cd;border-color:#b88800;color:#5a4400' : ''}">
-                ${current.published ? '● Published — click to unpublish' : '○ Publish (show in Fixtures)'}
-              </button>
-            </div>
-          ` : ''}
-          <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
-        `)}
+        ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
 
         ${collapsibleCard('lineup-saved', 'Saved lineups', `
           <div class="lineup-list">${lineupsListHtml}</div>
@@ -1171,112 +1362,9 @@ function wireLineupEvents() {
     };
   });
 
-  // Meta inputs
-  const oppEl = document.getElementById('l-opponent');
-  const dateEl = document.getElementById('l-date');
-  const typeEl = document.getElementById('l-match-type');
-  const haEl = document.getElementById('l-home-away');
-  if (oppEl)  oppEl.oninput  = e => { editor.current.opponent = e.target.value; };
-  if (dateEl) dateEl.oninput = e => { editor.current.game_date = e.target.value; };
-  if (typeEl) typeEl.onchange = e => { editor.current.match_type = e.target.value; };
-  if (haEl)   haEl.onchange   = e => {
-    editor.current.home_away = e.target.value;
-    // If switching to Home, auto-fill from team's home ground
-    if (e.target.value === 'home' && editor.team) {
-      editor.current.location_name = editor.team.home_ground_name || '';
-      editor.current.location_postcode = editor.team.home_ground_postcode || '';
-      editor.current.location_lat = editor.team.home_ground_lat ?? null;
-      editor.current.location_lng = editor.team.home_ground_lng ?? null;
-    }
-    renderLineupsTab();
-  };
-
-  // Venue inputs
-  const venueNameEl = document.getElementById('l-venue-name');
-  const venuePostEl = document.getElementById('l-venue-postcode');
-  if (venueNameEl) venueNameEl.oninput = e => { editor.current.location_name = e.target.value; };
-  if (venuePostEl) venuePostEl.oninput = e => {
-    editor.current.location_postcode = e.target.value;
-    // Invalidate cached lat/lng whenever postcode changes
-    editor.current.location_lat = null;
-    editor.current.location_lng = null;
-  };
-
-  // Postcode lookup via postcodes.io
-  const lookupBtn = document.getElementById('l-venue-lookup');
-  if (lookupBtn) lookupBtn.onclick = async () => {
-    const msg = document.getElementById('l-venue-msg');
-    const pc = (editor.current.location_postcode || '').trim().toUpperCase();
-    if (!pc) { msg.textContent = 'Enter a postcode first.'; msg.className = 'error'; return; }
-    msg.textContent = 'Looking up…'; msg.className = 'muted';
-    try {
-      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
-      const body = await res.json();
-      if (!res.ok || body.status !== 200 || !body.result) {
-        msg.textContent = 'Postcode not found.'; msg.className = 'error'; return;
-      }
-      editor.current.location_lat = body.result.latitude;
-      editor.current.location_lng = body.result.longitude;
-      editor.current.location_postcode = body.result.postcode;
-      // Update the input to the canonical formatting
-      if (venuePostEl) venuePostEl.value = body.result.postcode;
-      const place = [body.result.parish, body.result.admin_district].filter(Boolean).join(', ');
-      msg.innerHTML = `✓ ${escapeHtml(body.result.postcode)}${place ? ' (' + escapeHtml(place) + ')' : ''} — <a href="https://www.google.com/maps/search/?api=1&query=${body.result.latitude},${body.result.longitude}" target="_blank" rel="noopener">View on map</a>`;
-      msg.className = 'ok';
-    } catch (err) {
-      msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
-    }
-  };
-
-  // Fine-tune venue on map (away games only)
-  const venueFineBtn = document.getElementById('l-venue-finetune');
-  if (venueFineBtn) venueFineBtn.onclick = async () => {
-    let startLat = editor.current.location_lat;
-    let startLng = editor.current.location_lng;
-    if ((startLat == null || startLng == null) && (editor.current.location_postcode || '').trim()) {
-      try {
-        const pc = editor.current.location_postcode.trim().toUpperCase();
-        const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
-        const body = await res.json();
-        if (res.ok && body.status === 200 && body.result) {
-          startLat = body.result.latitude; startLng = body.result.longitude;
-        }
-      } catch {}
-    }
-    const result = await openMapPicker({ lat: startLat, lng: startLng });
-    if (!result) return;
-    editor.current.location_lat = result.lat;
-    editor.current.location_lng = result.lng;
-    const msg = document.getElementById('l-venue-msg');
-    if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
-  };
-
-  // Publish / unpublish toggle
-  const pubBtn = document.getElementById('toggle-publish');
-  if (pubBtn) pubBtn.onclick = async () => {
-    if (!editor.current.id) return;
-    const nextPublished = !editor.current.published;
-    if (nextPublished && !editor.current.game_date) {
-      alert('Set a Game date before publishing.'); return;
-    }
-    const { data, error } = await supabase
-      .from('lineups')
-      .update({
-        published: nextPublished,
-        published_at: nextPublished ? new Date().toISOString() : null
-      })
-      .eq('id', editor.current.id)
-      .select()
-      .single();
-    if (error) { alert('Publish failed: ' + error.message); return; }
-    editor.current.published = data.published;
-    editor.current.published_at = data.published_at;
-    // Update cached lineup too
-    const idx = editor.lineups.findIndex(l => l.id === data.id);
-    if (idx >= 0) editor.lineups[idx] = data;
-    await logAudit(editor.team.id, 'lineup', data.id, nextPublished ? 'publish' : 'unpublish', {});
-    renderLineupsTab();
-  };
+  // Open match details modal
+  const openMdBtn = document.getElementById('open-match-details');
+  if (openMdBtn) openMdBtn.onclick = openMatchDetailsModal;
 
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
@@ -2084,12 +2172,14 @@ function hasUnsaved() {
   return Object.keys(c.slots).length > 0 || c.subs.some(Boolean) || c.opponent;
 }
 
-async function saveLineup() {
+async function saveLineup() { return saveLineupWithMsg(document.getElementById('save-msg')); }
+
+async function saveLineupWithMsg(msgEl) {
   const { team, lineups, current } = editor;
-  const msgEl = document.getElementById('save-msg');
-  msgEl.textContent = '';
+  if (msgEl) { msgEl.textContent = ''; msgEl.className = 'muted'; }
+  const showMsg = (text, cls) => { if (msgEl) { msgEl.textContent = text; msgEl.className = cls; } };
   const opp = (current.opponent || '').trim();
-  if (!opp) { msgEl.textContent = 'Opponent is required'; msgEl.className = 'error'; return; }
+  if (!opp) { showMsg('Opponent is required', 'error'); return; }
   // Auto-derive a name for backward compat / saved list display
   const typeLbl = current.match_type === 'friendly' ? 'Friendly'
                 : current.match_type === 'cup' ? 'Cup' : 'League';
@@ -2134,7 +2224,7 @@ async function saveLineup() {
   if (current.id) {
     // Update
     const { data, error } = await supabase.from('lineups').update(payload).eq('id', current.id).select().single();
-    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    if (error) { showMsg(error.message, 'error'); return; }
     const idx = lineups.findIndex(l => l.id === current.id);
     if (idx >= 0) lineups[idx] = data;
     await logAudit(team.id, 'lineup', data.id, 'update', { name });
@@ -2143,14 +2233,13 @@ async function saveLineup() {
     const { data: { user } } = await supabase.auth.getUser();
     payload.created_by = user.id;
     const { data, error } = await supabase.from('lineups').insert(payload).select().single();
-    if (error) { msgEl.textContent = error.message; msgEl.className = 'error'; return; }
+    if (error) { showMsg(error.message, 'error'); return; }
     lineups.unshift(data);
     editor.current.id = data.id;
     await logAudit(team.id, 'lineup', data.id, 'create', { name });
   }
 
-  msgEl.textContent = '✓ Saved';
-  msgEl.className = 'ok';
+  showMsg('✓ Saved', 'ok');
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
   renderLineupsTab();
 }
