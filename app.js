@@ -3339,10 +3339,16 @@ function wirePositionEditing() {
     lab.addEventListener('dblclick', (e) => {
       e.preventDefault(); e.stopPropagation();
       const idx = parseInt(lab.dataset.posLabel, 10);
+      const f = getFormation(editor.current.formation);
+      if (!Array.isArray(editor.current.lbl) || (f && editor.current.lbl.length !== f.lbl.length)) {
+        editor.current.lbl = f ? [...f.lbl] : [];
+      }
       const current = (editor.current.lbl[idx] || '').toUpperCase();
       openPositionLabelPicker(current, (next) => {
         if (next == null) return;
         editor.current.lbl[idx] = next.trim().toUpperCase().slice(0, 4);
+        // Trigger autosave if this lineup is already saved
+        if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
         renderLineupsTab();
       });
     });
