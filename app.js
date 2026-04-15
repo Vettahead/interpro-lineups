@@ -2097,7 +2097,11 @@ async function buildWhatsAppMessage(current, team) {
         .select('id, full_name, email')
         .in('id', ids);
       coachNames = (profs || [])
-        .map(p => (p.full_name || '').trim() || (p.email ? p.email.split('@')[0] : ''))
+        .map(p => {
+          const full = (p.full_name || '').trim();
+          if (!full) return ''; // skip coaches without a display name — never expose email
+          return full.split(/\s+/)[0]; // first name only
+        })
         .filter(Boolean);
     }
   }
