@@ -1904,7 +1904,8 @@ function formationCardHtml(canEdit, formationBtns) {
       <p class="muted" style="font-size:0.75rem;margin:0 0 0.5rem">Drag circles to reposition. Click label to rename.</p>
       <input type="text" id="fe-name" value="${escapeHtml(formationEdit.name)}" placeholder="e.g. 4-3-3 custom" />
       <button class="primary btn-full" id="fe-save" style="margin-top:0.5rem">✱ Save as formation</button>
-      <button class="btn-full" id="fe-cancel" style="margin-bottom:0">Done</button>
+      <button class="btn-full" id="fe-save-as-play" style="margin-top:0.35rem">✚ Save as play</button>
+      <button class="btn-full" id="fe-cancel" style="margin-bottom:0;margin-top:0.35rem">Done</button>
     `;
   }
   return `
@@ -1985,6 +1986,8 @@ function wireFormationEdit(rerender) {
   };
   const feSave = document.getElementById('fe-save');
   if (feSave) feSave.onclick = () => saveCustomFormation(rerender);
+  const feSaveAsPlay = document.getElementById('fe-save-as-play');
+  if (feSaveAsPlay) feSaveAsPlay.onclick = () => saveFormationEditAsPlay(rerender);
   const feCancel = document.getElementById('fe-cancel');
   if (feCancel) feCancel.onclick = () => { formationEdit = null; rerender(); };
   const feName = document.getElementById('fe-name');
@@ -2091,11 +2094,9 @@ async function saveCustomFormation(rerender) {
   if (!name) { alert('Give the formation a name.'); return; }
   if (FORMATIONS[name]) { alert(`"${name}" is a preset name. Pick a different name.`); return; }
 
-  const { data: { user } } = await supabase.auth.getUser();
   const payload = {
     team_id: team.id,
     name,
-    created_by: user.id,
     data: { pos: fe.pos, lbl: fe.lbl }
   };
   const { data, error } = await supabase.from('formations').insert(payload).select().single();
@@ -2104,6 +2105,46 @@ async function saveCustomFormation(rerender) {
   await logAudit(team.id, 'formation', data.id, 'create', { name });
   editor.current.formation = name;
   formationEdit = null;
+  if (rerender) rerender();
+}
+
+async function saveFormationEditAsPlay(rerender) {
+  const { team, plays, current } = editor;
+  const fe = formationEdit;
+  if (!fe) return;
+  const name = prompt('Play name:', (fe.name || 'New play').trim() || 'New play');
+  if (!name) return;
+  const formationName = (fe.name || '').trim() || name;
+
+  // Ensure the formation exists (save inline if new) so the play references something real
+  let formationRef = formationName;
+  if (!FORMATIONS[formationName] && !editor.customFormations.some(c => c.name === formationName)) {
+    const { data, error } = await supabase.from('formations').insert({
+      team_id: team.id, name: formationName, data: { pos: fe.pos, lbl: fe.lbl }
+    }).select().single();
+    if (error) { alert('Save failed: ' + error.message); return; }
+    editor.customFormations.push(data);
+  }
+
+  const payload = {
+    team_id: team.id,
+    name,
+    formation: formationRef,
+    data: {
+      formationPos: fe.pos,
+      formationLbl: fe.lbl,
+      arrows: current?.arrows || [],
+      zones: current?.zones || [],
+      ball: current?.ballPos || null,
+      ballVisible: !!current?.ballVisible
+    }
+  };
+  const { data, error } = await supabase.from('plays').insert(payload).select().single();
+  if (error) { alert('Save failed: ' + error.message); return; }
+  plays.push(data);
+  await logAudit(team.id, 'play', data.id, 'create', { name });
+  formationEdit = null;
+  alert('Play saved: ' + name);
   if (rerender) rerender();
 }
 
