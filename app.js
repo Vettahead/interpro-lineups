@@ -1560,81 +1560,46 @@ function renderSquadTab(team, canEdit, players) {
   `;
 
   const cardHtml = (p) => {
-    const isOpen = expandedPlayers.has(p.id);
+    const numBadge = `<div class="sc-num-badge" style="position:absolute;top:-4px;left:-4px;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:#1e3a8a;color:#fff;font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.25);z-index:2">${p.number ?? '–'}</div>`;
     return `
-    <div class="sc-card ${isOpen ? 'open' : ''}" data-player="${p.id}">
-      <button class="sc-header" data-toggle type="button">
-        <div class="sc-chip ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
-          ${p.photo_url ? '' : `<div class="sc-chip-num">${p.number ?? '–'}</div>`}
+    <div class="sc-card" data-player="${p.id}">
+      <button class="sc-header" data-open-modal type="button">
+        <div style="position:relative;flex-shrink:0">
+          ${numBadge}
+          <div class="sc-chip ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+            ${p.photo_url ? '' : `<div class="sc-chip-initials" style="color:#fff;font-weight:600;font-size:1rem">${escapeHtml((shortName(p.name)[0] || '?').toUpperCase())}</div>`}
+          </div>
         </div>
         <div class="sc-chip-info">
           <div class="sc-chip-name">${escapeHtml(shortName(p.name))}</div>
           <div class="sc-chip-pos">${p.position || '—'}</div>
         </div>
-        <div class="sc-chevron">${isOpen ? '▾' : '▸'}</div>
+        <div class="sc-chevron">✎</div>
       </button>
-      ${isOpen ? `
-      <div class="sc-details">
-        <label>Photo</label>
-        <div class="photo-row">
-          <div class="photo-preview ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
-            ${p.photo_url ? '' : '<span>No photo</span>'}
-          </div>
-          <div class="photo-actions">
-            <input type="file" accept="image/jpeg,image/png,image/webp" data-photo-file id="photo-file-${p.id}" style="display:none" ${canEdit ? '' : 'disabled'} />
-            <button type="button" class="btn-secondary" data-photo-pick>${p.photo_url ? 'Replace' : 'Upload'} photo</button>
-            ${p.photo_url ? `<button type="button" class="btn-secondary" data-photo-remove>Remove</button>` : ''}
-            <div class="muted photo-msg" data-photo-msg style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
-          </div>
-        </div>
-        <label>Name</label>
-        <input type="text" class="field" value="${escapeHtml(p.name || '')}" data-field="name" ${canEdit ? '' : 'disabled'} />
-        <div class="sc-row-2">
-          <div>
-            <label>Number</label>
-            <input type="number" class="field" min="1" max="99" value="${p.number ?? ''}" data-field="number" ${canEdit ? '' : 'disabled'} />
-          </div>
-          <div>
-            <label>Position</label>
-            <select class="field" data-field="position" ${canEdit ? '' : 'disabled'}>${posOptions(p.position || '')}</select>
-          </div>
-        </div>
-        <label>Parent 1 name</label>
-        <input type="text" class="field" value="${escapeHtml(p.parent1_name || '')}" data-field="parent1_name" ${canEdit ? '' : 'disabled'} />
-        <label>Parent 1 phone</label>
-        <input type="tel" class="field" value="${escapeHtml(p.parent1_phone || '')}" data-field="parent1_phone" ${canEdit ? '' : 'disabled'} />
-        <label>Parent 2 name</label>
-        <input type="text" class="field" value="${escapeHtml(p.parent2_name || '')}" data-field="parent2_name" ${canEdit ? '' : 'disabled'} />
-        <label>Parent 2 phone</label>
-        <input type="tel" class="field" value="${escapeHtml(p.parent2_phone || '')}" data-field="parent2_phone" ${canEdit ? '' : 'disabled'} />
-        <div class="codes-box" style="margin-top:0.6rem;padding:0.5rem 0.6rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
-          <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:#666;margin-bottom:0.25rem">Access codes</div>
-          <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.95rem">
-            <div>Personal: <strong>${escapeHtml(p.access_code || '—')}</strong></div>
-            ${p.family_code
-              ? `<div style="margin-top:0.15rem">Family: <strong>${escapeHtml(p.family_code)}</strong> ${(() => {
-                  const sibs = (players || []).filter(q => q.id !== p.id && q.family_code === p.family_code);
-                  return sibs.length ? `<span class="muted" style="font-family:system-ui;font-size:0.75rem">— shared with ${sibs.map(s => escapeHtml(shortName(s.name))).join(', ')}</span>` : '';
-                })()}</div>`
-              : ''}
-          </div>
-          ${canEdit ? `
-            <div style="display:flex;gap:0.35rem;margin-top:0.5rem;flex-wrap:wrap">
-              <button type="button" class="btn-secondary" data-link-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">${p.family_code ? 'Manage siblings…' : '🔗 Link sibling…'}</button>
-              ${p.family_code ? `<button type="button" class="btn-secondary" data-unlink-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">Unlink</button>` : ''}
-            </div>
-          ` : ''}
-          <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player.</div>
-        </div>
-        ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
-      </div>` : ''}
     </div>
   `;
   };
 
-  const grid = visible.length
-    ? `<div class="sc-grid">${visible.map(cardHtml).join('')}</div>`
-    : `<p class="muted" style="text-align:center;padding:2rem">No players in this group.</p>`;
+  // Build the grid — when filter is "All", split into position groups with headings
+  let grid;
+  if (!visible.length) {
+    grid = `<p class="muted" style="text-align:center;padding:2rem">No players in this group.</p>`;
+  } else if (currentFilter === 'All') {
+    const groupOrder = ['Goalkeepers','Defenders','Midfielders','Forwards','Unassigned'];
+    const byGroup = {};
+    visible.forEach(p => {
+      const g = groupForPos(p.position || '');
+      (byGroup[g] = byGroup[g] || []).push(p);
+    });
+    grid = groupOrder
+      .filter(g => byGroup[g] && byGroup[g].length)
+      .map(g => `
+        <h4 style="margin:1rem 0 0.5rem;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#555">${g} <span class="muted" style="font-weight:normal">(${byGroup[g].length})</span></h4>
+        <div class="sc-grid">${byGroup[g].map(cardHtml).join('')}</div>
+      `).join('');
+  } else {
+    grid = `<div class="sc-grid">${visible.map(cardHtml).join('')}</div>`;
+  }
 
   tabEl.innerHTML = `
     <div class="squad-layout">
@@ -1765,17 +1730,89 @@ function renderSquadTab(team, canEdit, players) {
     };
   }
 
-  tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
-    const pid = cardEl.dataset.player;
-    const toggleBtn = cardEl.querySelector('[data-toggle]');
-    if (toggleBtn) {
-      toggleBtn.onclick = () => {
-        if (expandedPlayers.has(pid)) expandedPlayers.delete(pid);
-        else expandedPlayers.add(pid);
-        renderSquadTab(team, canEdit, players);
-      };
-    }
-    cardEl.querySelectorAll('[data-field]').forEach(input => {
+  // Build the details form HTML for a player (used by modal)
+  const detailsHtml = (p) => `
+    <label>Photo</label>
+    <div class="photo-row">
+      <div class="photo-preview ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+        ${p.photo_url ? '' : '<span>No photo</span>'}
+      </div>
+      <div class="photo-actions">
+        <input type="file" accept="image/jpeg,image/png,image/webp" data-photo-file id="photo-file-${p.id}" style="display:none" ${canEdit ? '' : 'disabled'} />
+        <button type="button" class="btn-secondary" data-photo-pick>${p.photo_url ? 'Replace' : 'Upload'} photo</button>
+        ${p.photo_url ? `<button type="button" class="btn-secondary" data-photo-remove>Remove</button>` : ''}
+        <div class="muted photo-msg" data-photo-msg style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
+      </div>
+    </div>
+    <label>Name</label>
+    <input type="text" class="field" value="${escapeHtml(p.name || '')}" data-field="name" ${canEdit ? '' : 'disabled'} />
+    <div class="sc-row-2">
+      <div>
+        <label>Number</label>
+        <input type="number" class="field" min="1" max="99" value="${p.number ?? ''}" data-field="number" ${canEdit ? '' : 'disabled'} />
+      </div>
+      <div>
+        <label>Position</label>
+        <select class="field" data-field="position" ${canEdit ? '' : 'disabled'}>${posOptions(p.position || '')}</select>
+      </div>
+    </div>
+    <label>Parent 1 name</label>
+    <input type="text" class="field" value="${escapeHtml(p.parent1_name || '')}" data-field="parent1_name" ${canEdit ? '' : 'disabled'} />
+    <label>Parent 1 phone</label>
+    <input type="tel" class="field" value="${escapeHtml(p.parent1_phone || '')}" data-field="parent1_phone" ${canEdit ? '' : 'disabled'} />
+    <label>Parent 2 name</label>
+    <input type="text" class="field" value="${escapeHtml(p.parent2_name || '')}" data-field="parent2_name" ${canEdit ? '' : 'disabled'} />
+    <label>Parent 2 phone</label>
+    <input type="tel" class="field" value="${escapeHtml(p.parent2_phone || '')}" data-field="parent2_phone" ${canEdit ? '' : 'disabled'} />
+    <div class="codes-box" style="margin-top:0.6rem;padding:0.5rem 0.6rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
+      <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:#666;margin-bottom:0.25rem">Access codes</div>
+      <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.95rem">
+        <div>Personal: <strong>${escapeHtml(p.access_code || '—')}</strong></div>
+        ${p.family_code
+          ? `<div style="margin-top:0.15rem">Family: <strong>${escapeHtml(p.family_code)}</strong> ${(() => {
+              const sibs = (players || []).filter(q => q.id !== p.id && q.family_code === p.family_code);
+              return sibs.length ? `<span class="muted" style="font-family:system-ui;font-size:0.75rem">— shared with ${sibs.map(s => escapeHtml(shortName(s.name))).join(', ')}</span>` : '';
+            })()}</div>`
+          : ''}
+      </div>
+      ${canEdit ? `
+        <div style="display:flex;gap:0.35rem;margin-top:0.5rem;flex-wrap:wrap">
+          <button type="button" class="btn-secondary" data-link-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">${p.family_code ? 'Manage siblings…' : '🔗 Link sibling…'}</button>
+          ${p.family_code ? `<button type="button" class="btn-secondary" data-unlink-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">Unlink</button>` : ''}
+        </div>
+      ` : ''}
+      <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player.</div>
+    </div>
+    ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
+  `;
+
+  const openPlayerModal = (pid) => {
+    const p = players.find(x => x.id === pid);
+    if (!p) return;
+    const existing = document.querySelector('.player-edit-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'map-modal-overlay player-edit-overlay';
+    overlay.innerHTML = `
+      <div class="map-modal" style="max-width:480px;width:92vw;max-height:90vh;display:flex;flex-direction:column">
+        <div class="map-modal-header">
+          <strong>${escapeHtml(p.name || 'Player')} ${p.number != null ? `· #${p.number}` : ''}</strong>
+          <button class="btn-secondary" id="pe-close" type="button">✕</button>
+        </div>
+        <div class="map-modal-body" style="padding:1rem;overflow-y:auto;flex:1">
+          ${detailsHtml(p)}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#pe-close').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    wirePlayerDetails(overlay, pid, close);
+  };
+
+  // Wire handlers inside a scoped root (modal or card)
+  const wirePlayerDetails = (root, pid, onChange) => {
+    root.querySelectorAll('[data-field]').forEach(input => {
       input.addEventListener('change', async () => {
         const field = input.dataset.field;
         let value = input.value;
@@ -1783,67 +1820,53 @@ function renderSquadTab(team, canEdit, players) {
         const player = players.find(p => p.id === pid);
         const oldValue = player ? player[field] : null;
         if (oldValue === value) return;
-
         const { error } = await supabase.from('players').update({ [field]: value }).eq('id', pid);
         if (error) { alert('Save failed: ' + error.message); input.value = oldValue ?? ''; return; }
-
         if (player) player[field] = value;
         await logAudit(team.id, 'player', pid, 'update', { field, from: oldValue, to: value });
-
         input.classList.add('saved');
         setTimeout(() => input.classList.remove('saved'), 600);
-
-        if (field === 'number' || field === 'position') {
+        if (field === 'number' || field === 'position' || field === 'name') {
           players.sort((a, b) => (a.number ?? 999) - (b.number ?? 999));
           renderSquadTab(team, canEdit, players);
         }
       });
     });
-
-    const removeBtn = cardEl.querySelector('[data-remove]');
-    if (removeBtn) {
-      removeBtn.onclick = async () => {
-        const player = players.find(p => p.id === pid);
-        if (!confirm(`Remove ${player?.name || 'this player'}?`)) return;
-        const { error } = await supabase.from('players').delete().eq('id', pid);
-        if (error) { alert('Remove failed: ' + error.message); return; }
-        await logAudit(team.id, 'player', pid, 'delete', { name: player?.name });
-        const idx = players.findIndex(p => p.id === pid);
-        if (idx >= 0) players.splice(idx, 1);
-        renderSquadTab(team, canEdit, players);
-      };
-    }
-
-    // Link / unlink siblings
-    const linkBtn = cardEl.querySelector('[data-link-sibling]');
-    if (linkBtn) {
-      linkBtn.onclick = () => openLinkSiblingModal(team, players, pid, () => renderSquadTab(team, canEdit, players));
-    }
-    const unlinkBtn = cardEl.querySelector('[data-unlink-sibling]');
-    if (unlinkBtn) {
-      unlinkBtn.onclick = async () => {
-        const player = players.find(p => p.id === pid);
-        if (!player?.family_code) return;
-        if (!confirm(`Remove ${player.name} from the family group? Other siblings keep the shared code.`)) return;
-        const { error } = await supabase.from('players').update({ family_code: null }).eq('id', pid);
-        if (error) { alert('Unlink failed: ' + error.message); return; }
-        // If only one sibling left, clear theirs too so the group dissolves cleanly
-        const remaining = players.filter(q => q.id !== pid && q.family_code === player.family_code);
-        if (remaining.length === 1) {
-          await supabase.from('players').update({ family_code: null }).eq('id', remaining[0].id);
-          remaining[0].family_code = null;
-        }
-        player.family_code = null;
-        await logAudit(team.id, 'player', pid, 'update', { field: 'family_code', to: null });
-        renderSquadTab(team, canEdit, players);
-      };
-    }
-
-    // Photo upload/remove
-    const photoPickBtn = cardEl.querySelector('[data-photo-pick]');
-    const photoFileInput = cardEl.querySelector('[data-photo-file]');
-    const photoRemoveBtn = cardEl.querySelector('[data-photo-remove]');
-    const photoMsg = cardEl.querySelector('[data-photo-msg]');
+    const removeBtn = root.querySelector('[data-remove]');
+    if (removeBtn) removeBtn.onclick = async () => {
+      const player = players.find(p => p.id === pid);
+      if (!confirm(`Remove ${player?.name || 'this player'}?`)) return;
+      const { error } = await supabase.from('players').delete().eq('id', pid);
+      if (error) { alert('Remove failed: ' + error.message); return; }
+      await logAudit(team.id, 'player', pid, 'delete', { name: player?.name });
+      const idx = players.findIndex(p => p.id === pid);
+      if (idx >= 0) players.splice(idx, 1);
+      if (onChange) onChange();
+      renderSquadTab(team, canEdit, players);
+    };
+    const linkBtn = root.querySelector('[data-link-sibling]');
+    if (linkBtn) linkBtn.onclick = () => openLinkSiblingModal(team, players, pid, () => { if (onChange) onChange(); renderSquadTab(team, canEdit, players); });
+    const unlinkBtn = root.querySelector('[data-unlink-sibling]');
+    if (unlinkBtn) unlinkBtn.onclick = async () => {
+      const player = players.find(p => p.id === pid);
+      if (!player?.family_code) return;
+      if (!confirm(`Remove ${player.name} from the family group? Other siblings keep the shared code.`)) return;
+      const { error } = await supabase.from('players').update({ family_code: null }).eq('id', pid);
+      if (error) { alert('Unlink failed: ' + error.message); return; }
+      const remaining = players.filter(q => q.id !== pid && q.family_code === player.family_code);
+      if (remaining.length === 1) {
+        await supabase.from('players').update({ family_code: null }).eq('id', remaining[0].id);
+        remaining[0].family_code = null;
+      }
+      player.family_code = null;
+      await logAudit(team.id, 'player', pid, 'update', { field: 'family_code', to: null });
+      if (onChange) onChange();
+      renderSquadTab(team, canEdit, players);
+    };
+    const photoPickBtn = root.querySelector('[data-photo-pick]');
+    const photoFileInput = root.querySelector('[data-photo-file]');
+    const photoRemoveBtn = root.querySelector('[data-photo-remove]');
+    const photoMsg = root.querySelector('[data-photo-msg]');
     if (photoPickBtn && photoFileInput) {
       photoPickBtn.onclick = () => photoFileInput.click();
       photoFileInput.onchange = async () => {
@@ -1851,16 +1874,11 @@ function renderSquadTab(team, canEdit, players) {
         if (!file) return;
         if (file.size > 10 * 1024 * 1024) {
           if (photoMsg) { photoMsg.textContent = 'File too large (max 10MB)'; photoMsg.className = 'muted photo-msg error'; }
-          photoFileInput.value = '';
-          return;
+          photoFileInput.value = ''; return;
         }
-        // Open cropper first
         const cropped = await openPhotoCropper(file);
         photoFileInput.value = '';
-        if (!cropped) {
-          if (photoMsg) { photoMsg.textContent = ''; photoMsg.className = 'muted photo-msg'; }
-          return;
-        }
+        if (!cropped) { if (photoMsg) { photoMsg.textContent = ''; photoMsg.className = 'muted photo-msg'; } return; }
         if (photoMsg) { photoMsg.textContent = 'Uploading…'; photoMsg.className = 'muted photo-msg'; }
         photoPickBtn.disabled = true;
         try {
@@ -1868,6 +1886,7 @@ function renderSquadTab(team, canEdit, players) {
           const player = players.find(p => p.id === pid);
           if (player) player.photo_url = updated.photo_url;
           await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: updated.photo_url });
+          if (onChange) onChange();
           renderSquadTab(team, canEdit, players);
         } catch (err) {
           if (photoMsg) { photoMsg.textContent = 'Upload failed: ' + (err.message || err); photoMsg.className = 'muted photo-msg error'; }
@@ -1876,23 +1895,28 @@ function renderSquadTab(team, canEdit, players) {
         }
       };
     }
-    if (photoRemoveBtn) {
-      photoRemoveBtn.onclick = async () => {
-        const player = players.find(p => p.id === pid);
-        if (!confirm(`Remove photo for ${player?.name || 'this player'}?`)) return;
-        if (photoMsg) { photoMsg.textContent = 'Removing…'; photoMsg.className = 'muted photo-msg'; }
-        photoRemoveBtn.disabled = true;
-        try {
-          await removePlayerPhoto(pid, player?.photo_url);
-          if (player) player.photo_url = null;
-          await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: null });
-          renderSquadTab(team, canEdit, players);
-        } catch (err) {
-          if (photoMsg) { photoMsg.textContent = 'Remove failed: ' + (err.message || err); photoMsg.className = 'muted photo-msg error'; }
-          photoRemoveBtn.disabled = false;
-        }
-      };
-    }
+    if (photoRemoveBtn) photoRemoveBtn.onclick = async () => {
+      const player = players.find(p => p.id === pid);
+      if (!confirm(`Remove photo for ${player?.name || 'this player'}?`)) return;
+      if (photoMsg) { photoMsg.textContent = 'Removing…'; photoMsg.className = 'muted photo-msg'; }
+      photoRemoveBtn.disabled = true;
+      try {
+        await removePlayerPhoto(pid, player?.photo_url);
+        if (player) player.photo_url = null;
+        await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: null });
+        if (onChange) onChange();
+        renderSquadTab(team, canEdit, players);
+      } catch (err) {
+        if (photoMsg) { photoMsg.textContent = 'Remove failed: ' + (err.message || err); photoMsg.className = 'muted photo-msg error'; }
+        photoRemoveBtn.disabled = false;
+      }
+    };
+  };
+
+  tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
+    const pid = cardEl.dataset.player;
+    const openBtn = cardEl.querySelector('[data-open-modal]');
+    if (openBtn) openBtn.onclick = () => openPlayerModal(pid);
   });
 }
 
@@ -2576,7 +2600,8 @@ function renderLineupsTab() {
             <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
               ${_posEditMode
                 ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
-                   <button class="btn-full" id="pos-edit-save">💾 Save as formation…</button>
+                   <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+                   <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
                    <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
                    <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
                 : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
@@ -3316,6 +3341,49 @@ function wireLineupEvents() {
     delete editor.current.lbl;
     _posEditMode = false;
     // Persist formation-name change on the lineup itself
+    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
+    renderLineupsTab();
+  };
+
+  const posSaveNew = document.getElementById('pos-edit-save-new');
+  if (posSaveNew) posSaveNew.onclick = async () => {
+    const baseName = editor.current.formation;
+    const suggested = baseName + ' (custom)';
+    const name = prompt('Save as new formation — name:', suggested);
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    // Check for name clash with existing custom formations
+    const clash = (editor.customFormations || []).find(cf => cf.name === trimmed);
+    if (clash && !confirm(`A formation named "${trimmed}" already exists. Overwrite it?`)) return;
+
+    const payloadData = {
+      pos: editor.current.pos.map(p => [...p]),
+      lbl: [...editor.current.lbl]
+    };
+
+    if (clash) {
+      const { data, error } = await supabase.from('formations')
+        .update({ data: payloadData, name: trimmed })
+        .eq('id', clash.id)
+        .select().single();
+      if (error) { alert('Save failed: ' + error.message); return; }
+      const idx = editor.customFormations.findIndex(cf => cf.id === clash.id);
+      if (idx >= 0) editor.customFormations[idx] = data;
+      await logAudit(editor.team.id, 'formation', data.id, 'update', { name: trimmed, from: 'edit-positions' });
+    } else {
+      const payload = { team_id: editor.team.id, name: trimmed, data: payloadData };
+      const { data, error } = await supabase.from('formations').insert(payload).select().single();
+      if (error) { alert('Save failed: ' + error.message); return; }
+      editor.customFormations = editor.customFormations || [];
+      editor.customFormations.unshift(data);
+      await logAudit(editor.team.id, 'formation', data.id, 'create', { name: trimmed, from: 'edit-positions' });
+    }
+
+    editor.current.formation = trimmed;
+    delete editor.current.pos;
+    delete editor.current.lbl;
+    _posEditMode = false;
     if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
     renderLineupsTab();
   };
