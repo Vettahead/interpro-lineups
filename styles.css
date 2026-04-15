@@ -412,6 +412,14 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   padding: 0 0.2rem;
 }
 .f-btn .f-del:hover { color: #900; }
+.f-btn .f-edit {
+  float: right;
+  margin-left: 0.4rem;
+  color: var(--blue-2);
+  font-weight: bold;
+  padding: 0 0.2rem;
+}
+.f-btn .f-edit:hover { color: var(--blue-1); }
 
 /* Formation edit mode — position circles (not player chips) */
 .pitch-editing-formation .slots-layer { pointer-events: auto; }
