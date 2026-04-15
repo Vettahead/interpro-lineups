@@ -380,8 +380,16 @@ async function renderTeamsHome(user) {
 }
 
 // ---------- Parent / public view ----------
-async function renderParentView(lineupId) {
-  appEl.innerHTML = `<p class="loading">Loading lineup…</p>`;
+let _parentViewPoll = null;
+let _parentViewLastHash = null;
+
+async function renderParentView(lineupId, opts = {}) {
+  // Stop any existing poll if we're navigating away or re-rendering fresh
+  if (!opts.fromPoll) {
+    if (_parentViewPoll) { clearInterval(_parentViewPoll); _parentViewPoll = null; }
+    _parentViewLastHash = null;
+    appEl.innerHTML = `<p class="loading">Loading lineup…</p>`;
+  }
   if (!lineupId) {
     appEl.innerHTML = `<div class="parent-view"><p class="error">No lineup specified.</p></div>`;
     return;
@@ -412,6 +420,19 @@ async function renderParentView(lineupId) {
   ]);
   const team = teamRes.data || { name: '' };
   const players = playersRes.data || [];
+
+  // Skip re-render if data is unchanged (poll case)
+  const dataHash = JSON.stringify({
+    upd: lineup.updated_at, data: lineup.data,
+    op: lineup.opponent, gd: lineup.game_date, mt: lineup.match_type, ha: lineup.home_away,
+    ko: lineup.kickoff_time, ar: lineup.arrival_time, nt: lineup.notes,
+    ln: lineup.location_name, lp: lineup.location_postcode, llat: lineup.location_lat, llng: lineup.location_lng,
+    pub: lineup.published,
+    tn: team.name, tg: team.home_ground_name, tp: team.home_ground_postcode, tlat: team.home_ground_lat, tlng: team.home_ground_lng,
+    pl: players.map(p => [p.id, p.name, p.number]).sort()
+  });
+  if (opts.fromPoll && dataHash === _parentViewLastHash) return;
+  _parentViewLastHash = dataHash;
 
   // Seed editor so renderFixturePitch (which reads from editor.players + getFormation) works
   editor = { team, canEdit: false, players, lineups: [lineup], current: null, customFormations: [] };
@@ -502,16 +523,33 @@ async function renderParentView(lineupId) {
       </div>
 
       <div class="pv-footer">
-        <a href="#" class="muted">interpro-lineups</a>
+        <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
+        <div class="muted" style="margin-top:0.5rem;font-size:0.7rem">Auto-updates every 15s · Last loaded ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
       </div>
     </div>
   `;
 
   renderFixturePitch(lineup);
+
+  document.getElementById('pv-refresh')?.addEventListener('click', () => {
+    _parentViewLastHash = null;
+    renderParentView(lineupId);
+  });
+
   // Re-draw on resize so tactics canvas stays crisp
   window.addEventListener('resize', () => {
     if (currentRoute().name === 'view') renderFixturePitch(lineup);
   }, { once: false });
+
+  // Start polling (only on first / non-poll render)
+  if (!opts.fromPoll && !_parentViewPoll) {
+    _parentViewPoll = setInterval(() => {
+      if (currentRoute().name !== 'view') {
+        clearInterval(_parentViewPoll); _parentViewPoll = null; return;
+      }
+      renderParentView(lineupId, { fromPoll: true }).catch(e => console.warn('poll failed', e));
+    }, 15000);
+  }
 }
 
 // ---------- Team dashboard ----------
