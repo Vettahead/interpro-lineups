@@ -643,6 +643,7 @@ async function renderTeamDashboard(user, teamId) {
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
+      <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
     `;
     tabsEl.querySelectorAll('.h-tab[data-tab]').forEach(b => {
       b.onclick = () => {
@@ -703,6 +704,248 @@ async function renderTeamDashboard(user, teamId) {
       current: newLineupState()
     };
     renderMembersTab(user);
+  } else if (activeTab === 'help') {
+    renderHelpTab(canEdit, role);
+  }
+}
+
+// ---------- Help / FAQ tab ----------
+const HELP_SECTIONS = [
+  {
+    id: 'getting-started', title: 'Getting started', adminOnly: false,
+    body: `
+      <h4>Signing in for the first time</h4>
+      <p>Enter your email and choose <strong>Sign up</strong>, then set a password (min 8 characters). You'll be signed in straight away.</p>
+      <h4>I was sent an invite email</h4>
+      <p>Click the link, set a password (or sign in), and you'll be added to the team automatically.</p>
+      <h4>Why am I being asked to set a password?</h4>
+      <p>If you arrived via a magic link or invite, the app prompts you once to set a password so you can log back in from any device.</p>
+      <h4>Signing out</h4>
+      <p>Click <strong>Log out</strong> in the top-right of the header.</p>
+    `
+  },
+  {
+    id: 'teams', title: 'Teams', adminOnly: false,
+    body: `
+      <h4>Switching between teams</h4>
+      <p>Click <strong>← Your teams</strong> in the top-left to go back to the team list.</p>
+      <h4>Who can see my team?</h4>
+      <p>Only people you invite as members. The exception is <strong>published lineups</strong>, which can be shared with anyone via a public link.</p>
+    `
+  },
+  {
+    id: 'create-team', title: 'Creating a team', adminOnly: true,
+    body: `
+      <p>On the <strong>Your teams</strong> page, scroll to <strong>Create a team</strong>, type a name and click <strong>Create</strong>. You'll become the team's admin automatically.</p>
+    `
+  },
+  {
+    id: 'squad', title: 'Squad — players & home ground', adminOnly: false,
+    body: `
+      <h4>Adding a player <em>(coach/admin only)</em></h4>
+      <p>Open <strong>Squad</strong> and click <strong>+ Add player</strong>. Fill in name, shirt number, preferred positions and notes. Save.</p>
+      <h4>What does the position field do?</h4>
+      <p>Preferred positions colour-code players on the lineup picker. They're suggestions, not restrictions.</p>
+      <h4>Editing or removing a player <em>(coach/admin only)</em></h4>
+      <p>Click a player to expand their card, then use <strong>Edit</strong> or <strong>Remove</strong>. Removing a player won't break old lineups — they'll just appear as empty slots.</p>
+      <h4>Setting the home ground <em>(coach/admin only)</em></h4>
+      <p>At the top of the Squad tab, the <strong>Home ground</strong> card lets you set venue name + postcode and fine-tune the map pin. This auto-fills for every Home game.</p>
+      <h4>Why fine-tune the map?</h4>
+      <p>UK postcodes can cover a large area. Drag the pin to the exact spot of the pitch entrance/car park so parents can find you.</p>
+    `
+  },
+  {
+    id: 'lineups', title: 'Lineups', adminOnly: true,
+    body: `
+      <h4>Creating a lineup</h4>
+      <p>Open <strong>Lineups</strong> → <strong>+ New lineup</strong>. Fill in match details and arrange players on the pitch.</p>
+      <h4>Setting match details</h4>
+      <p>Click the blue <strong>📋 Arrange match</strong> button. The popup has Opponent, Match type (Friendly/League/Cup), Home/Away, Game date, Kick off, Team arrival, Notes, and Venue. For Home games the venue auto-fills from your Squad-tab home ground; for Away games you can set venue + fine-tune the map.</p>
+      <h4>Adding players to the pitch</h4>
+      <p>Drag a player from <strong>Available players</strong> onto a position slot. Drag one onto another to swap. Drag back to the list to remove.</p>
+      <h4>Changing formation</h4>
+      <p>Open the <strong>Formation</strong> card and pick a preset (4-3-3, 4-4-2, etc.) or a custom one.</p>
+      <h4>Custom formations</h4>
+      <p>In the Formation card click <strong>+ Build custom</strong>. Drag dots, label positions, save. Custom formations show alongside presets.</p>
+      <h4>Subs</h4>
+      <p>Drag players to the <strong>Substitutes</strong> strip below the pitch (max 5).</p>
+      <h4>Tactics</h4>
+      <p>Press/Defensive lines (toggle and drag), arrows (click-drag, click to bend), and a movable ball. Use Clear to reset.</p>
+      <h4>Saving</h4>
+      <p>The <strong>Save lineup</strong> button is in the match-details popup. Saved lineups appear on the left.</p>
+      <h4>Loading or deleting saved lineups</h4>
+      <p>Click any item in <strong>Saved lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
+    `
+  },
+  {
+    id: 'publish', title: 'Publishing & sharing with parents', adminOnly: true,
+    body: `
+      <h4>What does Publish do?</h4>
+      <p>Publishing makes the lineup visible to anyone with the share link — no login. Drafts stay private.</p>
+      <h4>How to publish</h4>
+      <p>Open the lineup → <strong>📋 Arrange match</strong> → <strong>Publish lineup</strong>. The card shows a green ● Published indicator.</p>
+      <h4>Sending the link</h4>
+      <p>After publishing, click <strong>🔗 Copy share link for parents</strong>. Paste into WhatsApp/text.</p>
+      <h4>Do I need to re-share if I change something?</h4>
+      <p>No. The link always points to the latest version. Changes show up in the parent view within 15 seconds (or instantly via their <strong>↻ Refresh</strong> button).</p>
+      <h4>Unpublishing</h4>
+      <p>Open the lineup → <strong>📋 Arrange match</strong> → <strong>Unpublish</strong>. The link stops working immediately.</p>
+      <h4>What parents see</h4>
+      <p>Team vs opponent, date/kick-off/arrival, venue + map + what3words, coach notes, the full pitch with players, and subs. They don't see drafts, other lineups or admin data.</p>
+    `
+  },
+  {
+    id: 'plays', title: 'Plays', adminOnly: true,
+    body: `
+      <h4>What's a play?</h4>
+      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns.</p>
+      <h4>Saving a play</h4>
+      <p>Set up the formation/tactics on a lineup, then click <strong>Save as play</strong>. Name it.</p>
+      <h4>Using a saved play</h4>
+      <p>On Lineups, click <strong>Load from play</strong> in the Tactics section. Formation, arrows, zones and ball copy onto your current lineup; placed players stay.</p>
+    `
+  },
+  {
+    id: 'fixtures', title: 'Fixtures tab', adminOnly: false,
+    body: `
+      <h4>What is it?</h4>
+      <p>An overview of the season. The next game appears big at the top with the pitch and details. Calendar and Upcoming/Recent are collapsible cards below.</p>
+      <h4>Why don't draft lineups show?</h4>
+      <p>Fixtures only shows <strong>published</strong> lineups by default. Coaches/admins can tick <strong>Show draft lineups</strong> at the bottom of Upcoming.</p>
+      <h4>Jumping to a game</h4>
+      <p>Click any highlighted day on the calendar, or any item in Upcoming/Recent.</p>
+    `
+  },
+  {
+    id: 'members', title: 'Members & roles', adminOnly: true,
+    body: `
+      <h4>Roles</h4>
+      <ul>
+        <li><strong>Admin</strong> — full control: edit team, manage members, delete the team</li>
+        <li><strong>Coach</strong> — edit squad, lineups, plays, publish lineups</li>
+        <li><strong>Parent</strong> — read-only access for their child's team</li>
+        <li><strong>Viewer</strong> — read-only access (rare; assistants)</li>
+      </ul>
+      <h4>Inviting someone</h4>
+      <p>Open <strong>Members</strong> → <strong>+ Invite</strong>. Enter email + role. They get an email; signing up adds them automatically.</p>
+      <h4>Email didn't arrive</h4>
+      <p>Check spam. If still missing, resend from the Members list.</p>
+      <h4>Changing a role</h4>
+      <p>Click the role next to a member's name and pick a new one. Admins can change anyone; coaches can manage parents/viewers but not other coaches/admins.</p>
+      <h4>Removing a member</h4>
+      <p>Click the <strong>×</strong> next to their entry. Their account isn't deleted — just their team membership.</p>
+    `
+  },
+  {
+    id: 'parent-view', title: 'Parent view (public link)', adminOnly: false,
+    body: `
+      <h4>Do I need to download an app?</h4>
+      <p>No. The link opens in any browser. It works on phones, tablets and computers.</p>
+      <h4>Do I need to log in?</h4>
+      <p>No. The share link is public.</p>
+      <h4>How often does it refresh?</h4>
+      <p>Automatically every 15 seconds. There's also a <strong>↻ Refresh</strong> button at the bottom.</p>
+      <h4>What's the ///what3words link?</h4>
+      <p>A three-word address pinpoints a 3m × 3m square. Tap it on a phone for precise directions.</p>
+    `
+  },
+  {
+    id: 'troubleshooting', title: 'Tips & troubleshooting', adminOnly: false,
+    body: `
+      <h4>My changes aren't saving <em>(coaches)</em></h4>
+      <p>Each lineup needs a name (auto-generated as "vs Opponent") and a date. Check the form for missing required info.</p>
+      <h4>I can't see a player I added</h4>
+      <p>Make sure you're on the right team — squads are per-team.</p>
+      <h4>The pitch looks squashed on my phone</h4>
+      <p>Scroll the page or refresh your browser; the pitch should resize to fit.</p>
+      <h4>A parent says the share link doesn't work <em>(coaches)</em></h4>
+      <p>Check the lineup is still <strong>● Published</strong>. Unpublishing or deleting the lineup breaks the link.</p>
+      <h4>Where is my data stored?</h4>
+      <p>In a Supabase database in the cloud. Only members of your team can read your private team data.</p>
+      <h4>What devices does it work on?</h4>
+      <p>Any modern browser — Chrome, Safari, Firefox, Edge — on phones, tablets, laptops or desktops. Add it to your phone home screen for an app-like experience.</p>
+    `
+  },
+  {
+    id: 'workflow', title: 'A typical coach week', adminOnly: true,
+    body: `
+      <ol>
+        <li><strong>Monday</strong> — Squad tab, check player availability. Update notes if anyone's injured.</li>
+        <li><strong>Tuesday</strong> — Lineups → + New lineup. Fill in opponent/date/KO/arrival, pick formation, drag players in, save (don't publish yet).</li>
+        <li><strong>Wed/Thu</strong> — Tweak based on training. Add tactics arrows. Save.</li>
+        <li><strong>Friday</strong> — Arrange match → Publish. Copy share link, paste into team WhatsApp.</li>
+        <li><strong>Match day</strong> — If anything changes, edit the lineup; the parent link auto-updates.</li>
+        <li><strong>Post-match</strong> — Stays in Fixtures as a Recent entry for the season record.</li>
+      </ol>
+    `
+  },
+  {
+    id: 'roadmap', title: 'Roadmap (coming soon)', adminOnly: true,
+    body: `
+      <ul>
+        <li>Player photos on chips</li>
+        <li>Email notifications when lineups are published or updated</li>
+        <li>Admin panel for managing all members in one place</li>
+        <li>Audit log UI to see who changed what</li>
+        <li>Team-wide public page so parents can bookmark one URL for the season</li>
+      </ul>
+    `
+  }
+];
+
+let _helpQuery = '';
+
+function renderHelpTab(canEdit, role) {
+  const tabEl = document.getElementById('tab-content');
+  const isAdmin = canEdit; // admin or coach
+
+  const visible = HELP_SECTIONS.filter(s => isAdmin || !s.adminOnly);
+  const q = _helpQuery.trim().toLowerCase();
+  const matches = q
+    ? visible.filter(s => s.title.toLowerCase().includes(q) || s.body.toLowerCase().includes(q))
+    : visible;
+
+  const cards = matches.map(s => `
+    <details class="card collapsible help-card" data-card="help-${s.id}">
+      <summary class="card-title">
+        ${escapeHtml(s.title)}
+        ${s.adminOnly ? '<span class="help-badge">admin/coach</span>' : ''}
+        <span class="chev">▾</span>
+      </summary>
+      <div class="card-body help-body">${s.body}</div>
+    </details>
+  `).join('');
+
+  tabEl.innerHTML = `
+    <div class="help-tab">
+      <div class="help-header">
+        <h2 style="margin:0 0 0.25rem">Help & FAQ</h2>
+        <p class="muted" style="margin:0;font-size:0.9rem">
+          ${isAdmin
+            ? 'You can see everything, including coach/admin sections.'
+            : 'Showing parent/viewer help. Coach-only topics are hidden.'}
+        </p>
+        <input type="search" id="help-search" class="help-search"
+               placeholder="Search the help…" value="${escapeHtml(_helpQuery)}" />
+      </div>
+
+      ${cards || `<p class="muted" style="padding:1rem 0">No matches. Try a different search.</p>`}
+
+      <p class="muted" style="margin-top:1rem;font-size:0.8rem">
+        Can't find an answer? Contact your team admin.
+      </p>
+    </div>
+  `;
+
+  const search = tabEl.querySelector('#help-search');
+  if (search) {
+    search.addEventListener('input', () => {
+      _helpQuery = search.value || '';
+      renderHelpTab(canEdit, role);
+      // Restore focus + caret
+      const s2 = document.getElementById('help-search');
+      if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }
+    });
   }
 }
 
@@ -1562,7 +1805,7 @@ function renderPitch() {
 
 // Kept as fallback helper (not currently called, but left in case)
 function pitchSvgHtml() {
-  return `<svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>`;
+  return `<svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${pitchSvgInner()}</svg>`;
 }
 
 // Inner SVG markup (pitch lines) — placed inside the outer <svg> in render

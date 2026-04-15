@@ -1335,3 +1335,80 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   .pv-vs { font-size: 1.15rem; }
   .pv-logo { width: 44px; height: 44px; }
 }
+
+/* ---------- Help / FAQ tab ---------- */
+.help-tab {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+}
+.help-header {
+  margin-bottom: 0.5rem;
+}
+.help-search {
+  margin-top: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border, #e3e7ee);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+.help-card {
+  background: var(--card, #fff);
+  border: 1px solid var(--border, #e3e7ee);
+  border-radius: 8px;
+}
+.help-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.98rem;
+  list-style: none;
+}
+.help-card .card-title::-webkit-details-marker { display: none; }
+.help-card .chev {
+  margin-left: auto;
+  transition: transform 0.15s;
+  color: #888;
+}
+.help-card[open] .chev { transform: rotate(180deg); }
+.help-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #eef2f8;
+  color: #3a5;
+  border: 1px solid #d6e0ee;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.help-body {
+  padding: 0 0.9rem 0.9rem;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.help-body h4 {
+  margin: 0.9rem 0 0.25rem;
+  font-size: 0.95rem;
+  color: #333;
+}
+.help-body p, .help-body ul, .help-body ol {
+  margin: 0.25rem 0;
+}
+.help-body ul, .help-body ol {
+  padding-left: 1.25rem;
+}
+.help-body li { margin: 0.2rem 0; }
+@media (max-width: 480px) {
+  .help-tab { padding: 0.75rem; }
+}
