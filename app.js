@@ -2109,28 +2109,28 @@ async function buildWhatsAppMessage(current, team) {
     }
   }
   const coachList = coachNames.length
-    ? coachNames.map(n => `*${n}*`).join(' or ')
-    : '*your coach*';
+    ? coachNames.join(' or ')
+    : 'your coach';
 
   return [
     'Hey all 👋',
     '',
-    `New match added — *${teamName} vs ${opp}* (${haLbl})`,
+    `New match added — ${teamName} vs ${opp} (${haLbl})`,
     `📅 ${dateStr}`,
-    `🚌 Be there for *${arr}* for warm-ups & team talk`,
-    `⚽ Kick off *${ko}*`,
+    `🚌 Be there for ${arr} for warm-ups & team talk`,
+    `⚽ Kick off ${ko}`,
     `📍 ${venueLine}`,
     mapsUrl ? `🗺️ ${mapsUrl}` : null,
     '',
     'Two links — tap whichever you need:',
     '',
-    '🟡 *Availability*',
+    '🟡 Availability',
     availUrl,
     '',
-    '🟢 *Match info*',
+    '🟢 Match info',
     matchUrl,
     '',
-    `The Availability link asks for your child's *parent code* the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
+    `The Availability link asks for your child's parent code the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
     '',
     'Cheers!'
   ].filter(l => l !== null).join('\n');
