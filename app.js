@@ -413,13 +413,15 @@ async function renderParentView(lineupId, opts = {}) {
     return;
   }
 
-  // Fetch team + players (RLS allows read when team has a published lineup)
-  const [teamRes, playersRes] = await Promise.all([
+  // Fetch team + players + custom formations (RLS allows read when team has a published lineup)
+  const [teamRes, playersRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
-    supabase.from('players').select('*').eq('team_id', lineup.team_id)
+    supabase.from('players').select('*').eq('team_id', lineup.team_id),
+    supabase.from('formations').select('*').eq('team_id', lineup.team_id)
   ]);
   const team = teamRes.data || { name: '' };
   const players = playersRes.data || [];
+  const customFormations = formationsRes.data || [];
 
   // Skip re-render if data is unchanged (poll case)
   const dataHash = JSON.stringify({
@@ -435,7 +437,7 @@ async function renderParentView(lineupId, opts = {}) {
   _parentViewLastHash = dataHash;
 
   // Seed editor so renderFixturePitch (which reads from editor.players + getFormation) works
-  editor = { team, canEdit: false, players, lineups: [lineup], current: null, customFormations: [] };
+  editor = { team, canEdit: false, players, lineups: [lineup], current: null, customFormations };
 
   // Build match-details summary
   const data = lineup.data || {};
