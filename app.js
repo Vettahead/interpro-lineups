@@ -2251,12 +2251,12 @@ function renderLineupsTab() {
   tabEl.innerHTML = `
     <div class="lineup-layout">
       <aside class="lineup-left">
-        ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
-
         ${collapsibleCard('lineup-saved', 'Matches / Lineups', `
           <div class="lineup-list">${lineupsListHtml}</div>
           ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
         `)}
+
+        ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
       </aside>
 
       <div class="lineup-center">
@@ -2875,6 +2875,8 @@ function wireLineupEvents() {
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       // Mark this state as already-saved so autosave doesn't fire on first render
       _lastSavedHash = _lineupContentHash(editor.current);
+      // Auto-expand Match details when a lineup is selected
+      openCards.add('lineup-details');
       renderLineupsTab();
     };
   });
