@@ -1914,7 +1914,13 @@ function matchSummaryHtml(current, team, canEdit) {
       status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
     : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
     :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
-  const shareLabel = '🔗 Copy availability link for parents';
+  const shareLabel = status === 'published'
+    ? '🔗 Copy lineup link for parents'
+    : '🔗 Copy availability link for parents';
+  const shareDisabled = status === 'draft';
+  const shareBtnStyle = shareDisabled
+    ? 'margin-top:0.35rem;opacity:0.5;cursor:not-allowed;background:#f0f0f0;color:#888'
+    : 'margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600';
   return `
     <div style="display:flex;flex-direction:column;gap:0.15rem">
       <div style="font-weight:600">${oppStr}</div>
@@ -1927,7 +1933,8 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
-    ${current.id && (status === 'availability' || status === 'published') ? `<button class="btn-secondary btn-full" id="copy-share-link" style="margin-top:0.35rem">${shareLabel}</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-share-link" style="${shareBtnStyle}" ${shareDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>${shareLabel}</button>` : ''}
+    ${current.id && shareDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — link won't work for parents until you switch state.</div>` : ''}
     ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
