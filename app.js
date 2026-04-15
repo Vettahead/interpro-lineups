@@ -4630,10 +4630,10 @@ function renderFixturesTab() {
         ${collapsibleCard('fix-upcoming', 'Matches', upcomingBody)}
       </div>
       ${headline}
-      ${selected && canEdit && selShareable ? `
+      ${selected && canEdit ? `
         <div class="fix-share-wrap" style="max-width:560px;margin:0 0 0.75rem">
           <button class="btn-secondary btn-full" id="fix-share-link">${selShareLabel}</button>
-          <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
+          <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">${selShareable ? '' : '⚠ Lineup is in Draft — link won\'t work for parents until you switch to Availability or Show lineup.'}</div>
         </div>
       ` : ''}
       ${selected && canEdit && selShareable ? `
