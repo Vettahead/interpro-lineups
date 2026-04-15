@@ -527,7 +527,9 @@ async function renderParentView(lineupId, opts = {}) {
         </div>
       ` : ''}
 
-      ${isAvailabilityMode ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : `
+      ${(isAvailabilityMode || status === 'published') ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
+
+      ${status === 'published' ? `
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
@@ -537,7 +539,7 @@ async function renderParentView(lineupId, opts = {}) {
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
         </div>
         <div class="pv-subs" id="fix-subs" style="margin-top:0.5rem"></div>
-      </div>`}
+      </div>` : ''}
 
       <div class="pv-footer">
         <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
@@ -546,9 +548,10 @@ async function renderParentView(lineupId, opts = {}) {
     </div>
   `;
 
-  if (isAvailabilityMode) {
+  if (isAvailabilityMode || status === 'published') {
     wireAvailabilityForm(lineup, players, availByPlayer);
-  } else {
+  }
+  if (status === 'published') {
     renderFixturePitch(lineup);
   }
 
@@ -559,7 +562,7 @@ async function renderParentView(lineupId, opts = {}) {
 
   // Re-draw on resize so tactics canvas stays crisp
   window.addEventListener('resize', () => {
-    if (currentRoute().name === 'view' && !isAvailabilityMode) renderFixturePitch(lineup);
+    if (currentRoute().name === 'view' && status === 'published') renderFixturePitch(lineup);
   }, { once: false });
 
   // Start polling (only on first / non-poll render)
@@ -699,10 +702,12 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
 }
 
 // ---------- Coach availability responses panel ----------
-async function renderCoachAvailabilityPanel() {
-  const panelEl = document.getElementById('availability-panel');
-  if (!panelEl || !editor?.current?.id) return;
-  const lineupId = editor.current.id;
+async function renderCoachAvailabilityPanel(opts = {}) {
+  const containerId = opts.containerId || 'availability-panel';
+  const lineupId = opts.lineupId || editor?.current?.id;
+  const cardKey = opts.cardKey || 'coach-avail';
+  const panelEl = document.getElementById(containerId);
+  if (!panelEl || !lineupId) return;
   const { data: avail, error } = await supabase
     .from('player_availability')
     .select('*')
@@ -736,7 +741,7 @@ async function renderCoachAvailabilityPanel() {
     </div>`;
   }).join('');
   panelEl.innerHTML = `
-    <details class="collapsible-card" ${openCards.has('coach-avail') ? 'open' : ''} data-card="coach-avail">
+    <details class="collapsible-card" ${openCards.has(cardKey) ? 'open' : ''} data-card="${cardKey}">
       <summary style="cursor:pointer;padding:0.4rem 0.5rem;background:#f7f7f7;border-radius:4px;font-size:0.8rem;font-weight:600">
         Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
       </summary>
@@ -745,7 +750,7 @@ async function renderCoachAvailabilityPanel() {
   const det = panelEl.querySelector('details');
   if (det) {
     det.addEventListener('toggle', () => {
-      if (det.open) openCards.add('coach-avail'); else openCards.delete('coach-avail');
+      if (det.open) openCards.add(cardKey); else openCards.delete(cardKey);
     });
   }
 }
@@ -836,7 +841,7 @@ async function renderTeamDashboard(user, teamId) {
     tabsEl.innerHTML = `
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
-      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
+      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches / Lineups</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
       <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
@@ -1721,7 +1726,7 @@ function matchDetailsFormHtml(current, team, canEdit) {
         <div id="lineup-status-seg" style="display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid #ccc">
           ${btn('draft',        'Draft',        'Only coaches')}
           ${btn('availability', 'Availability', 'Ask parents')}
-          ${btn('published',    'Published',    'Show lineup')}
+          ${btn('published',    'Show lineup',  'Parents see pitch')}
         </div>
       </div>
       `;
@@ -1942,35 +1947,35 @@ function renderLineupsTab() {
       }).join('')
     : `<p class="muted" style="padding:0.75rem">No saved lineups yet.</p>`;
 
+  const tacticsCardHtml = canEdit ? collapsibleCard('lineup-tactics', 'Tactics', `
+    <div class="tactic-btns">
+      <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
+      <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
+      <button class="tactic-btn ${tacticMode === 'drag' ? 'active' : ''}" data-tactic-mode="drag">↗ Drag</button>
+      <button class="tactic-btn ${current.ballVisible ? 'active' : ''}" id="btn-ball">⚽ Ball</button>
+    </div>
+    <div id="tactic-info" class="tactic-info">Pick a mode to edit tactics.</div>
+    <div class="zone-row">
+      <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ffeb3b"></span>Press
+        <input type="checkbox" id="chk-zone-0" ${current.zoneLines[0] !== null ? 'checked' : ''} />
+      </label>
+      <input type="range" id="slider-zone-0" min="5" max="92" value="${current.zoneLines[0] ?? ZONES[0].defaultY}" ${current.zoneLines[0] === null ? 'disabled' : ''} />
+    </div>
+    <div class="zone-row">
+      <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ff7043"></span>Def
+        <input type="checkbox" id="chk-zone-1" ${current.zoneLines[1] !== null ? 'checked' : ''} />
+      </label>
+      <input type="range" id="slider-zone-1" min="5" max="92" value="${current.zoneLines[1] ?? ZONES[1].defaultY}" ${current.zoneLines[1] === null ? 'disabled' : ''} />
+    </div>
+    <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
+    <button class="btn-full" id="clear-tactics">✕ Clear all tactics</button>
+    <button class="btn-full" id="load-from-play" ${plays.length ? '' : 'disabled'}>↓ Load from play…</button>
+    <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
+  `) : '';
+
   tabEl.innerHTML = `
     <div class="lineup-layout">
       <aside class="lineup-left">
-        ${canEdit ? collapsibleCard('lineup-tactics', 'Tactics', `
-          <div class="tactic-btns">
-            <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
-            <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
-            <button class="tactic-btn ${tacticMode === 'drag' ? 'active' : ''}" data-tactic-mode="drag">↗ Drag</button>
-            <button class="tactic-btn ${current.ballVisible ? 'active' : ''}" id="btn-ball">⚽ Ball</button>
-          </div>
-          <div id="tactic-info" class="tactic-info">Pick a mode to edit tactics.</div>
-          <div class="zone-row">
-            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ffeb3b"></span>Press
-              <input type="checkbox" id="chk-zone-0" ${current.zoneLines[0] !== null ? 'checked' : ''} />
-            </label>
-            <input type="range" id="slider-zone-0" min="5" max="92" value="${current.zoneLines[0] ?? ZONES[0].defaultY}" ${current.zoneLines[0] === null ? 'disabled' : ''} />
-          </div>
-          <div class="zone-row">
-            <label class="zone-label"><span class="zone-swatch" style="border-top:3px dashed #ff7043"></span>Def
-              <input type="checkbox" id="chk-zone-1" ${current.zoneLines[1] !== null ? 'checked' : ''} />
-            </label>
-            <input type="range" id="slider-zone-1" min="5" max="92" value="${current.zoneLines[1] ?? ZONES[1].defaultY}" ${current.zoneLines[1] === null ? 'disabled' : ''} />
-          </div>
-          <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
-          <button class="btn-full" id="clear-tactics">✕ Clear all tactics</button>
-          <button class="btn-full" id="load-from-play" ${plays.length ? '' : 'disabled'}>↓ Load from play…</button>
-          <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
-        `) : ''}
-
         ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
 
         ${collapsibleCard('lineup-saved', 'Saved lineups', `
@@ -1995,6 +2000,7 @@ function renderLineupsTab() {
       </div>
 
       <aside class="lineup-right">
+        ${tacticsCardHtml}
         ${collapsibleCard('lineup-formation', 'Formation', `
           <div class="f-btns f-btns-col">${formationBtns}</div>
           ${canEdit ? `
@@ -4177,10 +4183,28 @@ function renderFixturesTab() {
     ` : ''}
   `;
 
+  const selStatus = selected ? (selected.lineup_status || (selected.published ? 'published' : 'draft')) : 'draft';
+  const selShareable = selected && (selStatus === 'availability' || selStatus === 'published');
+  const selShareLabel = selStatus === 'availability' ? '🔗 Copy availability link for parents' : '🔗 Copy share link for parents';
+  const showLineup = selStatus === 'published'; // hide pitch for availability/draft (in fixtures)
+
   tabEl.innerHTML = `
     <div class="fixtures-single">
+      <div style="display:flex;flex-direction:column;gap:0.5rem;max-width:560px;margin-bottom:1rem">
+        ${collapsibleCard('fix-calendar', 'Calendar', calendarBody)}
+        ${collapsibleCard('fix-upcoming', 'Upcoming / Recent', upcomingBody)}
+      </div>
       ${headline}
-      ${selected ? `
+      ${selected && canEdit && selShareable ? `
+        <div style="max-width:560px;margin:0 0 0.75rem">
+          <button class="btn-secondary btn-full" id="fix-share-link">${selShareLabel}</button>
+          <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
+        </div>
+      ` : ''}
+      ${selected && canEdit && selShareable ? `
+        <div id="fix-availability-panel" style="max-width:560px;margin-bottom:0.75rem"></div>
+      ` : ''}
+      ${selected && showLineup ? `
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
           <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
           <canvas class="tactics-canvas" id="fix-tactics"></canvas>
@@ -4188,15 +4212,22 @@ function renderFixturesTab() {
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
         </div>
         <div class="pv-subs" id="fix-subs"></div>
-      ` : ''}
-      <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.5rem;max-width:560px">
-        ${collapsibleCard('fix-calendar', 'Calendar', calendarBody)}
-        ${collapsibleCard('fix-upcoming', 'Upcoming / Recent', upcomingBody)}
-      </div>
+      ` : (selected && !showLineup ? `
+        <div class="muted" style="max-width:560px;padding:0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.85rem">
+          Lineup not yet published for this game. ${selStatus === 'availability' ? 'Collecting availability responses.' : ''}
+        </div>
+      ` : '')}
     </div>
   `;
 
-  if (selected) renderFixturePitch(selected);
+  if (selected && showLineup) renderFixturePitch(selected);
+  if (selected && canEdit && selShareable) {
+    renderCoachAvailabilityPanel({
+      containerId: 'fix-availability-panel',
+      lineupId: selected.id,
+      cardKey: 'fix-coach-avail'
+    });
+  }
   wireFixtureEvents();
 }
 
@@ -4346,6 +4377,23 @@ function wireFixtureEvents() {
     _fixturesUi.showDrafts = draftsEl.checked;
     _fixturesUi.selectedLineupId = null;
     renderFixturesTab();
+  };
+
+  const shareBtn = tabEl.querySelector('#fix-share-link');
+  if (shareBtn) shareBtn.onclick = async () => {
+    const id = _fixturesUi.selectedLineupId;
+    if (!id) return;
+    const base = location.origin + location.pathname;
+    const shareUrl = `${base}#/view/${id}`;
+    const msg = tabEl.querySelector('#fix-share-msg');
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      if (msg) { msg.textContent = '✓ Link copied to clipboard'; msg.className = 'ok'; }
+    } catch {
+      window.prompt('Copy this link:', shareUrl);
+      if (msg) { msg.textContent = 'Link ready to copy'; msg.className = 'muted'; }
+    }
+    setTimeout(() => { if (msg) { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
   };
 }
 
