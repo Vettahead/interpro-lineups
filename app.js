@@ -664,7 +664,7 @@ async function renderParentView(lineupId, opts = {}) {
       ${showPitch ? `
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
-        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0 auto;max-width:540px">
+        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0 auto;max-width:540px;width:100%;box-sizing:border-box">
           <div class="pitch" id="fix-pitch">
             <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
             <div class="slots-layer" id="fix-slots-layer"></div>

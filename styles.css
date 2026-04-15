@@ -1249,6 +1249,7 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .fixtures-single {
   display: flex;
   flex-direction: column;
+  align-items: center;           /* center all fixture children horizontally */
   gap: 0.5rem;
   padding: 0.5rem;
   max-width: 720px;
@@ -1258,7 +1259,11 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   overflow-x: hidden;
   min-width: 0;
 }
-.fixtures-single > * { min-width: 0; box-sizing: border-box; }
+.fixtures-single > * {
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;                   /* was relying on align-items:stretch; now explicit */
+}
 @media (max-width: 760px) {
   .fixtures-single {
     padding: 0.5rem;
