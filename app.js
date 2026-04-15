@@ -1,4 +1,4 @@
-// Interpro Blues — Web app
+// Interpro Coach / Manager Assistant — Web app
 // Slices 1 & 2: auth + teams + squad + lineup editor
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -88,7 +88,7 @@ window.addEventListener('hashchange', render);
 
 function resetHeader() {
   const titleEl = document.getElementById('header-title');
-  if (titleEl) titleEl.innerHTML = `<img src="logo.png" alt="Interpro" class="brand-logo" /><h1>Interpro Blues — Lineups</h1>`;
+  if (titleEl) titleEl.innerHTML = `<img src="logo.png" alt="Interpro" class="brand-logo" /><h1>Interpro Coach / Manager Assistant</h1>`;
   const tabsEl = document.getElementById('header-tabs');
   if (tabsEl) tabsEl.innerHTML = '';
 }
@@ -4270,7 +4270,8 @@ function renderFixturesTab() {
   const selStatus = selected ? (selected.lineup_status || (selected.published ? 'published' : 'draft')) : 'draft';
   const selShareable = selected && (selStatus === 'availability' || selStatus === 'published');
   const selShareLabel = '🔗 Copy availability link for parents';
-  const showLineup = selStatus === 'published'; // hide pitch for availability/draft (in fixtures)
+  // Coach Fixtures tab always shows the pitch; the public parent view gates it separately.
+  const showLineup = !!selected;
 
   tabEl.innerHTML = `
     <div class="fixtures-single">
@@ -4288,7 +4289,12 @@ function renderFixturesTab() {
       ${selected && canEdit && selShareable ? `
         <div id="fix-availability-panel" style="max-width:560px;margin-bottom:0.75rem"></div>
       ` : ''}
-      ${selected && showLineup ? `
+      ${selected ? `
+        ${selStatus !== 'published' ? `
+          <div class="muted" style="max-width:560px;padding:0.5rem 0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.8rem;margin-bottom:0.5rem">
+            ${selStatus === 'availability' ? '◐ Availability mode — parents only see the form, not this pitch.' : '○ Draft — not visible to parents yet.'}
+          </div>
+        ` : ''}
         <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
           <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
           <canvas class="tactics-canvas" id="fix-tactics"></canvas>
@@ -4296,15 +4302,11 @@ function renderFixturesTab() {
           <div class="pv-ball" id="fix-ball" style="display:none"></div>
         </div>
         <div class="pv-subs" id="fix-subs"></div>
-      ` : (selected && !showLineup ? `
-        <div class="muted" style="max-width:560px;padding:0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.85rem">
-          Lineup not yet published for this game. ${selStatus === 'availability' ? 'Collecting availability responses.' : ''}
-        </div>
-      ` : '')}
+      ` : ''}
     </div>
   `;
 
-  if (selected && showLineup) renderFixturePitch(selected);
+  if (selected) renderFixturePitch(selected);
   if (selected && canEdit && selShareable) {
     renderCoachAvailabilityPanel({
       containerId: 'fix-availability-panel',

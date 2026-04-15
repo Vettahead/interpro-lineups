@@ -1,6 +1,6 @@
-# Interpro Blues — Lineups
+# Interpro Coach / Manager Assistant
 
-A lightweight web app for planning match lineups, collecting parent availability, and sharing match details with a grassroots youth football team.
+A lightweight web app for planning match lineups, collecting parent availability, and sharing match details with a grassroots youth football team. Built originally for Interpro Blues, designed to work for any team.
 
 Live site: deployed on Vercel from the `main` branch of this repo.
 
