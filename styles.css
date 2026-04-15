@@ -1258,7 +1258,7 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   overflow-x: hidden;
   min-width: 0;
 }
-.fixtures-single > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.fixtures-single > * { min-width: 0; box-sizing: border-box; }
 @media (max-width: 760px) {
   .fixtures-single {
     padding: 0.5rem;
