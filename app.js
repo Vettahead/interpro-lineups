@@ -561,6 +561,7 @@ async function renderParentView(lineupId, opts = {}) {
             ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
           </div>
         ` : ''}
+        ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
       </div>
 
       ${notes ? `
@@ -601,6 +602,22 @@ async function renderParentView(lineupId, opts = {}) {
   document.getElementById('pv-refresh')?.addEventListener('click', () => {
     _parentViewLastHash = null;
     renderParentView(lineupId);
+  });
+
+  document.getElementById('pv-add-cal')?.addEventListener('click', () => {
+    // Build a minimal "current" shape from the parent-view lineup record for the ICS helper.
+    downloadLineupIcs({
+      game_date: lineup.game_date,
+      kickoff_time: lineup.kickoff_time,
+      arrival_time: lineup.arrival_time,
+      opponent: lineup.opponent,
+      home_away: lineup.home_away,
+      location_name: venue.name,
+      location_postcode: venue.postcode,
+      location_lat: venue.lat,
+      location_lng: venue.lng,
+      notes: lineup.notes
+    }, { name: teamName }, lineup.id);
   });
 
   // Re-draw on resize so tactics canvas stays crisp
@@ -1880,6 +1897,75 @@ let draggingLinePct = 0;
 let _posEditMode = false;
 let _posDrag = null; // { idx, ox, oy } — offsets captured on pointerdown
 
+// ---------- Calendar (.ics) export ----------
+// Generate a UK-time ICS file the parent (or coach) can save into Apple/Google/Outlook calendars.
+// Falls back gracefully when fields are missing.
+function _icsEscape(s) {
+  return String(s || '').replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+}
+function _icsDtLocal(dateStr, timeStr) {
+  // dateStr: YYYY-MM-DD ; timeStr: HH:MM (or '')
+  const d = (dateStr || '').replace(/-/g, '');
+  const t = (timeStr || '00:00').replace(':', '') + '00';
+  return `${d}T${t}`;
+}
+function _icsAddMinutes(dateStr, timeStr, mins) {
+  const [Y,M,D] = (dateStr || '').split('-').map(Number);
+  const [h,m]   = ((timeStr || '00:00').split(':')).map(Number);
+  const dt = new Date(Date.UTC(Y, (M||1)-1, D||1, h||0, m||0));
+  dt.setUTCMinutes(dt.getUTCMinutes() + mins);
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getUTCFullYear()}${pad(dt.getUTCMonth()+1)}${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}${pad(dt.getUTCMinutes())}00`;
+}
+function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
+  const c = lineupOrCurrent;
+  if (!c.game_date) { alert('No game date set — open Arrange match and add one first.'); return; }
+  const v = effectiveVenue(c, team);
+  const opponent = (c.opponent || '').trim() || 'match';
+  const ko = c.kickoff_time || '';
+  const arr = c.arrival_time || '';
+  const dtStart = ko ? _icsDtLocal(c.game_date, ko) : _icsDtLocal(c.game_date, '10:00');
+  const dtEnd   = _icsAddMinutes(c.game_date, ko || '10:00', 90);
+  const stamp = (() => { const d=new Date(); const p=n=>String(n).padStart(2,'0');
+    return `${d.getUTCFullYear()}${p(d.getUTCMonth()+1)}${p(d.getUTCDate())}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`; })();
+  const teamName = (team?.name || 'Team');
+  const haLbl = c.home_away === 'away' ? 'Away' : 'Home';
+  const locParts = [v.name, v.postcode].filter(Boolean).join(', ');
+  const desc = [
+    `${teamName} ${haLbl} vs ${opponent}`,
+    arr ? `Arrival: ${arr}` : '',
+    ko ? `Kick off: ${ko}` : '',
+    locParts ? `Venue: ${locParts}` : '',
+    (c.notes || '').trim() ? `Notes: ${c.notes.trim()}` : ''
+  ].filter(Boolean).join('\n');
+  const uid = `lineup-${lineupId || c.id || Date.now()}@interpro`;
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Interpro//Lineups//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART;TZID=Europe/London:${dtStart}`,
+    `DTEND;TZID=Europe/London:${dtEnd}`,
+    `SUMMARY:${_icsEscape(`${teamName} vs ${opponent} (${haLbl})`)}`,
+    `LOCATION:${_icsEscape(locParts)}`,
+    `DESCRIPTION:${_icsEscape(desc)}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${teamName.replace(/[^\w-]+/g,'_')}-vs-${opponent.replace(/[^\w-]+/g,'_')}-${c.game_date}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
+}
+
 // ---------- Match details (summary + modal) ----------
 function effectiveVenue(current, team) {
   if (current.home_away === 'home' && team) {
@@ -1914,11 +2000,11 @@ function matchSummaryHtml(current, team, canEdit) {
       status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
     : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
     :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
-  const shareLabel = status === 'published'
-    ? '🔗 Copy lineup link for parents'
-    : '🔗 Copy availability link for parents';
-  const shareDisabled = status === 'draft';
-  const shareBtnStyle = shareDisabled
+  const draftDisabled = status === 'draft';
+  const availStyle = draftDisabled
+    ? 'margin-top:0.35rem;opacity:0.5;cursor:not-allowed;background:#f0f0f0;color:#888'
+    : 'margin-top:0.35rem;background:#fff;color:var(--text);border:1px solid var(--border);font-weight:500';
+  const lineupStyle = draftDisabled
     ? 'margin-top:0.35rem;opacity:0.5;cursor:not-allowed;background:#f0f0f0;color:#888'
     : 'margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600';
   return `
@@ -1933,8 +2019,10 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-share-link" style="${shareBtnStyle}" ${shareDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>${shareLabel}</button>` : ''}
-    ${current.id && shareDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — link won't work for parents until you switch state.</div>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-availability-link" style="${availStyle}" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>🔗 Copy availability link for parents</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-lineup-link" style="${lineupStyle}" ${draftDisabled ? 'disabled title="Switch to Show lineup to share"' : ''}>🔗 Copy match link for parents</button>` : ''}
+    ${current.id && current.game_date ? `<button class="btn-full" id="add-to-calendar" style="margin-top:0.35rem;background:#fff;color:var(--text);border:1px solid var(--border);font-weight:500">📅 Add to calendar</button>` : ''}
+    ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state.</div>` : ''}
     ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
@@ -2812,9 +2900,8 @@ function wireLineupEvents() {
   const openMdBtn = document.getElementById('open-match-details');
   if (openMdBtn) openMdBtn.onclick = openMatchDetailsModal;
 
-  // Copy share link for parents
-  const copyShareBtn = document.getElementById('copy-share-link');
-  if (copyShareBtn) copyShareBtn.onclick = async () => {
+  // Copy share links for parents (availability + match)
+  const copyShareUrl = async (label) => {
     const id = editor?.current?.id;
     if (!id) return;
     const base = location.origin + location.pathname;
@@ -2822,14 +2909,19 @@ function wireLineupEvents() {
     const msg = document.getElementById('save-msg');
     try {
       await navigator.clipboard.writeText(shareUrl);
-      if (msg) { msg.textContent = '✓ Share link copied'; msg.className = 'ok'; }
+      if (msg) { msg.textContent = `✓ ${label} copied`; msg.className = 'ok'; }
     } catch (e) {
-      // Fallback: show a prompt so they can copy manually
       window.prompt('Copy this link:', shareUrl);
       if (msg) { msg.textContent = 'Link ready to copy'; msg.className = 'muted'; }
     }
     setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
   };
+  const availBtn = document.getElementById('copy-availability-link');
+  if (availBtn) availBtn.onclick = () => copyShareUrl('Availability link');
+  const matchBtn = document.getElementById('copy-lineup-link');
+  if (matchBtn) matchBtn.onclick = () => copyShareUrl('Match link');
+  const calBtn = document.getElementById('add-to-calendar');
+  if (calBtn) calBtn.onclick = () => downloadLineupIcs(editor.current, editor.team, editor.current.id);
 
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
