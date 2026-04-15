@@ -105,6 +105,9 @@ async function render() {
   // Claim any pending invites for this user's email (team_members + parent_players rows)
   await claimPendingInvites(session.user).catch(err => console.warn('claim invites failed', err));
 
+  // Prompt to set a password if they don't have one yet (common after magic-link invites)
+  maybePromptSetPassword(session.user);
+
   const route = currentRoute();
   if (route.name === 'team') {
     await renderTeamDashboard(session.user, route.teamId);
@@ -118,6 +121,72 @@ supabase.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT') location.hash = '';
   render();
 });
+
+// Show a "Set a password" modal for users who signed in via magic link and
+// have not yet set a password. Once set, user_metadata.password_set = true
+// so they don't see the prompt again.
+function maybePromptSetPassword(user) {
+  if (!user) return;
+  if (user.user_metadata?.password_set === true) return;
+  // Don't stack multiple modals
+  if (document.querySelector('.picker-overlay[data-pw-prompt]')) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  overlay.setAttribute('data-pw-prompt', '1');
+  overlay.innerHTML = `
+    <div class="picker-modal">
+      <div class="picker-header">
+        <strong>Set your password</strong>
+      </div>
+      <div class="picker-body">
+        <p class="muted" style="margin:0 0 0.75rem;font-size:0.9rem">
+          Welcome! Before you continue, set a password so you can log in from any device.
+        </p>
+        <label>New password (min 8 characters)</label>
+        <input type="password" id="pw-new" autocomplete="new-password" />
+        <label style="margin-top:0.5rem">Confirm password</label>
+        <input type="password" id="pw-confirm" autocomplete="new-password" />
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end">
+          <button class="btn-secondary" data-action="signout">Sign out</button>
+          <button class="primary" id="pw-save">Save password & continue</button>
+        </div>
+        <div id="pw-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  // Block outside-click and Escape — password is required
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) e.stopPropagation(); });
+  const blockKeys = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); } };
+  document.addEventListener('keydown', blockKeys, true);
+
+  const close = () => {
+    document.removeEventListener('keydown', blockKeys, true);
+    overlay.remove();
+  };
+
+  overlay.querySelector('[data-action=signout]').onclick = async () => {
+    await supabase.auth.signOut();
+    close();
+  };
+  overlay.querySelector('#pw-save').onclick = async () => {
+    const msg = overlay.querySelector('#pw-msg');
+    const pw = overlay.querySelector('#pw-new').value || '';
+    const pw2 = overlay.querySelector('#pw-confirm').value || '';
+    if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; msg.className = 'error'; return; }
+    if (pw !== pw2) { msg.textContent = 'Passwords do not match.'; msg.className = 'error'; return; }
+    msg.textContent = 'Saving…'; msg.className = 'muted';
+    const { error } = await supabase.auth.updateUser({
+      password: pw,
+      data: { password_set: true }
+    });
+    if (error) { msg.textContent = 'Failed: ' + error.message; msg.className = 'error'; return; }
+    msg.textContent = '✓ Password saved.'; msg.className = 'ok';
+    setTimeout(close, 700);
+  };
+  setTimeout(() => overlay.querySelector('#pw-new')?.focus(), 20);
+}
 
 // Look up and claim any pending invites for this user's email.
 // Creates team_members row + parent_players link (for parent invites), marks invite accepted.
