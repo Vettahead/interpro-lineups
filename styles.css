@@ -1004,33 +1004,59 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   padding: 1rem;
 }
 .map-modal {
-  background: var(--surface, #1a1f2a);
+  background: var(--card);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   width: 100%;
   max-width: 760px;
   height: 80vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
 }
 .map-modal-header {
-  padding: 0.6rem 0.8rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--surface2);
+  font-size: 1.05rem;
 }
+.map-modal-body label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+.map-modal-body label:first-child { margin-top: 0; }
+.map-modal-body input[type=text],
+.map-modal-body input[type=date],
+.map-modal-body input[type=time],
+.map-modal-body select,
+.map-modal-body textarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+.map-modal-body textarea { resize: vertical; min-height: 3.5em; font-family: inherit; }
 .map-modal-body {
   flex: 1;
   min-height: 0;
   position: relative;
 }
 .map-modal-footer {
-  padding: 0.5rem 0.8rem;
+  padding: 0.6rem 0.8rem;
   border-top: 1px solid var(--border);
+  background: var(--surface2);
   display: flex;
   gap: 0.4rem;
   align-items: center;
@@ -1057,7 +1083,7 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   font-size: 1rem;
   line-height: 1;
 }
-.cal-nav:hover { background: var(--surface3, #2a2f3a); }
+.cal-nav:hover { background: var(--surface3, #eef2f7); }
 .cal-title {
   font-weight: 600;
   color: var(--text);
@@ -1097,7 +1123,7 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   cursor: pointer;
   transition: background 0.1s ease, border-color 0.1s ease;
 }
-.cal-cell:hover { background: var(--surface3, #2a2f3a); }
+.cal-cell:hover { background: var(--surface3, #eef2f7); }
 .cal-cell.cal-empty {
   background: transparent;
   border-color: transparent;

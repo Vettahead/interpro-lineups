@@ -774,6 +774,9 @@ function newLineupState() {
     // match meta
     match_type: 'league',   // 'friendly' | 'league' | 'cup'
     home_away: 'home',      // 'home' | 'away'
+    kickoff_time: '',       // 'HH:MM'
+    arrival_time: '',       // 'HH:MM'
+    notes: '',
     // publish + location
     published: false,
     location_name: '',
@@ -904,7 +907,11 @@ function matchSummaryHtml(current, team, canEdit) {
       ${venueLine}
       ${pubLine}
     </div>
-    ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 ${current.id ? 'Edit match details' : 'Arrange match'}</button>` : ''}
+    ${(current.kickoff_time || current.arrival_time) ? `
+      <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">
+        ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
+      </div>` : ''}
+    ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
 }
@@ -934,6 +941,20 @@ function matchDetailsFormHtml(current, team, canEdit) {
     </div>
     <label style="margin-top:0.5rem">Game date</label>
     <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+
+    <div class="sc-row-2" style="margin-top:0.5rem">
+      <div>
+        <label>Kick off</label>
+        <input type="time" id="l-kickoff" value="${escapeHtml(current.kickoff_time || '')}" ${canEdit ? '' : 'disabled'} />
+      </div>
+      <div>
+        <label>Team arrival</label>
+        <input type="time" id="l-arrival" value="${escapeHtml(current.arrival_time || '')}" ${canEdit ? '' : 'disabled'} />
+      </div>
+    </div>
+
+    <label style="margin-top:0.5rem">Notes</label>
+    <textarea id="l-notes" rows="3" placeholder="e.g. bring training tops, meet at clubhouse" ${canEdit ? '' : 'disabled'}>${escapeHtml(current.notes || '')}</textarea>
 
     <label style="margin-top:0.5rem">Venue${homeLocked ? ' (from home ground)' : ' (optional)'}</label>
     <input type="text" id="l-venue-name" value="${escapeHtml(v.name)}" placeholder="${homeLocked ? (team?.home_ground_name ? '' : 'Set home ground in Squad tab') : 'e.g. Away ground'}" ${canEdit && !homeLocked ? '' : 'disabled'} />
@@ -1002,6 +1023,12 @@ function wireMatchDetailsFields(closeModal) {
   if (oppEl)  oppEl.oninput   = e => { editor.current.opponent = e.target.value; };
   if (dateEl) dateEl.oninput  = e => { editor.current.game_date = e.target.value; };
   if (typeEl) typeEl.onchange = e => { editor.current.match_type = e.target.value; };
+  const koEl = overlay.querySelector('#l-kickoff');
+  const arEl = overlay.querySelector('#l-arrival');
+  const notesEl = overlay.querySelector('#l-notes');
+  if (koEl)    koEl.oninput    = e => { editor.current.kickoff_time = e.target.value; };
+  if (arEl)    arEl.oninput    = e => { editor.current.arrival_time = e.target.value; };
+  if (notesEl) notesEl.oninput = e => { editor.current.notes = e.target.value; };
   if (haEl)   haEl.onchange   = e => {
     editor.current.home_away = e.target.value;
     if (e.target.value === 'home' && editor.team) {
@@ -1090,9 +1117,34 @@ function wireMatchDetailsFields(closeModal) {
   if (saveBtn) saveBtn.onclick = async () => {
     const msgEl = overlay.querySelector('#md-msg');
     await saveLineupWithMsg(msgEl);
-    if (msgEl && msgEl.className === 'ok') {
-      setTimeout(closeModal, 800);
+    if (!(msgEl && msgEl.className === 'ok')) return;
+    // After save: prompt to fine-tune the pitch location on the map.
+    // For Home games, the location comes from the team's home ground, so only prompt if coords are missing.
+    // For Away games, always offer to fine-tune so Chris can drop the pin exactly.
+    const cur = editor.current;
+    const haveCoords = cur.location_lat != null && cur.location_lng != null;
+    const shouldPrompt = cur.home_away === 'away' ? true : !haveCoords;
+    if (shouldPrompt) {
+      let startLat = cur.location_lat, startLng = cur.location_lng;
+      if ((startLat == null || startLng == null) && (cur.location_postcode || '').trim()) {
+        try {
+          const pc = cur.location_postcode.trim().toUpperCase();
+          const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+          const body = await res.json();
+          if (res.ok && body.status === 200 && body.result) {
+            startLat = body.result.latitude; startLng = body.result.longitude;
+          }
+        } catch {}
+      }
+      const result = await openMapPicker({ lat: startLat, lng: startLng });
+      if (result) {
+        editor.current.location_lat = result.lat;
+        editor.current.location_lng = result.lng;
+        // Persist the fine-tuned coords (re-save quietly)
+        await saveLineupWithMsg(msgEl);
+      }
     }
+    setTimeout(closeModal, 400);
   };
 
   const clearBtn = overlay.querySelector('#clear-pitch');
@@ -1399,6 +1451,9 @@ function wireLineupEvents() {
         game_date: l.game_date || '',
         match_type: l.match_type || 'league',
         home_away: l.home_away || 'home',
+        kickoff_time: l.kickoff_time || '',
+        arrival_time: l.arrival_time || '',
+        notes: l.notes || '',
         formation: l.data?.formation || '4-3-3',
         slots: { ...(l.data?.slots || {}) },
         subs: [...(l.data?.subs || [])],
@@ -2203,6 +2258,9 @@ async function saveLineupWithMsg(msgEl) {
     game_date: current.game_date || null,
     match_type: current.match_type || 'league',
     home_away: current.home_away || 'home',
+    kickoff_time: current.kickoff_time || null,
+    arrival_time: current.arrival_time || null,
+    notes: (current.notes || '').trim() || null,
     published: !!current.published,
     published_at: current.published ? (current.published_at || new Date().toISOString()) : null,
     location_name: (locName || '').trim() || null,
