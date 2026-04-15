@@ -5033,30 +5033,34 @@ function renderFixturePitch(lineup) {
 
   const subsBar = document.getElementById('fix-subs');
   if (subsBar) {
-    const items = subs.filter(Boolean).map(pid => {
-      const p = pById(pid);
-      if (!p) return '';
-      return `
-        <div class="pv-sub-chip" data-player-id="${p.id}">
-          <div class="pv-chip-wrap">
-            <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
-              ${p.photo_url ? '' : `${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}<div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>`}
+    const filled = subs.filter(Boolean);
+    if (filled.length) {
+      const cells = filled.map(pid => {
+        const p = pById(pid);
+        if (!p) return '';
+        return `
+          <div class="sub-slot filled" data-player-id="${p.id}">
+            <div class="chip-wrap">
+              <div class="chip chip-sub ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+                ${p.photo_url ? '' : `<div class="chip-inner">
+                  ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                  <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+                </div>`}
+              </div>
+              ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
             </div>
-            ${p.photo_url ? `<div class="pv-chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
-          </div>
+          </div>`;
+      }).join('');
+      subsBar.innerHTML = `
+        <div class="subs-bar" style="margin-top:0.5rem">
+          <div class="subs-label">SUBSTITUTES (${filled.length})</div>
+          <div class="subs-row">${cells}</div>
         </div>`;
-    }).join('');
-    subsBar.innerHTML = items
-      ? `<div class="pv-subs-label" style="width:100%;font-size:0.75rem;color:#666;font-weight:600;margin-bottom:0.25rem;text-transform:uppercase;letter-spacing:0.04em">Substitutes</div>${items}`
-      : '';
-    subsBar.style.display = items ? 'flex' : 'none';
-    subsBar.style.flexWrap = 'wrap';
-    subsBar.style.gap = '0.5rem';
-    subsBar.style.alignItems = 'flex-start';
-    subsBar.style.justifyContent = 'center';
-    subsBar.style.padding = items ? '0.5rem' : '0';
-    subsBar.style.background = items ? '#f3f6fa' : '';
-    subsBar.style.borderRadius = '8px';
+      subsBar.style.display = '';
+    } else {
+      subsBar.innerHTML = '';
+      subsBar.style.display = 'none';
+    }
   }
 
   const ball = document.getElementById('fix-ball');
