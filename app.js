@@ -4008,7 +4008,7 @@ function renderPlayPreview(play) {
     const items = subs.filter(Boolean).map(pid => {
       const p = pById(pid);
       if (!p) return '';
-      return `<div class="pv-sub">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
+      return `<div class="pv-sub" data-player-id="${p.id}">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
     }).join('');
     subsBar.innerHTML = items ? `<div class="muted" style="font-size:0.75rem;margin-right:0.35rem">Subs:</div>${items}` : '';
   }
@@ -4259,7 +4259,7 @@ function renderFixturesTab() {
   const upcomingBody = `
     <h4 style="margin:0 0 0.5rem">Upcoming</h4>
     <div class="lineup-list">${upcomingHtml}</div>
-    ${pastHtml ? `<h4 style="margin:1rem 0 0.5rem">Recent</h4><div class="lineup-list">${pastHtml}</div>` : ''}
+    ${pastHtml ? `<h4 style="margin:1rem 0 0.5rem">Past</h4><div class="lineup-list">${pastHtml}</div>` : ''}
     ${canEdit ? `
       <label style="display:flex;align-items:center;gap:0.35rem;margin-top:0.75rem;font-size:0.8rem;color:#555">
         <input type="checkbox" id="show-drafts" ${_fixturesUi.showDrafts ? 'checked' : ''}> Show draft lineups
@@ -4277,7 +4277,7 @@ function renderFixturesTab() {
     <div class="fixtures-single">
       <div style="display:flex;flex-direction:column;gap:0.5rem;max-width:560px;margin-bottom:1rem">
         ${collapsibleCard('fix-calendar', 'Calendar', calendarBody)}
-        ${collapsibleCard('fix-upcoming', 'Upcoming / Recent', upcomingBody)}
+        ${collapsibleCard('fix-upcoming', 'Matches', upcomingBody)}
       </div>
       ${headline}
       ${selected && canEdit && selShareable ? `
@@ -4314,6 +4314,13 @@ function renderFixturesTab() {
       cardKey: 'fix-coach-avail'
     });
   }
+  // Apply availability rings/badges on the fixture pitch chips too
+  if (selected && selShareable) {
+    ensureAvailabilityForLineup(selected.id).then(() => applyAvailabilityDecorations());
+  } else {
+    editor.availability = {};
+    applyAvailabilityDecorations();
+  }
   wireFixtureEvents();
 }
 
@@ -4344,7 +4351,7 @@ function renderFixturePitch(lineup) {
       const label = lbl[i] || '';
       const chipInner = p
         ? `<div class="pv-chip-wrap">
-             <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+             <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}" data-player-id="${p.id}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
                ${p.photo_url ? '' : `${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}<div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>`}
              </div>
              ${p.photo_url ? `<div class="pv-chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
@@ -4364,7 +4371,7 @@ function renderFixturePitch(lineup) {
     const items = subs.filter(Boolean).map(pid => {
       const p = pById(pid);
       if (!p) return '';
-      return `<div class="pv-sub">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
+      return `<div class="pv-sub" data-player-id="${p.id}">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
     }).join('');
     subsBar.innerHTML = items ? `<div class="muted" style="font-size:0.75rem;margin-right:0.35rem">Subs:</div>${items}` : '';
   }
