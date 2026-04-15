@@ -4875,7 +4875,7 @@ function renderFixturesTab() {
         const tLbl = selected.match_type === 'friendly' ? 'Friendly' : selected.match_type === 'cup' ? 'Cup' : 'League';
         const haLbl = selected.home_away === 'away' ? 'Away' : 'Home';
         return `
-          <div class="fixtures-headline" style="margin-bottom:0.5rem">
+          <div class="fixtures-headline" style="margin-bottom:0.25rem">
             <div class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em">${prefix} · ${tLbl} · ${haLbl}</div>
             <h2 style="margin:0.15rem 0 0;font-size:1.4rem">${escapeHtml(dateStr)}${opp}</h2>
             ${selected.location_name || selected.location_postcode ? `
@@ -4961,11 +4961,11 @@ function renderFixturesTab() {
       ` : ''}
       ${selected ? `
         ${selStatus !== 'published' ? `
-          <div class="muted fix-status-banner" style="max-width:560px;padding:0.5rem 0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.8rem;margin-bottom:0.5rem">
+          <div class="muted fix-status-banner" style="max-width:560px;padding:0.3rem 0.6rem;background:#f7f7f7;border-radius:6px;font-size:0.75rem;margin-bottom:0.35rem">
             ${selStatus === 'availability' ? '◐ Availability mode — parents only see the form, not this pitch.' : '○ Draft — not visible to parents yet.'}
           </div>
         ` : ''}
-        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:540px">
+        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0 auto;max-width:min(540px,100%);width:100%;box-sizing:border-box">
           <div class="pitch" id="fix-pitch">
             <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
             <div class="slots-layer" id="fix-slots-layer"></div>
