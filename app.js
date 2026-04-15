@@ -81,6 +81,7 @@ async function logAudit(teamId, entityType, entityId, action, changes) {
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h.startsWith('team/')) return { name: 'team', teamId: h.slice(5) };
+  if (h.startsWith('view/')) return { name: 'view', lineupId: h.slice(5) };
   return { name: 'home' };
 }
 window.addEventListener('hashchange', render);
@@ -93,6 +94,15 @@ function resetHeader() {
 }
 
 async function render() {
+  // Public parent view — no auth required
+  const preRoute = currentRoute();
+  if (preRoute.name === 'view') {
+    resetHeader();
+    userBar.innerHTML = '';
+    await renderParentView(preRoute.lineupId);
+    return;
+  }
+
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
     resetHeader();
@@ -367,6 +377,141 @@ async function renderTeamsHome(user) {
   appEl.querySelectorAll('[data-team]').forEach(btn => {
     btn.onclick = () => { location.hash = `#/team/${btn.dataset.team}`; };
   });
+}
+
+// ---------- Parent / public view ----------
+async function renderParentView(lineupId) {
+  appEl.innerHTML = `<p class="loading">Loading lineup…</p>`;
+  if (!lineupId) {
+    appEl.innerHTML = `<div class="parent-view"><p class="error">No lineup specified.</p></div>`;
+    return;
+  }
+
+  // Fetch the lineup (must be published — RLS enforces this for anon)
+  const { data: lineup, error: lErr } = await supabase
+    .from('lineups')
+    .select('*')
+    .eq('id', lineupId)
+    .maybeSingle();
+
+  if (lErr || !lineup) {
+    appEl.innerHTML = `
+      <div class="parent-view">
+        <div class="pv-card">
+          <h2>Lineup not available</h2>
+          <p class="muted">This lineup may have been unpublished or the link is incorrect.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Fetch team + players (RLS allows read when team has a published lineup)
+  const [teamRes, playersRes] = await Promise.all([
+    supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
+    supabase.from('players').select('*').eq('team_id', lineup.team_id)
+  ]);
+  const team = teamRes.data || { name: '' };
+  const players = playersRes.data || [];
+
+  // Seed editor so renderFixturePitch (which reads from editor.players + getFormation) works
+  editor = { team, canEdit: false, players, lineups: [lineup], current: null, customFormations: [] };
+
+  // Build match-details summary
+  const data = lineup.data || {};
+  const matchType = lineup.match_type || data.match_type || 'league';
+  const homeAway  = lineup.home_away  || data.home_away  || 'home';
+  const tLbl  = matchType === 'friendly' ? 'Friendly' : matchType === 'cup' ? 'Cup match' : 'League match';
+  const haLbl = homeAway === 'away' ? 'Away' : 'Home';
+
+  // Venue: home games use team.home_ground_*; away uses lineup.location_*
+  const venue = homeAway === 'home'
+    ? {
+        name: team.home_ground_name || '',
+        postcode: team.home_ground_postcode || '',
+        lat: team.home_ground_lat ?? null,
+        lng: team.home_ground_lng ?? null
+      }
+    : {
+        name: lineup.location_name || '',
+        postcode: lineup.location_postcode || '',
+        lat: lineup.location_lat ?? null,
+        lng: lineup.location_lng ?? null
+      };
+
+  const gd = lineup.game_date ? new Date(lineup.game_date + 'T00:00:00') : null;
+  const dateStr = gd ? gd.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+
+  const kickoff = lineup.kickoff_time || data.kickoff_time || '';
+  const arrival = lineup.arrival_time || data.arrival_time || '';
+  const notes   = lineup.notes        || data.notes        || '';
+
+  const mapHref = (venue.lat != null && venue.lng != null)
+    ? `https://www.google.com/maps/search/?api=1&query=${venue.lat},${venue.lng}`
+    : (venue.postcode ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue.postcode)}` : '');
+  const w3wHref = (venue.lat != null && venue.lng != null)
+    ? `https://what3words.com/${venue.lat},${venue.lng}`
+    : '';
+
+  const logoSrc = 'logo.png';
+  const teamName = escapeHtml(team.name || '');
+  const oppName  = escapeHtml(lineup.opponent || 'TBD');
+
+  appEl.innerHTML = `
+    <div class="parent-view">
+      <div class="pv-header">
+        <img src="${logoSrc}" alt="" class="pv-logo" />
+        <div>
+          <div class="pv-team">${teamName}</div>
+          <div class="pv-vs">${haLbl === 'Home' ? `${teamName} <span class="pv-vs-sep">vs</span> ${oppName}` : `${oppName} <span class="pv-vs-sep">vs</span> ${teamName}`}</div>
+          <div class="pv-sub">${tLbl} · ${haLbl}</div>
+        </div>
+      </div>
+
+      <div class="pv-card">
+        <h3 class="pv-card-title">Match details</h3>
+        <dl class="pv-details">
+          ${dateStr ? `<dt>Date</dt><dd>${escapeHtml(dateStr)}</dd>` : ''}
+          ${kickoff ? `<dt>Kick off</dt><dd>${escapeHtml(kickoff)}</dd>` : ''}
+          ${arrival ? `<dt>Team arrival</dt><dd>${escapeHtml(arrival)}</dd>` : ''}
+          ${(venue.name || venue.postcode) ? `<dt>Venue</dt><dd>${escapeHtml(venue.name || '')}${venue.name && venue.postcode ? ' · ' : ''}${escapeHtml(venue.postcode || '')}</dd>` : ''}
+        </dl>
+        ${(mapHref || w3wHref) ? `
+          <div class="pv-links">
+            ${mapHref ? `<a class="pv-link" href="${mapHref}" target="_blank" rel="noopener">🗺️ Open map</a>` : ''}
+            ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
+          </div>
+        ` : ''}
+      </div>
+
+      ${notes ? `
+        <div class="pv-card">
+          <h3 class="pv-card-title">Coach notes</h3>
+          <p class="pv-notes">${escapeHtml(notes)}</p>
+        </div>
+      ` : ''}
+
+      <div class="pv-card">
+        <h3 class="pv-card-title">Lineup</h3>
+        <div class="pv-pitch" id="fix-pitch" style="max-width:560px;margin:0 auto">
+          <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+          <div class="pv-slots" id="fix-slots"></div>
+          <div class="pv-ball" id="fix-ball" style="display:none"></div>
+        </div>
+        <div class="pv-subs" id="fix-subs" style="margin-top:0.5rem"></div>
+      </div>
+
+      <div class="pv-footer">
+        <a href="#" class="muted">interpro-lineups</a>
+      </div>
+    </div>
+  `;
+
+  renderFixturePitch(lineup);
+  // Re-draw on resize so tactics canvas stays crisp
+  window.addEventListener('resize', () => {
+    if (currentRoute().name === 'view') renderFixturePitch(lineup);
+  }, { once: false });
 }
 
 // ---------- Team dashboard ----------
@@ -950,6 +1095,7 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
+    ${current.id && current.published ? `<button class="btn-secondary btn-full" id="copy-share-link" style="margin-top:0.35rem">🔗 Copy share link for parents</button>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
 }
@@ -1459,6 +1605,25 @@ function wireLineupEvents() {
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
   if (openMdBtn) openMdBtn.onclick = openMatchDetailsModal;
+
+  // Copy share link for parents
+  const copyShareBtn = document.getElementById('copy-share-link');
+  if (copyShareBtn) copyShareBtn.onclick = async () => {
+    const id = editor?.current?.id;
+    if (!id) return;
+    const base = location.origin + location.pathname;
+    const shareUrl = `${base}#/view/${id}`;
+    const msg = document.getElementById('save-msg');
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      if (msg) { msg.textContent = '✓ Share link copied'; msg.className = 'ok'; }
+    } catch (e) {
+      // Fallback: show a prompt so they can copy manually
+      window.prompt('Copy this link:', shareUrl);
+      if (msg) { msg.textContent = 'Link ready to copy'; msg.className = 'muted'; }
+    }
+    setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
+  };
 
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
