@@ -4207,11 +4207,11 @@ function renderFixturesTab() {
         const tLbl = selected.match_type === 'friendly' ? 'Friendly' : selected.match_type === 'cup' ? 'Cup' : 'League';
         const haLbl = selected.home_away === 'away' ? 'Away' : 'Home';
         return `
-          <div style="margin-bottom:0.5rem">
+          <div class="fixtures-headline" style="margin-bottom:0.5rem">
             <div class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em">${prefix} · ${tLbl} · ${haLbl}</div>
             <h2 style="margin:0.15rem 0 0;font-size:1.4rem">${escapeHtml(dateStr)}${opp}</h2>
             ${selected.location_name || selected.location_postcode ? `
-              <div style="font-size:0.9rem;margin-top:0.25rem">
+              <div class="fix-loc" style="font-size:0.9rem;margin-top:0.25rem">
                 📍 ${escapeHtml(selected.location_name || '')}${selected.location_name && selected.location_postcode ? ' · ' : ''}${escapeHtml(selected.location_postcode || '')}
                 ${selected.location_lat && selected.location_lng
                   ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${selected.location_lat},${selected.location_lng}" target="_blank" rel="noopener">Map</a>`
@@ -4281,7 +4281,7 @@ function renderFixturesTab() {
       </div>
       ${headline}
       ${selected && canEdit && selShareable ? `
-        <div style="max-width:560px;margin:0 0 0.75rem">
+        <div class="fix-share-wrap" style="max-width:560px;margin:0 0 0.75rem">
           <button class="btn-secondary btn-full" id="fix-share-link">${selShareLabel}</button>
           <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
         </div>
@@ -4291,7 +4291,7 @@ function renderFixturesTab() {
       ` : ''}
       ${selected ? `
         ${selStatus !== 'published' ? `
-          <div class="muted" style="max-width:560px;padding:0.5rem 0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.8rem;margin-bottom:0.5rem">
+          <div class="muted fix-status-banner" style="max-width:560px;padding:0.5rem 0.75rem;background:#f7f7f7;border-radius:6px;font-size:0.8rem;margin-bottom:0.5rem">
             ${selStatus === 'availability' ? '◐ Availability mode — parents only see the form, not this pitch.' : '○ Draft — not visible to parents yet.'}
           </div>
         ` : ''}
