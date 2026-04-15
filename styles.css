@@ -600,6 +600,7 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 .chip:active { cursor: grabbing; }
 .chip.dragging { opacity: 0.45; }
 .chip, .chip * { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
+.chip * { pointer-events: none !important; }
 .chip-ghost { box-shadow: 0 6px 16px rgba(0,0,0,0.4) !important; }
 .chip-inner {
   display: flex;
