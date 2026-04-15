@@ -1529,8 +1529,12 @@ function wireDragAndDrop() {
 
   document.addEventListener('pointerdown', (e) => {
     if (!editor?.canEdit) return;
+    if (_posEditMode) return; // Edit-positions mode owns all pointer events on the pitch
+    if (tacticMode) return;   // Tactics (move/click/drag/ball) own pointer events on the pitch
     if (e.button !== undefined && e.button !== 0) return;
-    // Find the chip however we can:
+    // Don't start a chip drag if the press landed on the ball, tactics canvas, or a tactic control
+    if (e.target.closest?.('#ball-el, .tactics-canvas, [data-tactic-mode], #btn-ball, .zone-row, #tactic-info')) return;
+    // Find the chip:
     // 1. Walk up from target (hit .chip, .chip-inner, .chip-num, .chip-name)
     let chip = e.target.closest?.('.chip');
     // 2. If target is the slot/sub container, pick up the chip inside
@@ -1538,15 +1542,7 @@ function wireDragAndDrop() {
       const container = e.target.closest?.('[data-slot], [data-sub]');
       if (container) chip = container.querySelector('.chip');
     }
-    // 3. Last resort: use the pixel coordinates to find any chip under the pointer
-    if (!chip) {
-      const stack = document.elementsFromPoint(e.clientX, e.clientY);
-      for (const el of stack) {
-        if (el.classList?.contains('chip')) { chip = el; break; }
-        const c = el.querySelector?.('.chip');
-        if (c) { chip = c; break; }
-      }
-    }
+    // (No elementsFromPoint fallback — it reaches through the ball/canvas and grabs chips underneath.)
     if (!chip) return;
     if (!document.getElementById('tab-content')?.contains(chip)) return;
     e.preventDefault();
