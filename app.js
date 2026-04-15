@@ -1258,10 +1258,12 @@ const HELP_SECTIONS = [
       <p>Open <strong>Squad</strong> and click <strong>+ Add player</strong>. Fill in name, shirt number, preferred positions and notes. Save.</p>
       <h4>What does the position field do?</h4>
       <p>Preferred positions colour-code players on the lineup picker. They're suggestions, not restrictions.</p>
+      <h4>How the Squad tab is organised</h4>
+      <p>When the <strong>All</strong> filter is active, players are grouped into <strong>Goalkeepers</strong>, <strong>Defenders</strong>, <strong>Midfielders</strong>, <strong>Forwards</strong> and <strong>Unassigned</strong>. Pick a group from the filter to see just that group. Each card shows the player's shirt number as a small blue badge in the top-left corner, so it stays visible even when a photo is set.</p>
       <h4>Editing or removing a player <em>(coach/admin only)</em></h4>
-      <p>Click a player to expand their card. All fields (name, number, position, parent contacts, photo) save on blur. Use <strong>Remove player</strong> to delete. Removing a player won't break old lineups — they'll just appear as empty slots.</p>
+      <p>Tap a player's card to open the <strong>Edit player</strong> modal. All fields (photo, name, number, position, parent contacts) save on change. Use <strong>Remove player</strong> at the bottom to delete. Removing a player won't break old lineups — they'll just appear as empty slots.</p>
       <h4>Adding a player photo <em>(coach/admin only)</em></h4>
-      <p>Expand the player's card and click <strong>Upload photo</strong>. A cropper opens — drag and zoom to frame the face inside the square, then save. The image is compressed to a 512×512 JPEG and shows up everywhere that player appears: squad list, pitch chip, subs row, parent view chips, fixtures preview. Use <strong>Replace</strong> or <strong>Remove</strong> to change it.</p>
+      <p>Open the player modal and click <strong>Upload photo</strong>. A cropper opens <em>on top of</em> the player modal — drag and zoom to frame the face inside the square, then save. The image is compressed to a 512×512 JPEG and shows up everywhere that player appears: squad list, pitch chip, subs row, parent view chips, fixtures preview. Use <strong>Replace</strong> or <strong>Remove</strong> to change it.</p>
       <h4>What's the Access codes box for? <em>(coach/admin only)</em></h4>
       <p>Each player has an auto-generated <strong>personal code</strong> (e.g. <code>JE1234</code> — first initials + 4 digits) and optionally a 5-digit <strong>family code</strong> shared with linked siblings. Parents enter one of these codes once on the availability link to unlock that player on their device. WhatsApp the code(s) to the parents — they only need to enter one once. See "Publishing & sharing with parents" for the parent flow.</p>
       <h4>Linking siblings <em>(coach/admin only)</em></h4>
@@ -1286,7 +1288,14 @@ const HELP_SECTIONS = [
       <h4>Changing formation</h4>
       <p>Open the <strong>Formation</strong> card and pick a preset (4-3-3, 4-4-2, etc.) or a custom one.</p>
       <h4>Custom formations</h4>
-      <p>In the Formation card click <strong>+ Build custom</strong>. Drag dots, label positions, save. Custom formations show alongside presets.</p>
+      <p>In the Formation card click <strong>+ Build custom</strong>, or on any lineup click <strong>✎ Edit positions</strong>. Drag the dots to move players, and <strong>double-click a position label</strong> (GK, CB, ST etc.) to open a dropdown of common roles — or type a custom label up to 4 characters.</p>
+      <h4>Saving formation changes</h4>
+      <p>While in edit mode you'll see two save buttons:</p>
+      <ul>
+        <li><strong>💾 Save formation</strong> — if you're already on a custom formation, this overwrites it in place (with a confirm). Preset formations like 4-3-3 can't be overwritten, so this falls back to Save as new.</li>
+        <li><strong>➕ Save as new formation…</strong> — prompts for a name and saves a brand-new custom formation. Name clashes with an existing custom prompt to overwrite.</li>
+      </ul>
+      <p>Label or position changes are also persisted to the current lineup itself, so a reload keeps your tweaks without needing to save the formation.</p>
       <h4>Subs</h4>
       <p>Drag players to the <strong>Substitutes</strong> strip below the pitch (max 5).</p>
       <h4>Tactics</h4>
