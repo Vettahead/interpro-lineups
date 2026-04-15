@@ -662,6 +662,7 @@ async function renderParentView(lineupId, opts = {}) {
       ` : ''}
 
       ${showPitch ? `
+      <div id="pv-child-notice"></div>
       <div class="pv-card">
         <h3 class="pv-card-title">Lineup</h3>
         <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">
@@ -690,6 +691,7 @@ async function renderParentView(lineupId, opts = {}) {
   }
   if (showPitch) {
     renderFixturePitch(lineup);
+    highlightMyChildrenOnPitch(lineup, players);
   }
 
   document.getElementById('pv-refresh')?.addEventListener('click', () => {
@@ -4997,6 +4999,98 @@ function renderFixturesTab() {
     applyAvailabilityDecorations();
   }
   wireFixtureEvents();
+}
+
+// On the parent view, find any unlocked ("my") children in this lineup, highlight their
+// chips with a gold ring, and render a friendly notice above the pitch telling the parent
+// what position their child is playing. Subs get a softer "can't guarantee equal minutes"
+// line so the expectation is clear without sounding brusque.
+async function highlightMyChildrenOnPitch(lineup, players) {
+  const noticeEl = document.getElementById('pv-child-notice');
+  if (!noticeEl) return;
+  const unlocked = new Set(getUnlockedPlayers(lineup.team_id) || []);
+  if (!unlocked.size) { noticeEl.innerHTML = ''; return; }
+
+  // Look up coach/admin first names so the "not in squad" apology can name them
+  let coachNamesForNotice = 'your coach';
+  try {
+    const { data: members } = await supabase
+      .from('team_members')
+      .select('user_id, role')
+      .eq('team_id', lineup.team_id)
+      .in('role', ['admin', 'coach']);
+    const ids = (members || []).map(m => m.user_id);
+    if (ids.length) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', ids);
+      const names = (profs || [])
+        .map(p => {
+          const full = (p.full_name || '').trim();
+          if (!full || full.includes('@')) return '';
+          const first = full.split(/\s+/)[0];
+          return first && !first.includes('@') ? first : '';
+        })
+        .filter(Boolean);
+      if (names.length) coachNamesForNotice = names.join(' or ');
+    }
+  } catch (e) { /* fall back to "your coach" */ }
+
+  const data = lineup.data || {};
+  const slots = data.slots || {};
+  const subs = Array.isArray(data.subs) ? data.subs : [];
+  const formation = getFormation(data.formation) || FORMATIONS['4-3-3'];
+  const lbl = (Array.isArray(data.lbl) && data.lbl.length === formation.lbl.length) ? data.lbl : formation.lbl;
+  const pById = id => (players || []).find(p => p.id === id);
+
+  // Build entries for each unlocked child that appears in this lineup
+  const entries = [];
+  unlocked.forEach(pid => {
+    const p = pById(pid);
+    if (!p) return;
+    // Find slot index
+    let slotIdx = null;
+    Object.keys(slots).forEach(k => { if (slots[k] === pid) slotIdx = parseInt(k); });
+    if (slotIdx !== null) {
+      entries.push({ player: p, role: 'slot', position: lbl[slotIdx] || 'the pitch' });
+      return;
+    }
+    if (subs.includes(pid)) {
+      entries.push({ player: p, role: 'sub' });
+      return;
+    }
+    entries.push({ player: p, role: 'none' });
+  });
+
+  if (!entries.length) { noticeEl.innerHTML = ''; return; }
+
+  // Highlight each child's chip(s) on the pitch and subs bench with a gold ring
+  entries.forEach(({ player, role }) => {
+    if (role === 'none') return;
+    document.querySelectorAll(`.chip[data-player-id="${player.id}"]`).forEach(chip => {
+      chip.style.boxShadow = '0 0 0 4px #f4c430, 0 1px 3px rgba(0,0,0,0.4)';
+    });
+  });
+
+  // Build the notice copy
+  const firstName = n => (n || '').split(/\s+/)[0] || 'Your child';
+  const lines = entries.map(({ player, role, position }) => {
+    const name = escapeHtml(firstName(player.name));
+    if (role === 'slot') {
+      return `<div style="margin:0.2rem 0"><strong>${name}</strong> is starting at <strong>${escapeHtml(position)}</strong> ⚽</div>`;
+    }
+    if (role === 'sub') {
+      return `<div style="margin:0.2rem 0"><strong>${name}</strong> is on the bench today. The coaches do their best to rotate minutes, but we can't promise equal playing time every match — thanks for your understanding and support 💛</div>`;
+    }
+    return `<div style="margin:0.2rem 0"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
+  }).join('');
+
+  noticeEl.innerHTML = `
+    <div class="pv-card" style="border-left:4px solid #f4c430;background:#fffbea">
+      <div style="font-size:0.75rem;font-weight:700;color:#8a6a00;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.3rem">Your squad</div>
+      ${lines}
+    </div>`;
 }
 
 function renderFixturePitch(lineup) {
