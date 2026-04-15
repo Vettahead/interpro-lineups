@@ -252,7 +252,7 @@ button.link {
 /* Player cards */
 .sc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
 }
 .sc-card {
@@ -926,7 +926,7 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   .filter-list { flex-direction: row; flex-wrap: wrap; }
   .filter-btn { flex: 1 1 auto; min-width: calc(50% - 0.125rem); }
   .tabs-row { margin: -0.5rem -1rem 0; padding: 0 1rem; }
-  .sc-grid { grid-template-columns: 1fr; gap: 0.4rem; }
+  .sc-grid { grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
   .sc-header { padding: 0.6rem 0.8rem; }
   .sc-chip { width: 40px; height: 40px; }
   .add-row { grid-template-columns: 1fr 70px auto; }
