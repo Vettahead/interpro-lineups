@@ -1182,12 +1182,22 @@ function wireDragAndDrop() {
   document.addEventListener('pointerdown', (e) => {
     if (!editor?.canEdit) return;
     if (e.button !== undefined && e.button !== 0) return;
-    // Walk up from target — works whether hit is chip, chip-inner, chip-num, chip-name,
-    // OR the enclosing [data-slot] / [data-sub] (in which case we pick up the chip inside)
+    // Find the chip however we can:
+    // 1. Walk up from target (hit .chip, .chip-inner, .chip-num, .chip-name)
     let chip = e.target.closest?.('.chip');
+    // 2. If target is the slot/sub container, pick up the chip inside
     if (!chip) {
       const container = e.target.closest?.('[data-slot], [data-sub]');
       if (container) chip = container.querySelector('.chip');
+    }
+    // 3. Last resort: use the pixel coordinates to find any chip under the pointer
+    if (!chip) {
+      const stack = document.elementsFromPoint(e.clientX, e.clientY);
+      for (const el of stack) {
+        if (el.classList?.contains('chip')) { chip = el; break; }
+        const c = el.querySelector?.('.chip');
+        if (c) { chip = c; break; }
+      }
     }
     if (!chip) return;
     if (!document.getElementById('tab-content')?.contains(chip)) return;
