@@ -1240,15 +1240,22 @@ function renderSquadTab(team, canEdit, players) {
       photoFileInput.onchange = async () => {
         const file = photoFileInput.files && photoFileInput.files[0];
         if (!file) return;
-        if (file.size > 5 * 1024 * 1024) {
-          if (photoMsg) { photoMsg.textContent = 'File too large (max 5MB)'; photoMsg.className = 'muted photo-msg error'; }
+        if (file.size > 10 * 1024 * 1024) {
+          if (photoMsg) { photoMsg.textContent = 'File too large (max 10MB)'; photoMsg.className = 'muted photo-msg error'; }
           photoFileInput.value = '';
+          return;
+        }
+        // Open cropper first
+        const cropped = await openPhotoCropper(file);
+        photoFileInput.value = '';
+        if (!cropped) {
+          if (photoMsg) { photoMsg.textContent = ''; photoMsg.className = 'muted photo-msg'; }
           return;
         }
         if (photoMsg) { photoMsg.textContent = 'Uploading…'; photoMsg.className = 'muted photo-msg'; }
         photoPickBtn.disabled = true;
         try {
-          const updated = await uploadPlayerPhoto(pid, file);
+          const updated = await uploadPlayerPhoto(pid, cropped);
           const player = players.find(p => p.id === pid);
           if (player) player.photo_url = updated.photo_url;
           await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: updated.photo_url });
@@ -1808,16 +1815,19 @@ function renderLineupsTab() {
 
 function chipHtml(player, context) {
   const num = player.number ?? '';
-  const photo = player.photo_url ? `<div class="chip-photo" style="background-image:url('${escapeHtml(player.photo_url)}')"></div>` : '';
+  const hasPhoto = !!player.photo_url;
+  const photoStyle = hasPhoto ? ` style="background-image:url('${escapeHtml(player.photo_url)}')"` : '';
   return `
-    <div class="chip ${context === 'palette' ? 'chip-palette' : ''} ${player.photo_url ? 'has-photo' : ''}"
-         draggable="${editor.canEdit ? 'true' : 'false'}"
-         data-player-id="${player.id}">
-      ${photo}
-      <div class="chip-inner">
-        ${num !== '' ? `<div class="chip-num">${num}</div>` : ''}
-        <div class="chip-name">${escapeHtml(shortName(player.name))}</div>
+    <div class="chip-wrap">
+      <div class="chip ${context === 'palette' ? 'chip-palette' : ''} ${hasPhoto ? 'has-photo' : ''}"
+           draggable="${editor.canEdit ? 'true' : 'false'}"
+           data-player-id="${player.id}"${photoStyle}>
+        ${hasPhoto ? '' : `<div class="chip-inner">
+          ${num !== '' ? `<div class="chip-num">${num}</div>` : ''}
+          <div class="chip-name">${escapeHtml(shortName(player.name))}</div>
+        </div>`}
       </div>
+      ${hasPhoto ? `<div class="chip-caption">${num !== '' ? `<span class="cc-num">${num}</span> ` : ''}${escapeHtml(shortName(player.name))}</div>` : ''}
     </div>
   `;
 }
@@ -1841,6 +1851,142 @@ async function uploadPlayerPhoto(playerId, file) {
   const updRes = await supabase.from('players').update({ photo_url: publicUrl }).eq('id', playerId).select().single();
   if (updRes.error) throw updRes.error;
   return updRes.data;
+}
+
+// Photo cropper: shows the picked image in a square frame, lets user drag + zoom,
+// returns a Blob (square JPEG, ~512x512) ready to upload.
+function openPhotoCropper(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'cropper-overlay';
+      overlay.innerHTML = `
+        <div class="cropper-modal" role="dialog" aria-label="Crop photo">
+          <div class="cropper-header">
+            <div class="cropper-title">Position the face</div>
+            <button class="cropper-close" type="button" aria-label="Cancel">×</button>
+          </div>
+          <div class="cropper-stage" data-stage>
+            <canvas data-cv width="320" height="320"></canvas>
+            <div class="cropper-frame" aria-hidden="true"></div>
+          </div>
+          <div class="cropper-controls">
+            <label class="cropper-zoom">
+              <span>Zoom</span>
+              <input type="range" min="100" max="400" value="100" data-zoom>
+            </label>
+            <p class="cropper-hint muted">Drag the photo to move it. Use zoom to scale.</p>
+          </div>
+          <div class="cropper-actions">
+            <button class="btn-secondary" type="button" data-cancel>Cancel</button>
+            <button class="btn-primary" type="button" data-save>Use photo</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      const SIZE = 320;        // preview canvas size
+      const OUT = 512;         // output size
+      const cv = overlay.querySelector('[data-cv]');
+      const ctx = cv.getContext('2d');
+      const zoomEl = overlay.querySelector('[data-zoom]');
+      const stage = overlay.querySelector('[data-stage]');
+
+      // Fit image so the SHORTEST side fills the SIZE x SIZE frame at zoom=1.
+      const fitScale = SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+      let scale = 1;           // multiplier on top of fitScale
+      let tx = 0, ty = 0;      // translation in canvas px (centred at 0,0)
+
+      function clamp() {
+        const s = fitScale * scale;
+        const w = img.naturalWidth * s;
+        const h = img.naturalHeight * s;
+        const maxX = Math.max(0, (w - SIZE) / 2);
+        const maxY = Math.max(0, (h - SIZE) / 2);
+        if (tx > maxX) tx = maxX; if (tx < -maxX) tx = -maxX;
+        if (ty > maxY) ty = maxY; if (ty < -maxY) ty = -maxY;
+      }
+      function draw() {
+        clamp();
+        const s = fitScale * scale;
+        const w = img.naturalWidth * s;
+        const h = img.naturalHeight * s;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, SIZE, SIZE);
+        ctx.drawImage(img, (SIZE - w) / 2 + tx, (SIZE - h) / 2 + ty, w, h);
+      }
+      draw();
+
+      // Drag (mouse + touch)
+      let dragging = false; let lastX = 0, lastY = 0;
+      const onDown = (e) => {
+        dragging = true;
+        const pt = e.touches ? e.touches[0] : e;
+        lastX = pt.clientX; lastY = pt.clientY;
+        e.preventDefault();
+      };
+      const onMove = (e) => {
+        if (!dragging) return;
+        const pt = e.touches ? e.touches[0] : e;
+        tx += pt.clientX - lastX;
+        ty += pt.clientY - lastY;
+        lastX = pt.clientX; lastY = pt.clientY;
+        draw();
+        e.preventDefault();
+      };
+      const onUp = () => { dragging = false; };
+      cv.addEventListener('mousedown', onDown);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      cv.addEventListener('touchstart', onDown, { passive: false });
+      cv.addEventListener('touchmove', onMove, { passive: false });
+      cv.addEventListener('touchend', onUp);
+
+      zoomEl.oninput = () => {
+        const newScale = parseInt(zoomEl.value, 10) / 100;
+        // Keep centre stable when zooming
+        const ratio = newScale / scale;
+        tx *= ratio; ty *= ratio;
+        scale = newScale;
+        draw();
+      };
+
+      const cleanup = (result) => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        URL.revokeObjectURL(url);
+        overlay.remove();
+        resolve(result);
+      };
+      overlay.querySelector('.cropper-close').onclick = () => cleanup(null);
+      overlay.querySelector('[data-cancel]').onclick = () => cleanup(null);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+      overlay.querySelector('[data-save]').onclick = () => {
+        // Render at OUT x OUT
+        const out = document.createElement('canvas');
+        out.width = OUT; out.height = OUT;
+        const octx = out.getContext('2d');
+        const s = fitScale * scale * (OUT / SIZE);
+        const w = img.naturalWidth * s;
+        const h = img.naturalHeight * s;
+        const otx = tx * (OUT / SIZE);
+        const oty = ty * (OUT / SIZE);
+        octx.fillStyle = '#000';
+        octx.fillRect(0, 0, OUT, OUT);
+        octx.drawImage(img, (OUT - w) / 2 + otx, (OUT - h) / 2 + oty, w, h);
+        out.toBlob((blob) => {
+          if (!blob) { cleanup(null); return; }
+          // Attach a name so .upload() picks a sensible content type
+          blob.name = 'photo.jpg';
+          cleanup(blob);
+        }, 'image/jpeg', 0.88);
+      };
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
 }
 
 async function removePlayerPhoto(playerId, currentUrl) {
@@ -1883,11 +2029,14 @@ function renderPitch() {
           ? `<div class="pos-handle" data-pos-handle="${i}" title="Drag to reposition"></div>
              <div class="pos-edit-label" data-pos-label="${i}">${escapeHtml(label)}</div>`
           : (p
-              ? `<div class="chip chip-slot" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-slot="${i}">
-                  <div class="chip-inner">
-                    ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
-                    <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+              ? `<div class="chip-wrap">
+                  <div class="chip chip-slot ${p.photo_url ? 'has-photo' : ''}" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-slot="${i}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+                    ${p.photo_url ? '' : `<div class="chip-inner">
+                      ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                      <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+                    </div>`}
                   </div>
+                  ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
                 </div>`
               : `<div class="slot-label">${label}</div>`)
         }
@@ -1947,11 +2096,14 @@ function renderSubsBar() {
     cells.push(`
       <div class="sub-slot ${p ? 'filled' : ''}" data-sub="${i}">
         ${p
-          ? `<div class="chip chip-sub" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-sub="${i}">
-              <div class="chip-inner">
-                ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
-                <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+          ? `<div class="chip-wrap">
+              <div class="chip chip-sub ${p.photo_url ? 'has-photo' : ''}" draggable="${editor.canEdit ? 'true' : 'false'}" data-player-id="${p.id}" data-from-sub="${i}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+                ${p.photo_url ? '' : `<div class="chip-inner">
+                  ${p.number != null ? `<div class="chip-num">${p.number}</div>` : ''}
+                  <div class="chip-name">${escapeHtml(shortName(p.name))}</div>
+                </div>`}
               </div>
+              ${p.photo_url ? `<div class="chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
             </div>`
           : `<div class="sub-empty">+</div>`
         }
@@ -3520,12 +3672,11 @@ function renderPlayPreview(play) {
       const p = pid ? pById(pid) : null;
       const label = lbl[i] || '';
       const chipInner = p
-        ? `<div class="pv-chip ${p.photo_url ? 'has-photo' : ''}">
-             ${p.photo_url ? `<div class="pv-chip-photo" style="background-image:url('${escapeHtml(p.photo_url)}')"></div>` : ''}
-             <div class="pv-chip-inner">
-               ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
-               <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+        ? `<div class="pv-chip-wrap">
+             <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+               ${p.photo_url ? '' : `${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}<div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>`}
              </div>
+             ${p.photo_url ? `<div class="pv-chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
            </div>`
         : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
       return `
@@ -3850,12 +4001,11 @@ function renderFixturePitch(lineup) {
       const p = pid ? pById(pid) : null;
       const label = lbl[i] || '';
       const chipInner = p
-        ? `<div class="pv-chip ${p.photo_url ? 'has-photo' : ''}">
-             ${p.photo_url ? `<div class="pv-chip-photo" style="background-image:url('${escapeHtml(p.photo_url)}')"></div>` : ''}
-             <div class="pv-chip-inner">
-               ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
-               <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+        ? `<div class="pv-chip-wrap">
+             <div class="pv-chip ${p.photo_url ? 'has-photo' : ''}"${p.photo_url ? ` style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+               ${p.photo_url ? '' : `${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}<div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>`}
              </div>
+             ${p.photo_url ? `<div class="pv-chip-caption">${p.number != null ? `<span class="cc-num">${p.number}</span> ` : ''}${escapeHtml(shortName(p.name))}</div>` : ''}
            </div>`
         : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
       return `
