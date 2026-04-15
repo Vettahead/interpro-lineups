@@ -2100,7 +2100,10 @@ async function buildWhatsAppMessage(current, team) {
         .map(p => {
           const full = (p.full_name || '').trim();
           if (!full) return ''; // skip coaches without a display name — never expose email
-          return full.split(/\s+/)[0]; // first name only
+          if (full.includes('@')) return ''; // full_name is an email address — skip, don't leak it
+          const first = full.split(/\s+/)[0];
+          if (!first || first.includes('@')) return '';
+          return first; // first name only
         })
         .filter(Boolean);
     }
@@ -2188,7 +2191,7 @@ function matchSummaryHtml(current, team, canEdit) {
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
     ${current.id ? `<button class="btn-full" id="copy-availability-link" style="${availStyle}" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>🔗 Availability link</button>` : ''}
     ${current.id ? `<button class="btn-full" id="copy-lineup-link" style="${lineupStyle}" ${draftDisabled ? 'disabled title="Switch to Show lineup to share"' : ''}>🔗 Match link</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-whatsapp" style="margin-top:0.35rem;background:#25D366;color:#fff;border:none;font-weight:600" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup first"' : ''}>💬 Copy WhatsApp message</button>` : ''}
+    ${current.id ? `<button class="btn-full" id="copy-whatsapp" style="margin-top:0.35rem;background:#25D366;color:#fff;border:none;font-weight:600" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup first"' : ''}>💬 Send via WhatsApp</button>` : ''}
     ${current.id && current.game_date ? `<button class="btn-full" id="add-to-calendar" style="margin-top:0.35rem;background:#fff;color:var(--text);border:1px solid var(--border);font-weight:500">📅 Add to calendar</button>` : ''}
     ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state.</div>` : ''}
     ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
@@ -3095,8 +3098,16 @@ function wireLineupEvents() {
     const msg = document.getElementById('save-msg');
     try {
       const text = await buildWhatsAppMessage(editor.current, editor.team);
-      await navigator.clipboard.writeText(text);
-      if (msg) { msg.textContent = '✓ WhatsApp message copied — paste into the team chat'; msg.className = 'ok'; }
+      // Copy to clipboard as a safety net (in case the WhatsApp handoff fails)
+      try { await navigator.clipboard.writeText(text); } catch (_) {}
+      // Open WhatsApp with chat picker: on mobile launches the app, on desktop opens WhatsApp Web
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      const win = window.open(waUrl, '_blank');
+      if (!win) {
+        // Popup blocked — fall back to same-tab navigation
+        location.href = waUrl;
+      }
+      if (msg) { msg.textContent = '✓ Opening WhatsApp — pick the team chat (message also copied as backup)'; msg.className = 'ok'; }
     } catch (e) {
       console.warn('whatsapp build failed', e);
       if (msg) { msg.textContent = 'Failed: ' + (e.message || 'could not build message'); msg.className = 'error'; }
