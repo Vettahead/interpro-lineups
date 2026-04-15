@@ -378,6 +378,40 @@ const expandedPlayers = new Set(); // player ids with expanded detail panel
 // In-memory editor state for lineups tab
 let editor = null; // { team, canEdit, players, lineups, current: { id?, name, opponent, game_date, formation, slots, subs } }
 
+// Auto-save state for published lineups
+let _autosaveTimer = null;
+let _autosaveInFlight = false;
+let _lastSavedHash = null;
+function _lineupContentHash(c) {
+  if (!c) return null;
+  return JSON.stringify({
+    slots: c.slots, subs: c.subs, formation: c.formation,
+    arrows: c.arrows, zoneLines: c.zoneLines,
+    ballVisible: c.ballVisible, ballPos: c.ballPos,
+    opponent: c.opponent, game_date: c.game_date,
+    match_type: c.match_type, home_away: c.home_away,
+    kickoff_time: c.kickoff_time, arrival_time: c.arrival_time, notes: c.notes,
+    location_name: c.location_name, location_postcode: c.location_postcode,
+    location_lat: c.location_lat, location_lng: c.location_lng
+  });
+}
+function scheduleAutosaveIfPublished() {
+  if (_autosaveInFlight) return;
+  if (!editor?.current?.id || !editor.current.published) return;
+  const h = _lineupContentHash(editor.current);
+  if (h === _lastSavedHash) return;
+  if (_autosaveTimer) clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(async () => {
+    _autosaveTimer = null;
+    _autosaveInFlight = true;
+    try {
+      await saveLineupWithMsg(null);
+      _lastSavedHash = _lineupContentHash(editor.current);
+    } catch (e) { console.error('autosave failed', e); }
+    _autosaveInFlight = false;
+  }, 800);
+}
+
 async function renderTeamDashboard(user, teamId) {
   appEl.innerHTML = `<p class="loading">Loading team…</p>`;
 
@@ -945,11 +979,11 @@ function matchDetailsFormHtml(current, team, canEdit) {
     <div class="sc-row-2" style="margin-top:0.5rem">
       <div>
         <label>Kick off</label>
-        <input type="time" id="l-kickoff" value="${escapeHtml(current.kickoff_time || '')}" step="900" ${canEdit ? '' : 'disabled'} />
+        <select id="l-kickoff" ${canEdit ? '' : 'disabled'}>${timeOptions(current.kickoff_time)}</select>
       </div>
       <div>
         <label>Team arrival</label>
-        <input type="time" id="l-arrival" value="${escapeHtml(current.arrival_time || '')}" step="900" ${canEdit ? '' : 'disabled'} />
+        <select id="l-arrival" ${canEdit ? '' : 'disabled'}>${timeOptions(current.arrival_time)}</select>
       </div>
     </div>
 
@@ -1026,8 +1060,8 @@ function wireMatchDetailsFields(closeModal) {
   const koEl = overlay.querySelector('#l-kickoff');
   const arEl = overlay.querySelector('#l-arrival');
   const notesEl = overlay.querySelector('#l-notes');
-  if (koEl)    koEl.oninput    = e => { editor.current.kickoff_time = e.target.value; };
-  if (arEl)    arEl.oninput    = e => { editor.current.arrival_time = e.target.value; };
+  if (koEl)    koEl.onchange   = e => { editor.current.kickoff_time = e.target.value; };
+  if (arEl)    arEl.onchange   = e => { editor.current.arrival_time = e.target.value; };
   if (notesEl) notesEl.oninput = e => { editor.current.notes = e.target.value; };
   if (haEl)   haEl.onchange   = e => {
     editor.current.home_away = e.target.value;
@@ -1274,6 +1308,9 @@ function renderLineupsTab() {
   drawTactics();
   renderBall();
   updateTacticsCanvasClass();
+
+  // Auto-save any changes once a published lineup is open
+  scheduleAutosaveIfPublished();
 }
 
 function chipHtml(player, context) {
@@ -1423,7 +1460,7 @@ function wireLineupEvents() {
   const newBtn = document.getElementById('new-lineup-btn');
   if (newBtn) newBtn.onclick = () => {
     if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
-    editor.current = newLineupState();
+    editor.current = newLineupState(); _lastSavedHash = _lineupContentHash(editor.current);
     renderLineupsTab();
   };
 
@@ -1469,6 +1506,8 @@ function wireLineupEvents() {
         location_lng: l.location_lng ?? null
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
+      // Mark this state as already-saved so autosave doesn't fire on first render
+      _lastSavedHash = _lineupContentHash(editor.current);
       renderLineupsTab();
     };
   });
@@ -1486,7 +1525,7 @@ function wireLineupEvents() {
       await logAudit(team.id, 'lineup', id, 'delete', { name: l.name });
       const idx = lineups.findIndex(x => x.id === id);
       if (idx >= 0) lineups.splice(idx, 1);
-      if (editor.current.id === id) editor.current = newLineupState();
+      if (editor.current.id === id) editor.current = newLineupState(); _lastSavedHash = _lineupContentHash(editor.current);
       renderLineupsTab();
     };
   });
@@ -2299,6 +2338,7 @@ async function saveLineupWithMsg(msgEl) {
   }
 
   showMsg('✓ Saved', 'ok');
+  _lastSavedHash = _lineupContentHash(editor.current);
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
   renderLineupsTab();
 }
@@ -2373,6 +2413,23 @@ function openMapPicker(initial) {
     overlay.querySelector('#mp-cancel').onclick = () => close(null);
     overlay.querySelector('#mp-save').onclick = () => close(cur);
   });
+}
+
+// 15-min interval time options from 07:00 to 22:00, plus blank and current value if non-standard
+function timeOptions(selected) {
+  const cur = (selected || '').slice(0,5); // HH:MM
+  const opts = ['<option value="">—</option>'];
+  for (let h = 7; h <= 22; h++) {
+    for (const m of [0,15,30,45]) {
+      const v = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      opts.push(`<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`);
+    }
+  }
+  // If saved value falls outside standard options, include it so nothing is lost
+  if (cur && !opts.some(o => o.includes(`value="${cur}"`))) {
+    opts.push(`<option value="${cur}" selected>${cur}</option>`);
+  }
+  return opts.join('');
 }
 
 function formatDate(iso) {
