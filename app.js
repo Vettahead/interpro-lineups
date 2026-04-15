@@ -382,7 +382,7 @@ async function renderTeamDashboard(user, teamId) {
   appEl.innerHTML = `<p class="loading">Loading team…</p>`;
 
   const [teamRes, memberRes, playersRes, lineupsRes, playsRes, formationsRes] = await Promise.all([
-    supabase.from('teams').select('id, name').eq('id', teamId).single(),
+    supabase.from('teams').select('*').eq('id', teamId).single(),
     supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', user.id).maybeSingle(),
     supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }),
@@ -510,8 +510,9 @@ function renderSquadTab(team, canEdit, players) {
         <input type="text" id="hg-postcode" value="${escapeHtml(team.home_ground_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" />
         <button class="btn-secondary" id="hg-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>
       </div>
+      <button class="btn-full" id="hg-finetune" type="button" style="margin-top:0.4rem">🗺️ Fine-tune on map</button>
       <div id="hg-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
-        ${team.home_ground_lat && team.home_ground_lng ? `✓ <a href="https://www.google.com/maps/search/?api=1&query=${team.home_ground_lat},${team.home_ground_lng}" target="_blank" rel="noopener">View on map</a>` : ''}
+        ${team.home_ground_lat && team.home_ground_lng ? `✓ ${Number(team.home_ground_lat).toFixed(5)}, ${Number(team.home_ground_lng).toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${team.home_ground_lat},${team.home_ground_lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${team.home_ground_lat},${team.home_ground_lng}" target="_blank" rel="noopener">what3words</a>` : ''}
       </div>
       <button class="primary" id="hg-save" style="margin-top:0.5rem">Save home ground</button>
     </div>
@@ -651,6 +652,31 @@ function renderSquadTab(team, canEdit, players) {
       } catch (err) {
         msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
       }
+    };
+
+    // Home ground fine-tune on map
+    const hgFineBtn = document.getElementById('hg-finetune');
+    if (hgFineBtn) hgFineBtn.onclick = async () => {
+      const pcEl = document.getElementById('hg-postcode');
+      let startLat = team._pending_hg_lat ?? team.home_ground_lat ?? null;
+      let startLng = team._pending_hg_lng ?? team.home_ground_lng ?? null;
+      // If we have no coords yet but do have a postcode, try to geocode first
+      if ((startLat == null || startLng == null) && pcEl.value.trim()) {
+        try {
+          const pc = pcEl.value.trim().toUpperCase();
+          const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+          const body = await res.json();
+          if (res.ok && body.status === 200 && body.result) {
+            startLat = body.result.latitude; startLng = body.result.longitude;
+          }
+        } catch {}
+      }
+      const result = await openMapPicker({ lat: startLat, lng: startLng });
+      if (!result) return;
+      team._pending_hg_lat = result.lat;
+      team._pending_hg_lng = result.lng;
+      const msg = document.getElementById('hg-msg');
+      if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} (unsaved — click Save home ground) — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
     };
 
     // Save home ground
@@ -932,8 +958,9 @@ function renderLineupsTab() {
             <input type="text" id="l-venue-postcode" value="${escapeHtml(current.location_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit && current.home_away !== 'home' ? '' : 'disabled'} />
             ${canEdit && current.home_away !== 'home' ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
           </div>
+          ${canEdit && current.home_away !== 'home' ? `<button class="btn-full" id="l-venue-finetune" type="button" style="margin-top:0.4rem">🗺️ Fine-tune on map</button>` : ''}
           <div id="l-venue-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
-            ${current.location_lat && current.location_lng ? `✓ <a href="https://www.google.com/maps/search/?api=1&query=${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">View on map</a>` : ''}
+            ${current.location_lat && current.location_lng ? `✓ ${Number(current.location_lat).toFixed(5)}, ${Number(current.location_lng).toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">what3words</a>` : ''}
           </div>
 
           <div class="lineup-actions" style="margin-top:0.5rem">
@@ -1199,6 +1226,29 @@ function wireLineupEvents() {
     } catch (err) {
       msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
     }
+  };
+
+  // Fine-tune venue on map (away games only)
+  const venueFineBtn = document.getElementById('l-venue-finetune');
+  if (venueFineBtn) venueFineBtn.onclick = async () => {
+    let startLat = editor.current.location_lat;
+    let startLng = editor.current.location_lng;
+    if ((startLat == null || startLng == null) && (editor.current.location_postcode || '').trim()) {
+      try {
+        const pc = editor.current.location_postcode.trim().toUpperCase();
+        const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+        const body = await res.json();
+        if (res.ok && body.status === 200 && body.result) {
+          startLat = body.result.latitude; startLng = body.result.longitude;
+        }
+      } catch {}
+    }
+    const result = await openMapPicker({ lat: startLat, lng: startLng });
+    if (!result) return;
+    editor.current.location_lat = result.lat;
+    editor.current.location_lng = result.lng;
+    const msg = document.getElementById('l-venue-msg');
+    if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
   };
 
   // Publish / unpublish toggle
@@ -2103,6 +2153,78 @@ async function saveLineup() {
   msgEl.className = 'ok';
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
   renderLineupsTab();
+}
+
+// ---------- Map picker (Leaflet) ----------
+// Opens a modal with a draggable marker. Resolves with { lat, lng } or null if cancelled.
+function openMapPicker(initial) {
+  return new Promise((resolve) => {
+    if (typeof L === 'undefined') {
+      alert('Map library failed to load. Check your internet connection.');
+      resolve(null); return;
+    }
+    const start = (initial && initial.lat != null && initial.lng != null)
+      ? { lat: Number(initial.lat), lng: Number(initial.lng) }
+      : { lat: 54.5, lng: -3 }; // UK centre fallback
+    const zoom = (initial && initial.lat != null) ? 17 : 6;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'map-modal-overlay';
+    overlay.innerHTML = `
+      <div class="map-modal">
+        <div class="map-modal-header">
+          <strong>Drag the pin to fine-tune</strong>
+          <button class="btn-secondary" id="mp-close" type="button">✕</button>
+        </div>
+        <div class="map-modal-body">
+          <div id="mp-map" style="width:100%;height:100%"></div>
+        </div>
+        <div class="map-modal-footer">
+          <div id="mp-coords" class="muted" style="font-size:0.8rem;flex:1">${start.lat.toFixed(6)}, ${start.lng.toFixed(6)}</div>
+          <a id="mp-w3w" href="https://what3words.com/${start.lat},${start.lng}" target="_blank" rel="noopener" class="btn-secondary" style="text-decoration:none">🔤 what3words</a>
+          <button class="btn-secondary" id="mp-cancel" type="button">Cancel</button>
+          <button class="primary" id="mp-save" type="button">Use this point</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const map = L.map('mp-map').setView([start.lat, start.lng], zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+    const marker = L.marker([start.lat, start.lng], { draggable: true }).addTo(map);
+
+    let cur = { ...start };
+    const coordsEl = overlay.querySelector('#mp-coords');
+    const w3wEl = overlay.querySelector('#mp-w3w');
+    const updateReadout = () => {
+      coordsEl.textContent = `${cur.lat.toFixed(6)}, ${cur.lng.toFixed(6)}`;
+      w3wEl.href = `https://what3words.com/${cur.lat},${cur.lng}`;
+    };
+    marker.on('dragend', () => {
+      const p = marker.getLatLng();
+      cur = { lat: p.lat, lng: p.lng };
+      updateReadout();
+    });
+    map.on('click', (e) => {
+      cur = { lat: e.latlng.lat, lng: e.latlng.lng };
+      marker.setLatLng(e.latlng);
+      updateReadout();
+    });
+    // Fix for map rendering inside a just-opened modal
+    setTimeout(() => map.invalidateSize(), 50);
+
+    const close = (result) => {
+      map.remove();
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('#mp-close').onclick = () => close(null);
+    overlay.querySelector('#mp-cancel').onclick = () => close(null);
+    overlay.querySelector('#mp-save').onclick = () => close(cur);
+  });
 }
 
 function formatDate(iso) {

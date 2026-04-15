@@ -992,6 +992,53 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
   border-radius: 4px;
 }
 
+/* ---------- Map picker modal ---------- */
+.map-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 1rem;
+}
+.map-modal {
+  background: var(--surface, #1a1f2a);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 760px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.map-modal-header {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.map-modal-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.map-modal-footer {
+  padding: 0.5rem 0.8rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* Leaflet default pane/controls over dark bg */
+.leaflet-container { background: #333; }
+
 /* ---------- Fixtures calendar ---------- */
 .cal-header {
   display: flex;
