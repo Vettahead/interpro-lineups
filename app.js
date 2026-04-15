@@ -458,6 +458,8 @@ async function renderTeamDashboard(user, teamId) {
     editor = {
       mode: 'play',
       team, canEdit, players, lineups, plays, customFormations,
+      currentUserId: user.id,
+      currentUserRole: role,
       current: newPlayState()
     };
     renderPlaysTab();
@@ -465,6 +467,8 @@ async function renderTeamDashboard(user, teamId) {
     editor = {
       mode: 'members',
       team, canEdit, players, lineups, plays, customFormations,
+      currentUserId: user.id,
+      currentUserRole: role,
       current: newLineupState()
     };
     renderMembersTab(user);
@@ -1269,9 +1273,11 @@ function saveAsPlay() {
     const possession = overlay.querySelector('#sap-possession').value;
     const description = overlay.querySelector('#sap-description').value || '';
 
+    const { data: { user } } = await supabase.auth.getUser();
     const payload = {
       team_id: team.id,
       name,
+      created_by: user?.id || null,
       data: {
         formation: current.formation,
         pos: current.pos ? current.pos.map(p => [...p]) : null,
@@ -2328,6 +2334,10 @@ function renderPlaysTab() {
     const possPill = d.possession === 'out'
       ? '<span class="pill pill-out">Out</span>'
       : '<span class="pill pill-in">In</span>';
+    const isMine = selected.created_by && editor.currentUserId && selected.created_by === editor.currentUserId;
+    const isAdmin = editor.currentUserRole === 'admin';
+    const canDelete = canEdit && (isMine || isAdmin);
+    const creatorLabel = !selected.created_by ? '' : (isMine ? 'by you' : 'by another coach');
     return `
       <h3 style="margin:0 0 0.5rem">${escapeHtml(selected.name)}</h3>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
@@ -2335,11 +2345,13 @@ function renderPlaysTab() {
         ${d.formation ? `<span class="pill" style="background:#e6f1fb;color:#185fa5">${escapeHtml(d.formation)}</span>` : ''}
       </div>
       ${d.description ? `<div style="font-size:0.9rem;line-height:1.4;color:var(--text2,#555);margin-bottom:0.75rem;white-space:pre-wrap">${escapeHtml(d.description)}</div>` : '<p class="muted" style="margin:0 0 0.75rem">No description.</p>'}
-      <p class="muted" style="font-size:0.8rem;margin:0 0 0.75rem">${possLabel} · ${(d.arrows || []).length} arrow(s) · ${(d.zoneLines || [null,null]).filter(z => z !== null).length} zone line(s)${d.ballVisible ? ' · ball placed' : ''}</p>
-      ${canEdit ? `
-        <button class="primary btn-full" id="load-play-btn">▶ Load onto Lineup pitch</button>
-        <button class="btn-full" id="del-play-btn" style="color:#c62828;border-color:#c62828;margin-bottom:0">✕ Delete</button>
-      ` : `<button class="primary btn-full" id="load-play-btn">▶ Load onto Lineup pitch</button>`}
+      <p class="muted" style="font-size:0.8rem;margin:0 0 0.75rem">
+        ${possLabel} · ${(d.arrows || []).length} arrow(s) · ${(d.zoneLines || [null,null]).filter(z => z !== null).length} zone line(s)${d.ballVisible ? ' · ball placed' : ''}
+        ${creatorLabel ? ' · ' + creatorLabel : ''}
+      </p>
+      ${canEdit ? `<button class="primary btn-full" id="load-play-btn">▶ Load onto Lineup pitch</button>` : ''}
+      ${canDelete ? `<button class="btn-full" id="del-play-btn" style="color:#c62828;border-color:#c62828;margin-bottom:0">✕ Delete</button>` : ''}
+      ${canEdit && !canDelete ? `<p class="muted" style="font-size:0.75rem;margin:0.5rem 0 0">Only the creator or an admin can delete this play.</p>` : ''}
     `;
   })() : `<p class="muted" style="padding:0.5rem 0">Select a play on the left.</p>`;
 
@@ -2562,17 +2574,43 @@ let _membersUi = { invites: [], members: [], loading: true };
 async function renderMembersTab(currentUser) {
   const tabEl = document.getElementById('tab-content');
   const { team, players } = editor;
+  const isAdmin = editor.currentUserRole === 'admin' || currentUser.id && (await getMyRole(team.id, currentUser.id)) === 'admin';
 
   tabEl.innerHTML = `<div style="padding:1rem"><p class="loading">Loading members…</p></div>`;
 
   // Load invites + members for this team
   const [invRes, memRes] = await Promise.all([
     supabase.from('invites').select('*').eq('team_id', team.id).order('created_at', { ascending: false }),
-    supabase.from('team_members').select('user_id, role, created_at').eq('team_id', team.id)
+    supabase.from('team_members').select('user_id, role, created_at').eq('team_id', team.id).order('created_at')
   ]);
   _membersUi.invites = invRes.data || [];
   _membersUi.members = memRes.data || [];
   _membersUi.loading = false;
+
+  // Look up profile info for each member
+  const memberIds = _membersUi.members.map(m => m.user_id);
+  let profilesById = {};
+  if (memberIds.length) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, email, full_name')
+      .in('id', memberIds);
+    (profs || []).forEach(p => { profilesById[p.id] = p; });
+  }
+
+  // Look up parent_players for parent members so we can show which player they're linked to
+  const parentLinks = {};
+  const parentIds = _membersUi.members.filter(m => m.role === 'parent').map(m => m.user_id);
+  if (parentIds.length) {
+    const { data: links } = await supabase
+      .from('parent_players')
+      .select('parent_id, player_id')
+      .in('parent_id', parentIds);
+    (links || []).forEach(l => {
+      if (!parentLinks[l.parent_id]) parentLinks[l.parent_id] = [];
+      parentLinks[l.parent_id].push(l.player_id);
+    });
+  }
 
   const pending = _membersUi.invites.filter(i => i.status === 'pending');
   const accepted = _membersUi.invites.filter(i => i.status !== 'pending');
@@ -2641,7 +2679,42 @@ async function renderMembersTab(currentUser) {
 
       <div class="card">
         <h3 style="margin:0 0 0.5rem">Current members (${memberCount})</h3>
-        <p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem">A full admin panel with role editing is coming next.</p>
+        ${isAdmin ? '' : '<p class="muted" style="font-size:0.8rem;margin:0 0 0.5rem">Only admins can change roles or remove members.</p>'}
+        <div class="lineup-list">
+          ${_membersUi.members.map(m => {
+            const prof = profilesById[m.user_id] || {};
+            const isSelf = m.user_id === currentUser.id;
+            const linkedPlayerIds = parentLinks[m.user_id] || [];
+            const linkedNames = linkedPlayerIds
+              .map(pid => players.find(p => p.id === pid)?.name)
+              .filter(Boolean).join(', ');
+            const roleSelect = isAdmin && !isSelf
+              ? `<select class="m-role" data-uid="${m.user_id}" style="width:auto;display:inline-block;margin:0 0.5rem">
+                   <option value="admin"${m.role==='admin'?' selected':''}>admin</option>
+                   <option value="coach"${m.role==='coach'?' selected':''}>coach</option>
+                   <option value="parent"${m.role==='parent'?' selected':''}>parent</option>
+                   <option value="viewer"${m.role==='viewer'?' selected':''}>viewer</option>
+                 </select>`
+              : `<span class="pill" style="background:#e6f1fb;color:#185fa5;margin:0 0.5rem">${escapeHtml(m.role)}</span>`;
+            const removeBtn = isAdmin && !isSelf
+              ? `<button class="lineup-del" data-remove-uid="${m.user_id}" title="Remove from team">✕</button>`
+              : '';
+            return `
+              <div class="lineup-item" style="padding-right:2.5rem">
+                <div class="lineup-name">
+                  ${escapeHtml(prof.full_name || prof.email || '(no profile)')}
+                  ${isSelf ? ' <span class="muted" style="font-size:0.75rem">(you)</span>' : ''}
+                </div>
+                <div class="lineup-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.25rem">
+                  ${roleSelect}
+                  ${prof.email && prof.email !== prof.full_name ? '· ' + escapeHtml(prof.email) : ''}
+                  ${linkedNames ? ' · linked to ' + escapeHtml(linkedNames) : ''}
+                </div>
+                ${removeBtn}
+              </div>
+            `;
+          }).join('')}
+        </div>
       </div>
 
       ${acceptedHtml ? `<div class="card">
@@ -2741,6 +2814,49 @@ function wireMembersEvents(currentUser) {
       renderMembersTab(currentUser);
     };
   });
+
+  // Change a member's role (admin only — RLS will block non-admins)
+  tabEl.querySelectorAll('.m-role').forEach(sel => {
+    sel.onchange = async () => {
+      const uid = sel.dataset.uid;
+      const newRole = sel.value;
+      const { error } = await supabase
+        .from('team_members')
+        .update({ role: newRole })
+        .eq('team_id', team.id)
+        .eq('user_id', uid);
+      if (error) { alert('Role change failed: ' + error.message); renderMembersTab(currentUser); return; }
+      await logAudit(team.id, 'member', uid, 'role_change', { new_role: newRole });
+      renderMembersTab(currentUser);
+    };
+  });
+
+  // Remove a member (admin only)
+  tabEl.querySelectorAll('[data-remove-uid]').forEach(btn => {
+    btn.onclick = async () => {
+      const uid = btn.dataset.removeUid;
+      if (!confirm('Remove this member from the team? Their account will not be deleted, but they will lose access to this team.')) return;
+      const { error } = await supabase
+        .from('team_members')
+        .delete()
+        .eq('team_id', team.id)
+        .eq('user_id', uid);
+      if (error) { alert('Remove failed: ' + error.message); return; }
+      await logAudit(team.id, 'member', uid, 'remove', {});
+      renderMembersTab(currentUser);
+    };
+  });
+}
+
+// Look up the current user's role on a given team (used to gate admin UI)
+async function getMyRole(teamId, userId) {
+  const { data } = await supabase
+    .from('team_members')
+    .select('role')
+    .eq('team_id', teamId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  return data?.role || null;
 }
 
 // Kick off
