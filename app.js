@@ -64,6 +64,48 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ---------- Player access codes ----------
+// Personal code: <firstInitial><lastInitial><4 random digits>, e.g. JE1234
+// Family code:   5 random digits, shared by linked siblings
+function _initial(s) {
+  const ch = (s || '').trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(ch) ? ch : 'X';
+}
+function makeAccessCode(name, existingSet) {
+  const parts = (name || '').trim().split(/\s+/);
+  const a = _initial(parts[0]);
+  const b = _initial(parts[1] || parts[0]?.slice(1) || '');
+  for (let i = 0; i < 200; i++) {
+    const code = a + b + String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    if (!existingSet.has(code)) return code;
+  }
+  return a + b + String(Date.now() % 10000).padStart(4, '0');
+}
+function makeFamilyCode(existingSet) {
+  for (let i = 0; i < 200; i++) {
+    const code = String(Math.floor(Math.random() * 100000)).padStart(5, '0');
+    if (!existingSet.has(code)) return code;
+  }
+  return String(Date.now() % 100000).padStart(5, '0');
+}
+// Backfill: any player without an access_code gets one assigned (mutates `players`).
+async function ensureAccessCodes(players) {
+  const existing = new Set(players.map(p => p.access_code).filter(Boolean));
+  const updates = [];
+  for (const p of players) {
+    if (!p.access_code) {
+      const code = makeAccessCode(p.name, existing);
+      existing.add(code);
+      p.access_code = code;
+      updates.push(supabase.from('players').update({ access_code: code }).eq('id', p.id));
+    }
+  }
+  if (updates.length) {
+    const results = await Promise.all(updates);
+    results.forEach(r => { if (r.error) console.warn('access_code backfill error', r.error); });
+  }
+}
+
 async function logAudit(teamId, entityType, entityId, action, changes) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
@@ -413,10 +455,11 @@ async function renderParentView(lineupId, opts = {}) {
     return;
   }
 
-  // Fetch team + players + custom formations (RLS allows read when team has a published lineup)
+  // Fetch team + players + custom formations (RLS allows read when team has a published lineup).
+  // Explicit column list — never expose access_code / family_code to anon clients.
   const [teamRes, playersRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
-    supabase.from('players').select('*').eq('team_id', lineup.team_id),
+    supabase.from('players').select('id,team_id,name,number,position,photo_url').eq('team_id', lineup.team_id),
     supabase.from('formations').select('*').eq('team_id', lineup.team_id)
   ]);
   const team = teamRes.data || { name: '' };
@@ -577,6 +620,23 @@ async function renderParentView(lineupId, opts = {}) {
 }
 
 // ---------- Parent availability form ----------
+// ---------- Parent device unlocks (per team, in localStorage) ----------
+function _unlockKey(teamId) { return `pv_unlocked_${teamId}`; }
+function getUnlockedPlayers(teamId) {
+  try {
+    const raw = localStorage.getItem(_unlockKey(teamId));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function setUnlockedPlayers(teamId, ids) {
+  try { localStorage.setItem(_unlockKey(teamId), JSON.stringify(ids)); } catch {}
+}
+function clearUnlockedPlayers(teamId) {
+  try { localStorage.removeItem(_unlockKey(teamId)); } catch {}
+}
+
 function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
   const sorted = [...players].sort((a, b) => {
     const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
@@ -586,6 +646,9 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
   const rememberedName = (() => {
     try { return localStorage.getItem('pv_responder_name') || ''; } catch { return ''; }
   })();
+  const unlockedIds = getUnlockedPlayers(lineup.team_id);
+  const unlockedSet = new Set(unlockedIds);
+  const unlockedPlayers = sorted.filter(p => unlockedSet.has(p.id));
   const statusBtn = (pid, value, label, emoji) => {
     const cur = availByPlayer[pid];
     const active = cur && cur.status === value;
@@ -594,7 +657,7 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
       ${emoji} ${label}
     </button>`;
   };
-  const rows = sorted.map(p => {
+  const rows = unlockedPlayers.map(p => {
     const cur = availByPlayer[p.id];
     const photoHtml = p.photo_url
       ? `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
@@ -622,15 +685,35 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
       </div>`;
   }).join('');
 
+  const codeBoxHtml = `
+    <div id="avail-code-box" style="margin-top:0.6rem;padding:0.6rem 0.7rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
+      <label style="font-size:0.8rem;font-weight:600;display:block;margin-bottom:0.25rem">${unlockedPlayers.length ? 'Add another child' : 'Enter your child\u2019s code'}</label>
+      <p class="muted" style="font-size:0.75rem;margin:0 0 0.4rem">The coach can read your code from the player card. A 5-digit family code unlocks all linked siblings at once.</p>
+      <div style="display:flex;gap:0.4rem">
+        <input type="text" id="avail-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
+          style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
+        <button type="button" class="primary" id="avail-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
+      </div>
+      <div id="avail-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+    </div>`;
+
+  const forgetBtnHtml = unlockedPlayers.length
+    ? `<button type="button" id="avail-forget" class="btn-secondary" style="font-size:0.75rem;padding:0.3rem 0.55rem;margin-top:0.5rem">Forget this device</button>`
+    : '';
+
   return `
     <div class="pv-card">
       <h3 class="pv-card-title">Availability check</h3>
       <p class="muted" style="font-size:0.85rem;margin-top:0">Please mark availability for your player(s) for this match. The coach will use these responses to pick the squad.</p>
-      <label style="font-size:0.75rem;margin-top:0.5rem;display:block">Your name (optional)</label>
-      <input type="text" id="avail-responder" value="${escapeHtml(rememberedName)}" placeholder="e.g. Sarah (Alex's mum)"
-        style="width:100%;padding:0.45rem;font-size:0.9rem;border:1px solid #ddd;border-radius:4px" />
-      <div id="avail-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
-      <div id="avail-list" style="margin-top:0.5rem">${rows}</div>
+      ${unlockedPlayers.length ? `
+        <label style="font-size:0.75rem;margin-top:0.5rem;display:block">Your name (optional)</label>
+        <input type="text" id="avail-responder" value="${escapeHtml(rememberedName)}" placeholder="e.g. Sarah (Alex's mum)"
+          style="width:100%;padding:0.45rem;font-size:0.9rem;border:1px solid #ddd;border-radius:4px" />
+        <div id="avail-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
+        <div id="avail-list" style="margin-top:0.5rem">${rows}</div>
+        ${forgetBtnHtml}
+      ` : ''}
+      ${codeBoxHtml}
     </div>`;
 }
 
@@ -643,6 +726,12 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
     setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2500);
   };
 
+  // Pick a code that this player accepts (we stored the code on initial unlock).
+  // We reuse the most recent code the parent typed; falls back to scanning all stored codes.
+  const codesByPlayer = (() => {
+    try { return JSON.parse(localStorage.getItem('pv_codes_' + lineup.team_id) || '{}'); } catch { return {}; }
+  })();
+
   const submit = async (playerId, status) => {
     const responderName = (responderEl?.value || '').trim();
     if (responderName) {
@@ -650,22 +739,23 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
     }
     const noteEl = document.querySelector(`[data-player-note="${playerId}"]`);
     const note = (noteEl?.value || '').trim() || null;
-    const payload = {
-      lineup_id: lineup.id,
-      player_id: playerId,
-      status,
-      note,
-      responded_by: responderName || null,
-      responded_at: new Date().toISOString()
-    };
-    const { data, error } = await supabase
-      .from('player_availability')
-      .upsert(payload, { onConflict: 'lineup_id,player_id' })
-      .select()
-      .single();
+    const code = codesByPlayer[playerId];
+    if (!code) { flash('No code stored for this player. Re-enter it below.', 'error'); return; }
+
+    const { error } = await supabase.rpc('submit_player_availability', {
+      p_lineup_id: lineup.id,
+      p_player_id: playerId,
+      p_code:      code,
+      p_status:    status,
+      p_note:      note,
+      p_name:      responderName || null
+    });
     if (error) { flash('Save failed: ' + error.message, 'error'); return; }
-    availByPlayer[playerId] = data;
-    // Visually update the buttons for this row
+
+    availByPlayer[playerId] = {
+      lineup_id: lineup.id, player_id: playerId, status, note,
+      responded_by: responderName || null, responded_at: new Date().toISOString()
+    };
     document.querySelectorAll(`[data-player="${playerId}"]`).forEach(btn => {
       const active = btn.dataset.status === status;
       btn.style.background = active ? '#2a7' : '#fff';
@@ -682,23 +772,69 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
     btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.status));
   });
 
-  // Save note on blur if a status exists
+  // Save note on blur if a status exists — re-submits via RPC with current status.
   document.querySelectorAll('.avail-note').forEach(inp => {
     inp.addEventListener('blur', async () => {
       const pid = inp.dataset.playerNote;
       const cur = availByPlayer[pid];
-      if (!cur) return; // only save notes alongside an existing status
+      if (!cur) return;
       const note = (inp.value || '').trim() || null;
       if ((cur.note || null) === note) return;
-      const { error } = await supabase
-        .from('player_availability')
-        .update({ note, responded_at: new Date().toISOString() })
-        .eq('lineup_id', lineup.id).eq('player_id', pid);
+      const code = codesByPlayer[pid];
+      if (!code) return;
+      const responderName = (responderEl?.value || '').trim();
+      const { error } = await supabase.rpc('submit_player_availability', {
+        p_lineup_id: lineup.id, p_player_id: pid, p_code: code,
+        p_status: cur.status, p_note: note, p_name: responderName || cur.responded_by || null
+      });
       if (error) { flash('Note save failed: ' + error.message, 'error'); return; }
       cur.note = note;
       flash('✓ Note saved', 'ok');
     });
   });
+
+  // Code-entry: unlock a player (or sibling group) on this device
+  const codeBtn = document.getElementById('avail-code-submit');
+  const codeInput = document.getElementById('avail-code-input');
+  const codeMsg = document.getElementById('avail-code-msg');
+  const tryUnlock = async () => {
+    const raw = (codeInput?.value || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!raw) return;
+    codeMsg.textContent = 'Checking…'; codeMsg.className = 'muted';
+    const { data, error } = await supabase.rpc('validate_player_code', {
+      p_lineup_id: lineup.id,
+      p_code:      raw
+    });
+    if (error) { codeMsg.textContent = 'Check failed: ' + error.message; codeMsg.className = 'error'; return; }
+    const matchedIds = (data || []).map(r => r.player_id || r); // RPC returns rows with player_id
+    if (!matchedIds.length) { codeMsg.textContent = 'Code not recognised. Ask your coach.'; codeMsg.className = 'error'; return; }
+    const matchedNames = players.filter(p => matchedIds.includes(p.id)).map(p => p.name);
+
+    const currentUnlocked = new Set(getUnlockedPlayers(lineup.team_id));
+    matchedIds.forEach(id => currentUnlocked.add(id));
+    setUnlockedPlayers(lineup.team_id, [...currentUnlocked]);
+
+    const codes = (() => { try { return JSON.parse(localStorage.getItem('pv_codes_' + lineup.team_id) || '{}'); } catch { return {}; } })();
+    matchedIds.forEach(id => { codes[id] = raw; });
+    try { localStorage.setItem('pv_codes_' + lineup.team_id, JSON.stringify(codes)); } catch {}
+
+    codeMsg.textContent = `✓ Unlocked ${matchedNames.join(', ') || matchedIds.length + ' player(s)'}`; codeMsg.className = 'ok';
+    setTimeout(() => location.reload(), 600);
+  };
+  if (codeBtn) codeBtn.addEventListener('click', tryUnlock);
+  if (codeInput) codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); } });
+
+  // Forget this device
+  const forgetBtn = document.getElementById('avail-forget');
+  if (forgetBtn) {
+    forgetBtn.addEventListener('click', () => {
+      if (!confirm('Forget all unlocked players on this device? You will need to re-enter the code(s) next time.')) return;
+      clearUnlockedPlayers(lineup.team_id);
+      try { localStorage.removeItem('pv_codes_' + lineup.team_id); } catch {}
+      try { localStorage.removeItem('pv_responder_name'); } catch {}
+      location.reload();
+    });
+  }
 }
 
 // ---------- Coach availability responses panel (button + modal) ----------
@@ -858,6 +994,8 @@ async function renderTeamDashboard(user, teamId) {
   const role = memberRes.data?.role || 'viewer';
   const canEdit = role === 'admin' || role === 'coach';
   const players = playersRes.data || [];
+  // Backfill any players missing an access_code (one-shot per session).
+  if (canEdit) { try { await ensureAccessCodes(players); } catch (e) { console.warn('ensureAccessCodes failed', e); } }
   const lineups = lineupsRes.data || [];
   const plays = playsRes.data || [];
   const customFormations = formationsRes.data || [];
@@ -1296,7 +1434,26 @@ function renderSquadTab(team, canEdit, players) {
         <input type="text" class="field" value="${escapeHtml(p.parent2_name || '')}" data-field="parent2_name" ${canEdit ? '' : 'disabled'} />
         <label>Parent 2 phone</label>
         <input type="tel" class="field" value="${escapeHtml(p.parent2_phone || '')}" data-field="parent2_phone" ${canEdit ? '' : 'disabled'} />
-        ${canEdit ? `<button class="del-btn" data-remove>Remove player</button>` : ''}
+        <div class="codes-box" style="margin-top:0.6rem;padding:0.5rem 0.6rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
+          <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:#666;margin-bottom:0.25rem">Access codes</div>
+          <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.95rem">
+            <div>Personal: <strong>${escapeHtml(p.access_code || '—')}</strong></div>
+            ${p.family_code
+              ? `<div style="margin-top:0.15rem">Family: <strong>${escapeHtml(p.family_code)}</strong> ${(() => {
+                  const sibs = (players || []).filter(q => q.id !== p.id && q.family_code === p.family_code);
+                  return sibs.length ? `<span class="muted" style="font-family:system-ui;font-size:0.75rem">— shared with ${sibs.map(s => escapeHtml(shortName(s.name))).join(', ')}</span>` : '';
+                })()}</div>`
+              : ''}
+          </div>
+          ${canEdit ? `
+            <div style="display:flex;gap:0.35rem;margin-top:0.5rem;flex-wrap:wrap">
+              <button type="button" class="btn-secondary" data-link-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">${p.family_code ? 'Manage siblings…' : '🔗 Link sibling…'}</button>
+              ${p.family_code ? `<button type="button" class="btn-secondary" data-unlink-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">Unlink</button>` : ''}
+            </div>
+          ` : ''}
+          <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player.</div>
+        </div>
+        ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
       </div>` : ''}
     </div>
   `;
@@ -1334,8 +1491,21 @@ function renderSquadTab(team, canEdit, players) {
       const number = numRaw ? parseInt(numRaw, 10) : null;
       if (!name) return;
 
-      const { data: inserted, error } = await supabase
-        .from('players').insert({ team_id: team.id, name, number }).select().single();
+      const existingCodes = new Set(players.map(p => p.access_code).filter(Boolean));
+      let access_code = makeAccessCode(name, existingCodes);
+      let inserted, error;
+      // Retry once on rare unique-violation race
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await supabase
+          .from('players').insert({ team_id: team.id, name, number, access_code }).select().single();
+        if (!r.error) { inserted = r.data; error = null; break; }
+        if (r.error.code === '23505') {
+          existingCodes.add(access_code);
+          access_code = makeAccessCode(name, existingCodes);
+          continue;
+        }
+        error = r.error; break;
+      }
       if (error) { errEl.textContent = error.message; return; }
 
       await logAudit(team.id, 'player', inserted.id, 'create', { name, number });
@@ -1467,6 +1637,31 @@ function renderSquadTab(team, canEdit, players) {
         await logAudit(team.id, 'player', pid, 'delete', { name: player?.name });
         const idx = players.findIndex(p => p.id === pid);
         if (idx >= 0) players.splice(idx, 1);
+        renderSquadTab(team, canEdit, players);
+      };
+    }
+
+    // Link / unlink siblings
+    const linkBtn = cardEl.querySelector('[data-link-sibling]');
+    if (linkBtn) {
+      linkBtn.onclick = () => openLinkSiblingModal(team, players, pid, () => renderSquadTab(team, canEdit, players));
+    }
+    const unlinkBtn = cardEl.querySelector('[data-unlink-sibling]');
+    if (unlinkBtn) {
+      unlinkBtn.onclick = async () => {
+        const player = players.find(p => p.id === pid);
+        if (!player?.family_code) return;
+        if (!confirm(`Remove ${player.name} from the family group? Other siblings keep the shared code.`)) return;
+        const { error } = await supabase.from('players').update({ family_code: null }).eq('id', pid);
+        if (error) { alert('Unlink failed: ' + error.message); return; }
+        // If only one sibling left, clear theirs too so the group dissolves cleanly
+        const remaining = players.filter(q => q.id !== pid && q.family_code === player.family_code);
+        if (remaining.length === 1) {
+          await supabase.from('players').update({ family_code: null }).eq('id', remaining[0].id);
+          remaining[0].family_code = null;
+        }
+        player.family_code = null;
+        await logAudit(team.id, 'player', pid, 'update', { field: 'family_code', to: null });
         renderSquadTab(team, canEdit, players);
       };
     }
@@ -2169,6 +2364,121 @@ async function uploadPlayerPhoto(playerId, file) {
 
 // Photo cropper: shows the picked image in a square frame, lets user drag + zoom,
 // returns a Blob (square JPEG, ~512x512) ready to upload.
+// Open a modal to link this player to one or more sibling players (shared family_code)
+function openLinkSiblingModal(team, players, playerId, onChange) {
+  const me = players.find(p => p.id === playerId);
+  if (!me) return;
+
+  const candidates = players.filter(p => p.id !== playerId);
+  const currentFamily = me.family_code || null;
+  // Pre-tick anyone already in the same family
+  const initiallyLinked = new Set(
+    currentFamily ? candidates.filter(p => p.family_code === currentFamily).map(p => p.id) : []
+  );
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" role="dialog" aria-label="Link siblings" style="max-width:480px">
+      <div class="map-modal-header">
+        <h3 style="margin:0">Link siblings to ${escapeHtml(me.name || 'player')}</h3>
+        <button type="button" class="map-modal-close" data-close>×</button>
+      </div>
+      <div class="map-modal-body" style="max-height:60vh;overflow:auto;padding:1rem">
+        <p class="muted" style="margin-top:0;font-size:0.85rem">
+          Tick siblings to share a single family code. A parent who enters the family code unlocks all linked players in one go.
+        </p>
+        ${currentFamily ? `<p style="font-size:0.85rem">Current family code: <strong>${escapeHtml(currentFamily)}</strong></p>` : ''}
+        <div id="sib-list" style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.5rem">
+          ${candidates.map(p => `
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;border:1px solid #e3e7ee;border-radius:6px;cursor:pointer">
+              <input type="checkbox" data-sib="${p.id}" ${initiallyLinked.has(p.id) ? 'checked' : ''} />
+              <span style="flex:1">${escapeHtml(p.name || '')}</span>
+              <span class="muted" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.8rem">${escapeHtml(p.access_code || '')}${p.family_code ? ' · fam ' + escapeHtml(p.family_code) : ''}</span>
+            </label>
+          `).join('') || '<p class="muted">No other players in the squad.</p>'}
+        </div>
+        <div id="sib-msg" class="muted" style="font-size:0.8rem;min-height:1em;margin-top:0.5rem"></div>
+      </div>
+      <div class="map-modal-footer" style="display:flex;justify-content:flex-end;gap:0.5rem;padding:0.75rem 1rem;border-top:1px solid #eee">
+        <button type="button" class="btn-secondary" data-close>Cancel</button>
+        <button type="button" class="primary" data-save>Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll('[data-close]').forEach(el => el.onclick = close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  overlay.querySelector('[data-save]').onclick = async () => {
+    const msg = overlay.querySelector('#sib-msg');
+    const ticked = Array.from(overlay.querySelectorAll('[data-sib]:checked')).map(el => el.dataset.sib);
+
+    // Decide the family_code to apply
+    let famCode = currentFamily;
+    if (ticked.length) {
+      // Reuse any existing family_code among me + ticked siblings, else generate fresh
+      const reused = (() => {
+        if (currentFamily) return currentFamily;
+        for (const sid of ticked) {
+          const sib = players.find(q => q.id === sid);
+          if (sib?.family_code) return sib.family_code;
+        }
+        const existing = new Set(players.map(p => p.family_code).filter(Boolean));
+        return makeFamilyCode(existing);
+      })();
+      famCode = reused;
+    } else {
+      famCode = null; // no siblings ticked = no family link
+    }
+
+    msg.textContent = 'Saving…'; msg.className = 'muted';
+    try {
+      // Build target id list: me + ticked
+      const targetIds = [playerId, ...ticked];
+      // Also: players who were previously in this family but are no longer ticked → unlink
+      const previouslyLinked = currentFamily
+        ? players.filter(p => p.family_code === currentFamily).map(p => p.id)
+        : [];
+      const toUnlink = previouslyLinked.filter(id => id !== playerId && !ticked.includes(id));
+
+      const ops = [];
+      if (famCode === null) {
+        // Just unlink me
+        ops.push(supabase.from('players').update({ family_code: null }).eq('id', playerId));
+      } else {
+        ops.push(supabase.from('players').update({ family_code: famCode }).in('id', targetIds));
+      }
+      if (toUnlink.length) {
+        ops.push(supabase.from('players').update({ family_code: null }).in('id', toUnlink));
+      }
+      const results = await Promise.all(ops);
+      const err = results.find(r => r.error);
+      if (err) throw err.error;
+
+      // Mutate local state
+      players.forEach(p => {
+        if (targetIds.includes(p.id)) p.family_code = famCode;
+        if (toUnlink.includes(p.id)) p.family_code = null;
+      });
+      // Cleanup: if only one player still holds famCode, dissolve it
+      if (famCode) {
+        const stillLinked = players.filter(p => p.family_code === famCode);
+        if (stillLinked.length === 1) {
+          await supabase.from('players').update({ family_code: null }).eq('id', stillLinked[0].id);
+          stillLinked[0].family_code = null;
+        }
+      }
+      await logAudit(team.id, 'player', playerId, 'update', { field: 'family_code', to: famCode, linked: ticked });
+      close();
+      onChange?.();
+    } catch (e) {
+      msg.textContent = 'Save failed: ' + (e.message || e); msg.className = 'error';
+    }
+  };
+}
+
 function openPhotoCropper(file) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
