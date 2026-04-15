@@ -419,6 +419,7 @@ async function renderTeamDashboard(user, teamId) {
   const tabsEl = document.getElementById('header-tabs');
   if (tabsEl) {
     tabsEl.innerHTML = `
+      <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
@@ -434,7 +435,16 @@ async function renderTeamDashboard(user, teamId) {
 
   appEl.innerHTML = `<div id="tab-content"></div>`;
 
-  if (activeTab === 'squad') {
+  if (activeTab === 'fixtures') {
+    editor = {
+      mode: 'fixtures',
+      team, canEdit, players, lineups, plays, customFormations,
+      currentUserId: user.id,
+      currentUserRole: role,
+      current: newLineupState()
+    };
+    renderFixturesTab();
+  } else if (activeTab === 'squad') {
     renderSquadTab(team, canEdit, players);
   } else if (activeTab === 'lineups') {
     const base = newLineupState();
@@ -666,7 +676,13 @@ function newLineupState() {
     arrows: [],             // [{x1,y1,x2,y2,cx?,cy?}] in pitch %
     zoneLines: [null, null],// [pressY%, defY%] or null
     ballVisible: false,
-    ballPos: { x: 50, y: 50 }
+    ballPos: { x: 50, y: 50 },
+    // publish + location
+    published: false,
+    location_name: '',
+    location_postcode: '',
+    location_lat: null,
+    location_lng: null
   };
 }
 
@@ -820,10 +836,29 @@ function renderLineupsTab() {
           <input type="text" id="l-opponent" value="${escapeHtml(current.opponent)}" ${canEdit ? '' : 'disabled'} />
           <label>Game date</label>
           <input type="date" id="l-date" value="${current.game_date || ''}" ${canEdit ? '' : 'disabled'} />
+
+          <label style="margin-top:0.5rem">Venue (optional)</label>
+          <input type="text" id="l-venue-name" value="${escapeHtml(current.location_name || '')}" placeholder="e.g. Home ground" ${canEdit ? '' : 'disabled'} />
+          <label>Postcode</label>
+          <div style="display:flex;gap:0.35rem">
+            <input type="text" id="l-venue-postcode" value="${escapeHtml(current.location_postcode || '')}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" ${canEdit ? '' : 'disabled'} />
+            ${canEdit ? `<button class="btn-secondary" id="l-venue-lookup" type="button" style="flex-shrink:0">🔍 Look up</button>` : ''}
+          </div>
+          <div id="l-venue-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
+            ${current.location_lat && current.location_lng ? `✓ <a href="https://www.google.com/maps/search/?api=1&query=${current.location_lat},${current.location_lng}" target="_blank" rel="noopener">View on map</a>` : ''}
+          </div>
+
           <div class="lineup-actions" style="margin-top:0.5rem">
             ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
             ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
           </div>
+          ${canEdit && current.id ? `
+            <div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem">
+              <button class="btn-full" id="toggle-publish" style="margin-bottom:0;${current.published ? 'background:#fff3cd;border-color:#b88800;color:#5a4400' : ''}">
+                ${current.published ? '● Published — click to unpublish' : '○ Publish (show in Fixtures)'}
+              </button>
+            </div>
+          ` : ''}
           <div id="save-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
         `)}
 
@@ -1029,6 +1064,70 @@ function wireLineupEvents() {
   if (oppEl)  oppEl.oninput  = e => { editor.current.opponent = e.target.value; };
   if (dateEl) dateEl.oninput = e => { editor.current.game_date = e.target.value; };
 
+  // Venue inputs
+  const venueNameEl = document.getElementById('l-venue-name');
+  const venuePostEl = document.getElementById('l-venue-postcode');
+  if (venueNameEl) venueNameEl.oninput = e => { editor.current.location_name = e.target.value; };
+  if (venuePostEl) venuePostEl.oninput = e => {
+    editor.current.location_postcode = e.target.value;
+    // Invalidate cached lat/lng whenever postcode changes
+    editor.current.location_lat = null;
+    editor.current.location_lng = null;
+  };
+
+  // Postcode lookup via postcodes.io
+  const lookupBtn = document.getElementById('l-venue-lookup');
+  if (lookupBtn) lookupBtn.onclick = async () => {
+    const msg = document.getElementById('l-venue-msg');
+    const pc = (editor.current.location_postcode || '').trim().toUpperCase();
+    if (!pc) { msg.textContent = 'Enter a postcode first.'; msg.className = 'error'; return; }
+    msg.textContent = 'Looking up…'; msg.className = 'muted';
+    try {
+      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+      const body = await res.json();
+      if (!res.ok || body.status !== 200 || !body.result) {
+        msg.textContent = 'Postcode not found.'; msg.className = 'error'; return;
+      }
+      editor.current.location_lat = body.result.latitude;
+      editor.current.location_lng = body.result.longitude;
+      editor.current.location_postcode = body.result.postcode;
+      // Update the input to the canonical formatting
+      if (venuePostEl) venuePostEl.value = body.result.postcode;
+      const place = [body.result.parish, body.result.admin_district].filter(Boolean).join(', ');
+      msg.innerHTML = `✓ ${escapeHtml(body.result.postcode)}${place ? ' (' + escapeHtml(place) + ')' : ''} — <a href="https://www.google.com/maps/search/?api=1&query=${body.result.latitude},${body.result.longitude}" target="_blank" rel="noopener">View on map</a>`;
+      msg.className = 'ok';
+    } catch (err) {
+      msg.textContent = 'Lookup failed: ' + err.message; msg.className = 'error';
+    }
+  };
+
+  // Publish / unpublish toggle
+  const pubBtn = document.getElementById('toggle-publish');
+  if (pubBtn) pubBtn.onclick = async () => {
+    if (!editor.current.id) return;
+    const nextPublished = !editor.current.published;
+    if (nextPublished && !editor.current.game_date) {
+      alert('Set a Game date before publishing.'); return;
+    }
+    const { data, error } = await supabase
+      .from('lineups')
+      .update({
+        published: nextPublished,
+        published_at: nextPublished ? new Date().toISOString() : null
+      })
+      .eq('id', editor.current.id)
+      .select()
+      .single();
+    if (error) { alert('Publish failed: ' + error.message); return; }
+    editor.current.published = data.published;
+    editor.current.published_at = data.published_at;
+    // Update cached lineup too
+    const idx = editor.lineups.findIndex(l => l.id === data.id);
+    if (idx >= 0) editor.lineups[idx] = data;
+    await logAudit(editor.team.id, 'lineup', data.id, nextPublished ? 'publish' : 'unpublish', {});
+    renderLineupsTab();
+  };
+
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
   if (newBtn) newBtn.onclick = () => {
@@ -1066,7 +1165,12 @@ function wireLineupEvents() {
         arrows: (l.data?.arrows || []).map(a => ({ ...a })),
         zoneLines: [...(l.data?.zoneLines || [null, null])],
         ballVisible: !!l.data?.ballVisible,
-        ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) }
+        ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) },
+        published: !!l.published,
+        location_name: l.location_name || '',
+        location_postcode: l.location_postcode || '',
+        location_lat: l.location_lat ?? null,
+        location_lng: l.location_lng ?? null
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       renderLineupsTab();
@@ -1840,6 +1944,12 @@ async function saveLineup() {
     name,
     opponent: current.opponent.trim() || null,
     game_date: current.game_date || null,
+    published: !!current.published,
+    published_at: current.published ? (current.published_at || new Date().toISOString()) : null,
+    location_name: current.location_name?.trim() || null,
+    location_postcode: current.location_postcode?.trim().toUpperCase() || null,
+    location_lat: current.location_lat ?? null,
+    location_lng: current.location_lng ?? null,
     data: {
       formation: current.formation,
       slots: current.slots,
@@ -2565,6 +2675,296 @@ function wirePlayEvents() {
     if (idx >= 0) plays.splice(idx, 1);
     _playsUi.selectedId = null;
     renderPlaysTab();
+  };
+}
+
+// ---------- Fixtures tab (Slice 5 — Step 3: Publish + calendar + next game) ----------
+let _fixturesUi = { selectedLineupId: null, calMonth: null, calYear: null, showDrafts: false };
+
+function renderFixturesTab() {
+  const tabEl = document.getElementById('tab-content');
+  const { team, canEdit, players, lineups } = editor;
+
+  // Published lineups are visible to everyone; coaches can flip a toggle to also see drafts.
+  const list = lineups.filter(l => {
+    if (!l.game_date) return false;
+    return canEdit && _fixturesUi.showDrafts ? true : !!l.published;
+  });
+  list.sort((a, b) => (a.game_date || '').localeCompare(b.game_date || ''));
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  let selected = list.find(l => l.id === _fixturesUi.selectedLineupId);
+  if (!selected) {
+    // Default to next upcoming, else most recent past
+    selected = list.find(l => (l.game_date || '') >= todayISO) || list[list.length - 1] || null;
+    _fixturesUi.selectedLineupId = selected ? selected.id : null;
+  }
+
+  // Default calendar month = selected game's month, or today's
+  const refDate = selected?.game_date ? new Date(selected.game_date + 'T00:00:00') : new Date();
+  if (_fixturesUi.calMonth === null) { _fixturesUi.calMonth = refDate.getMonth(); _fixturesUi.calYear = refDate.getFullYear(); }
+
+  const gameDates = new Set(list.map(l => l.game_date));
+
+  // Build month grid (Mon-first)
+  const y = _fixturesUi.calYear, m = _fixturesUi.calMonth;
+  const first = new Date(y, m, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  let startDow = first.getDay() - 1; if (startDow < 0) startDow = 6; // Mon=0..Sun=6
+  const monthName = first.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(`<div class="cal-cell cal-empty"></div>`);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const hasGame = gameDates.has(iso);
+    const isSelected = selected && selected.game_date === iso;
+    const isToday = iso === todayISO;
+    cells.push(`
+      <button class="cal-cell${hasGame ? ' cal-game' : ''}${isSelected ? ' cal-sel' : ''}${isToday ? ' cal-today' : ''}"
+              ${hasGame ? `data-game-date="${iso}"` : ''}
+              ${!hasGame ? 'disabled' : ''}>
+        <div class="cal-day-num">${d}</div>
+        ${hasGame ? `<div class="cal-dot"></div>` : ''}
+      </button>
+    `);
+  }
+
+  const headline = selected
+    ? (() => {
+        const gd = selected.game_date ? new Date(selected.game_date + 'T00:00:00') : null;
+        const dateStr = gd ? gd.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+        const upcoming = gd && gd >= new Date(todayISO);
+        const prefix = upcoming ? 'Next game' : 'Last game';
+        const opp = selected.opponent ? ` vs ${escapeHtml(selected.opponent)}` : '';
+        return `
+          <div style="margin-bottom:0.5rem">
+            <div class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em">${prefix}</div>
+            <h2 style="margin:0.15rem 0 0;font-size:1.4rem">${escapeHtml(dateStr)}${opp}</h2>
+            ${selected.location_name || selected.location_postcode ? `
+              <div style="font-size:0.9rem;margin-top:0.25rem">
+                📍 ${escapeHtml(selected.location_name || '')}${selected.location_name && selected.location_postcode ? ' · ' : ''}${escapeHtml(selected.location_postcode || '')}
+                ${selected.location_lat && selected.location_lng
+                  ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${selected.location_lat},${selected.location_lng}" target="_blank" rel="noopener">Map</a>`
+                  : (selected.location_postcode ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selected.location_postcode)}" target="_blank" rel="noopener">Map</a>` : '')
+                }
+              </div>` : ''}
+          </div>
+        `;
+      })()
+    : `<div class="muted" style="padding:1rem 0">No published games yet.${canEdit ? ' Publish a lineup from the Lineups tab to show it here.' : ''}</div>`;
+
+  const upcomingList = list.filter(l => (l.game_date || '') >= todayISO).slice(0, 10);
+  const pastList = list.filter(l => (l.game_date || '') < todayISO).slice(-5).reverse();
+
+  const upcomingHtml = upcomingList.length
+    ? upcomingList.map(l => `
+        <div class="lineup-item ${selected && l.id === selected.id ? 'active' : ''}" data-fix="${l.id}">
+          <div class="lineup-name">${escapeHtml(l.opponent || l.name || '—')}</div>
+          <div class="lineup-meta">${formatDate(l.game_date)}${l.location_postcode ? ' · ' + escapeHtml(l.location_postcode) : ''}${canEdit && !l.published ? ' · <em>draft</em>' : ''}</div>
+        </div>
+      `).join('')
+    : `<p class="muted" style="padding:0.5rem 0;font-size:0.85rem">No upcoming games.</p>`;
+
+  const pastHtml = pastList.length
+    ? pastList.map(l => `
+        <div class="lineup-item ${selected && l.id === selected.id ? 'active' : ''}" data-fix="${l.id}" style="opacity:0.75">
+          <div class="lineup-name">${escapeHtml(l.opponent || l.name || '—')}</div>
+          <div class="lineup-meta">${formatDate(l.game_date)}</div>
+        </div>
+      `).join('')
+    : '';
+
+  tabEl.innerHTML = `
+    <div style="display:flex;gap:1rem;padding:1rem;flex:1;min-height:0;overflow:hidden">
+      <aside style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:0.75rem;overflow-y:auto">
+        <div class="card" style="padding:0.5rem">
+          <div class="cal-header">
+            <button class="cal-nav" id="cal-prev" aria-label="Previous month">‹</button>
+            <div class="cal-title">${escapeHtml(monthName)}</div>
+            <button class="cal-nav" id="cal-next" aria-label="Next month">›</button>
+          </div>
+          <div class="cal-dow">
+            ${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => `<div>${d}</div>`).join('')}
+          </div>
+          <div class="cal-grid">${cells.join('')}</div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin:0 0 0.5rem">Upcoming</h4>
+          <div class="lineup-list">${upcomingHtml}</div>
+          ${pastHtml ? `<h4 style="margin:1rem 0 0.5rem">Recent</h4><div class="lineup-list">${pastHtml}</div>` : ''}
+          ${canEdit ? `
+            <label style="display:flex;align-items:center;gap:0.35rem;margin-top:0.75rem;font-size:0.8rem;color:#555">
+              <input type="checkbox" id="show-drafts" ${_fixturesUi.showDrafts ? 'checked' : ''}> Show draft lineups
+            </label>
+          ` : ''}
+        </div>
+      </aside>
+
+      <section style="flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto">
+        ${headline}
+        ${selected ? `
+          <div class="pv-pitch" id="fix-pitch" style="max-width:560px">
+            <svg class="pitch-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+            <div class="pv-slots" id="fix-slots"></div>
+            <div class="pv-ball" id="fix-ball" style="display:none"></div>
+          </div>
+          <div class="pv-subs" id="fix-subs"></div>
+        ` : ''}
+      </section>
+    </div>
+  `;
+
+  if (selected) renderFixturePitch(selected);
+  wireFixtureEvents();
+}
+
+function renderFixturePitch(lineup) {
+  // Adapt the existing play-preview renderer for a lineup (stored slightly differently:
+  // players are in lineup.data.slots, formation in lineup.data.formation, etc.)
+  const play = {
+    id: lineup.id,
+    name: lineup.name,
+    data: lineup.data || {}
+  };
+  // Replace the pv-* element ids with fix-* ones by temporarily swapping:
+  // Easiest: inline a near-copy of renderPlayPreview adapted to the fix-* ids.
+  const d = play.data;
+  const formation = getFormation(d.formation) || FORMATIONS['4-3-3'];
+  const pos = (Array.isArray(d.pos) && d.pos.length === formation.pos.length) ? d.pos : formation.pos;
+  const lbl = (Array.isArray(d.lbl) && d.lbl.length === formation.lbl.length) ? d.lbl : formation.lbl;
+  const slots = d.slots || {};
+  const subs = Array.isArray(d.subs) ? d.subs : [];
+  const players = editor.players || [];
+  const pById = id => players.find(p => p.id === id);
+
+  const slotsLayer = document.getElementById('fix-slots');
+  if (slotsLayer) {
+    slotsLayer.innerHTML = pos.map(([x, y], i) => {
+      const pid = slots[i];
+      const p = pid ? pById(pid) : null;
+      const label = lbl[i] || '';
+      const chipInner = p
+        ? `<div class="pv-chip">
+             ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
+             <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+           </div>`
+        : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
+      return `
+        <div class="pv-slot" style="left:${x}%; top:${y}%">
+          ${chipInner}
+          <div class="pv-pos-lbl">${escapeHtml(label)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const subsBar = document.getElementById('fix-subs');
+  if (subsBar) {
+    const items = subs.filter(Boolean).map(pid => {
+      const p = pById(pid);
+      if (!p) return '';
+      return `<div class="pv-sub">${p.number != null ? p.number + ' · ' : ''}${escapeHtml(shortName(p.name))}</div>`;
+    }).join('');
+    subsBar.innerHTML = items ? `<div class="muted" style="font-size:0.75rem;margin-right:0.35rem">Subs:</div>${items}` : '';
+  }
+
+  const ball = document.getElementById('fix-ball');
+  if (ball) {
+    if (d.ballVisible && d.ballPos) {
+      ball.style.display = '';
+      ball.style.left = (d.ballPos.x ?? 50) + '%';
+      ball.style.top = (d.ballPos.y ?? 50) + '%';
+    } else {
+      ball.style.display = 'none';
+    }
+  }
+
+  const tc = document.getElementById('fix-tactics');
+  if (tc) {
+    const host = document.getElementById('fix-pitch');
+    const rect = host.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    tc.width = Math.max(1, Math.round(rect.width * dpr));
+    tc.height = Math.max(1, Math.round(rect.height * dpr));
+    tc.style.width = rect.width + 'px';
+    tc.style.height = rect.height + 'px';
+    const ctx = tc.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    (d.zoneLines || [null, null]).forEach((yv, i) => {
+      if (yv === null || yv === undefined) return;
+      const z = ZONES[i], py = yv / 100 * h;
+      ctx.save();
+      ctx.setLineDash([10, 7]);
+      ctx.strokeStyle = z.color; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
+      ctx.restore();
+    });
+
+    (d.arrows || []).forEach(a => {
+      const x1 = a.x1 / 100 * w, y1 = a.y1 / 100 * h;
+      const x2 = a.x2 / 100 * w, y2 = a.y2 / 100 * h;
+      const hasBend = typeof a.cx === 'number' && typeof a.cy === 'number';
+      const cxv = hasBend ? a.cx / 100 * w : 0;
+      const cyv = hasBend ? a.cy / 100 * h : 0;
+      const len = Math.hypot(x2 - x1, y2 - y1); if (len < 4) return;
+      const ang = hasBend ? Math.atan2(y2 - cyv, x2 - cxv) : Math.atan2(y2 - y1, x2 - x1);
+      const hl = Math.min(20, len * 0.38);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,220,0,0.95)';
+      ctx.fillStyle = 'rgba(255,220,0,0.95)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(x1, y1);
+      if (hasBend) ctx.quadraticCurveTo(cxv, cyv, x2, y2); else ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - hl * Math.cos(ang - 0.4), y2 - hl * Math.sin(ang - 0.4));
+      ctx.lineTo(x2 - hl * Math.cos(ang + 0.4), y2 - hl * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+  }
+}
+
+function wireFixtureEvents() {
+  const tabEl = document.getElementById('tab-content');
+
+  tabEl.querySelector('#cal-prev')?.addEventListener('click', () => {
+    _fixturesUi.calMonth -= 1;
+    if (_fixturesUi.calMonth < 0) { _fixturesUi.calMonth = 11; _fixturesUi.calYear -= 1; }
+    renderFixturesTab();
+  });
+  tabEl.querySelector('#cal-next')?.addEventListener('click', () => {
+    _fixturesUi.calMonth += 1;
+    if (_fixturesUi.calMonth > 11) { _fixturesUi.calMonth = 0; _fixturesUi.calYear += 1; }
+    renderFixturesTab();
+  });
+
+  tabEl.querySelectorAll('[data-game-date]').forEach(btn => {
+    btn.onclick = () => {
+      const iso = btn.dataset.gameDate;
+      const match = editor.lineups.find(l => l.game_date === iso && (l.published || _fixturesUi.showDrafts));
+      if (match) { _fixturesUi.selectedLineupId = match.id; renderFixturesTab(); }
+    };
+  });
+
+  tabEl.querySelectorAll('[data-fix]').forEach(el => {
+    el.onclick = () => {
+      _fixturesUi.selectedLineupId = el.dataset.fix;
+      renderFixturesTab();
+    };
+  });
+
+  const draftsEl = tabEl.querySelector('#show-drafts');
+  if (draftsEl) draftsEl.onchange = () => {
+    _fixturesUi.showDrafts = draftsEl.checked;
+    _fixturesUi.selectedLineupId = null;
+    renderFixturesTab();
   };
 }
 
