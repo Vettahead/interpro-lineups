@@ -959,7 +959,9 @@ function _lineupContentHash(c) {
 }
 function scheduleAutosaveIfPublished() {
   if (_autosaveInFlight) return;
-  if (!editor?.current?.id || !editor.current.published) return;
+  // Autosave any saved lineup (draft / availability / published) once it has an id.
+  // New unsaved lineups still need the explicit "Save lineup" button to insert the row.
+  if (!editor?.current?.id) return;
   const h = _lineupContentHash(editor.current);
   if (h === _lastSavedHash) return;
   if (_autosaveTimer) clearTimeout(_autosaveTimer);
@@ -4621,7 +4623,9 @@ function renderFixturesTab() {
 
   const selStatus = selected ? (selected.lineup_status || (selected.published ? 'published' : 'draft')) : 'draft';
   const selShareable = selected && (selStatus === 'availability' || selStatus === 'published');
-  const selShareLabel = '🔗 Copy availability link for parents';
+  const selShareLabel = selStatus === 'published'
+    ? '🔗 Copy lineup link for parents'
+    : '🔗 Copy availability link for parents';
   // Coach Fixtures tab always shows the pitch; the public parent view gates it separately.
   const showLineup = !!selected;
 
@@ -4634,7 +4638,7 @@ function renderFixturesTab() {
       ${headline}
       ${selected && canEdit ? `
         <div class="fix-share-wrap" style="max-width:560px;margin:0 0 0.75rem">
-          <button class="btn-secondary btn-full" id="fix-share-link">${selShareLabel}</button>
+          <button class="primary btn-full" id="fix-share-link" style="background:var(--blue-2);color:#fff;border:none;padding:0.65rem 0.8rem;font-weight:600">${selShareLabel}</button>
           <div id="fix-share-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">${selShareable ? '' : '⚠ Lineup is in Draft — link won\'t work for parents until you switch to Availability or Show lineup.'}</div>
         </div>
       ` : ''}
