@@ -716,6 +716,69 @@ details.card.collapsible > .card-body { padding: 0 1rem 0.9rem; }
 .cfb-mini:disabled { opacity: 0.4; cursor: default; }
 .cfb-del { color: #b91c1c; border-color: #fecaca; }
 
+/* Player photos */
+.chip.has-photo { background-size: cover; background-position: center; }
+.chip-photo {
+  position: absolute; inset: 0; border-radius: 50%;
+  background-size: cover; background-position: center;
+  pointer-events: none;
+}
+.chip.has-photo .chip-inner {
+  position: absolute; left: 0; right: 0; bottom: -2px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 0 0 50% 50%;
+  padding: 1px 0 3px;
+  z-index: 1;
+}
+.chip.has-photo .chip-num { font-size: 0.65rem; }
+.chip.has-photo .chip-name { font-size: 0.55rem; }
+
+.pv-chip.has-photo { padding: 0; overflow: hidden; position: relative; background: #ddd; }
+.pv-chip-photo {
+  position: absolute; inset: 0; border-radius: 50%;
+  background-size: cover; background-position: center;
+}
+.pv-chip.has-photo .pv-chip-inner {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  padding: 1px 0 2px;
+  z-index: 1;
+  display: flex; flex-direction: column; align-items: center;
+}
+.pv-chip.has-photo .pv-chip-num { font-size: 0.55rem; }
+.pv-chip.has-photo .pv-chip-name { font-size: 0.5rem; max-width: 38px; }
+
+.sc-chip.has-photo {
+  background-size: cover; background-position: center;
+  background-color: #ddd;
+}
+.sc-chip.has-photo .sc-chip-num { display: none; }
+
+.picker-item.has-photo .picker-photo {
+  display: inline-block;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background-size: cover; background-position: center;
+  background-color: #ddd;
+  flex-shrink: 0;
+}
+
+.photo-row { display: flex; gap: 0.75rem; align-items: flex-start; margin-top: 0.4rem; }
+.photo-preview {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  border: 2px solid #cbd5e1;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.65rem; color: #64748b;
+  background-size: cover; background-position: center;
+  flex-shrink: 0;
+}
+.photo-preview.has-photo { border-color: #94a3b8; }
+.photo-actions { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.photo-msg.error { color: #b91c1c; }
+
 /* Possession pills */
 .pill { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; vertical-align: middle; margin-left: 4px; }
 .pill-in  { background: #dcfce7; color: #166534; }

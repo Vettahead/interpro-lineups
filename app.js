@@ -1012,8 +1012,8 @@ function renderSquadTab(team, canEdit, players) {
     return `
     <div class="sc-card ${isOpen ? 'open' : ''}" data-player="${p.id}">
       <button class="sc-header" data-toggle type="button">
-        <div class="sc-chip">
-          <div class="sc-chip-num">${p.number ?? '–'}</div>
+        <div class="sc-chip ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+          ${p.photo_url ? '' : `<div class="sc-chip-num">${p.number ?? '–'}</div>`}
         </div>
         <div class="sc-chip-info">
           <div class="sc-chip-name">${escapeHtml(shortName(p.name))}</div>
@@ -1023,6 +1023,18 @@ function renderSquadTab(team, canEdit, players) {
       </button>
       ${isOpen ? `
       <div class="sc-details">
+        <label>Photo</label>
+        <div class="photo-row">
+          <div class="photo-preview ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
+            ${p.photo_url ? '' : '<span>No photo</span>'}
+          </div>
+          <div class="photo-actions">
+            <input type="file" accept="image/jpeg,image/png,image/webp" data-photo-file id="photo-file-${p.id}" style="display:none" ${canEdit ? '' : 'disabled'} />
+            <button type="button" class="btn-secondary" data-photo-pick>${p.photo_url ? 'Replace' : 'Upload'} photo</button>
+            ${p.photo_url ? `<button type="button" class="btn-secondary" data-photo-remove>Remove</button>` : ''}
+            <div class="muted photo-msg" data-photo-msg style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
+          </div>
+        </div>
         <label>Name</label>
         <input type="text" class="field" value="${escapeHtml(p.name || '')}" data-field="name" ${canEdit ? '' : 'disabled'} />
         <div class="sc-row-2">
@@ -1215,6 +1227,54 @@ function renderSquadTab(team, canEdit, players) {
         const idx = players.findIndex(p => p.id === pid);
         if (idx >= 0) players.splice(idx, 1);
         renderSquadTab(team, canEdit, players);
+      };
+    }
+
+    // Photo upload/remove
+    const photoPickBtn = cardEl.querySelector('[data-photo-pick]');
+    const photoFileInput = cardEl.querySelector('[data-photo-file]');
+    const photoRemoveBtn = cardEl.querySelector('[data-photo-remove]');
+    const photoMsg = cardEl.querySelector('[data-photo-msg]');
+    if (photoPickBtn && photoFileInput) {
+      photoPickBtn.onclick = () => photoFileInput.click();
+      photoFileInput.onchange = async () => {
+        const file = photoFileInput.files && photoFileInput.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+          if (photoMsg) { photoMsg.textContent = 'File too large (max 5MB)'; photoMsg.className = 'muted photo-msg error'; }
+          photoFileInput.value = '';
+          return;
+        }
+        if (photoMsg) { photoMsg.textContent = 'Uploading…'; photoMsg.className = 'muted photo-msg'; }
+        photoPickBtn.disabled = true;
+        try {
+          const updated = await uploadPlayerPhoto(pid, file);
+          const player = players.find(p => p.id === pid);
+          if (player) player.photo_url = updated.photo_url;
+          await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: updated.photo_url });
+          renderSquadTab(team, canEdit, players);
+        } catch (err) {
+          if (photoMsg) { photoMsg.textContent = 'Upload failed: ' + (err.message || err); photoMsg.className = 'muted photo-msg error'; }
+          photoPickBtn.disabled = false;
+          photoFileInput.value = '';
+        }
+      };
+    }
+    if (photoRemoveBtn) {
+      photoRemoveBtn.onclick = async () => {
+        const player = players.find(p => p.id === pid);
+        if (!confirm(`Remove photo for ${player?.name || 'this player'}?`)) return;
+        if (photoMsg) { photoMsg.textContent = 'Removing…'; photoMsg.className = 'muted photo-msg'; }
+        photoRemoveBtn.disabled = true;
+        try {
+          await removePlayerPhoto(pid, player?.photo_url);
+          if (player) player.photo_url = null;
+          await logAudit(team.id, 'player', pid, 'update', { field: 'photo_url', to: null });
+          renderSquadTab(team, canEdit, players);
+        } catch (err) {
+          if (photoMsg) { photoMsg.textContent = 'Remove failed: ' + (err.message || err); photoMsg.className = 'muted photo-msg error'; }
+          photoRemoveBtn.disabled = false;
+        }
       };
     }
   });
@@ -1748,16 +1808,52 @@ function renderLineupsTab() {
 
 function chipHtml(player, context) {
   const num = player.number ?? '';
+  const photo = player.photo_url ? `<div class="chip-photo" style="background-image:url('${escapeHtml(player.photo_url)}')"></div>` : '';
   return `
-    <div class="chip ${context === 'palette' ? 'chip-palette' : ''}"
+    <div class="chip ${context === 'palette' ? 'chip-palette' : ''} ${player.photo_url ? 'has-photo' : ''}"
          draggable="${editor.canEdit ? 'true' : 'false'}"
          data-player-id="${player.id}">
+      ${photo}
       <div class="chip-inner">
         ${num !== '' ? `<div class="chip-num">${num}</div>` : ''}
         <div class="chip-name">${escapeHtml(shortName(player.name))}</div>
       </div>
     </div>
   `;
+}
+
+// ---------- Player photo helper ----------
+// Uploads a file to Supabase Storage at `<player_id>/photo-<timestamp>.<ext>`
+// then sets players.photo_url to the public URL. RLS gates who can write.
+async function uploadPlayerPhoto(playerId, file) {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const safeExt = ['jpg','jpeg','png','webp'].includes(ext) ? ext : 'jpg';
+  const path = `${playerId}/photo-${Date.now()}.${safeExt}`;
+  const up = await supabase.storage.from('player-photos').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || ('image/' + safeExt)
+  });
+  if (up.error) throw up.error;
+  const { data: pub } = supabase.storage.from('player-photos').getPublicUrl(path);
+  const publicUrl = pub?.publicUrl;
+  if (!publicUrl) throw new Error('Could not generate public URL');
+  const updRes = await supabase.from('players').update({ photo_url: publicUrl }).eq('id', playerId).select().single();
+  if (updRes.error) throw updRes.error;
+  return updRes.data;
+}
+
+async function removePlayerPhoto(playerId, currentUrl) {
+  // Best-effort: try to delete the old file from storage, then null the column
+  if (currentUrl) {
+    const m = currentUrl.match(/\/player-photos\/(.+)$/);
+    if (m && m[1]) {
+      try { await supabase.storage.from('player-photos').remove([decodeURIComponent(m[1])]); } catch {}
+    }
+  }
+  const updRes = await supabase.from('players').update({ photo_url: null }).eq('id', playerId).select().single();
+  if (updRes.error) throw updRes.error;
+  return updRes.data;
 }
 
 function renderPitch() {
@@ -2257,8 +2353,10 @@ function openPlayerPicker(kind, idx) {
         ${available.length
           ? `<div class="picker-list">
               ${available.map(p => `
-                <button class="picker-item" data-pid="${p.id}">
-                  <span class="picker-num">${p.number ?? '–'}</span>
+                <button class="picker-item ${p.photo_url ? 'has-photo' : ''}" data-pid="${p.id}">
+                  ${p.photo_url
+                    ? `<span class="picker-photo" style="background-image:url('${escapeHtml(p.photo_url)}')"></span>`
+                    : `<span class="picker-num">${p.number ?? '–'}</span>`}
                   <span class="picker-name">${escapeHtml(p.name)}</span>
                   <span class="picker-pos">${p.position || ''}</span>
                 </button>
@@ -3422,9 +3520,12 @@ function renderPlayPreview(play) {
       const p = pid ? pById(pid) : null;
       const label = lbl[i] || '';
       const chipInner = p
-        ? `<div class="pv-chip">
-             ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
-             <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+        ? `<div class="pv-chip ${p.photo_url ? 'has-photo' : ''}">
+             ${p.photo_url ? `<div class="pv-chip-photo" style="background-image:url('${escapeHtml(p.photo_url)}')"></div>` : ''}
+             <div class="pv-chip-inner">
+               ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
+               <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+             </div>
            </div>`
         : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
       return `
@@ -3749,9 +3850,12 @@ function renderFixturePitch(lineup) {
       const p = pid ? pById(pid) : null;
       const label = lbl[i] || '';
       const chipInner = p
-        ? `<div class="pv-chip">
-             ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
-             <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+        ? `<div class="pv-chip ${p.photo_url ? 'has-photo' : ''}">
+             ${p.photo_url ? `<div class="pv-chip-photo" style="background-image:url('${escapeHtml(p.photo_url)}')"></div>` : ''}
+             <div class="pv-chip-inner">
+               ${p.number != null ? `<div class="pv-chip-num">${p.number}</div>` : ''}
+               <div class="pv-chip-name">${escapeHtml(shortName(p.name))}</div>
+             </div>
            </div>`
         : `<div class="pv-chip pv-empty">${escapeHtml(label)}</div>`;
       return `
