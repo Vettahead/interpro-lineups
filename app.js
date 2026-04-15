@@ -1126,7 +1126,15 @@ const HELP_SECTIONS = [
       <h4>What does the position field do?</h4>
       <p>Preferred positions colour-code players on the lineup picker. They're suggestions, not restrictions.</p>
       <h4>Editing or removing a player <em>(coach/admin only)</em></h4>
-      <p>Click a player to expand their card, then use <strong>Edit</strong> or <strong>Remove</strong>. Removing a player won't break old lineups — they'll just appear as empty slots.</p>
+      <p>Click a player to expand their card. All fields (name, number, position, parent contacts, photo) save on blur. Use <strong>Remove player</strong> to delete. Removing a player won't break old lineups — they'll just appear as empty slots.</p>
+      <h4>Adding a player photo <em>(coach/admin only)</em></h4>
+      <p>Expand the player's card and click <strong>Upload photo</strong>. A cropper opens — drag and zoom to frame the face inside the square, then save. The image is compressed to a 512×512 JPEG and shows up everywhere that player appears: squad list, pitch chip, subs row, parent view chips, fixtures preview. Use <strong>Replace</strong> or <strong>Remove</strong> to change it.</p>
+      <h4>What's the Access codes box for? <em>(coach/admin only)</em></h4>
+      <p>Each player has an auto-generated <strong>personal code</strong> (e.g. <code>JE1234</code> — first initials + 4 digits) and optionally a 5-digit <strong>family code</strong> shared with linked siblings. Parents enter one of these codes once on the availability link to unlock that player on their device. WhatsApp the code(s) to the parents — they only need to enter one once. See "Publishing & sharing with parents" for the parent flow.</p>
+      <h4>Linking siblings <em>(coach/admin only)</em></h4>
+      <p>In the Access codes box, click <strong>🔗 Link sibling…</strong>. Tick the brothers/sisters in the squad and save. The app generates (or reuses) a shared 5-digit family code so a parent enters one code and unlocks both children at once. Click <strong>Unlink</strong> to remove a player from the family group; if only one player is left, the family code is dissolved automatically.</p>
+      <h4>Parent contact fields <em>(coach/admin only)</em></h4>
+      <p>Parent name + phone are stored on each card so you can chase someone quickly. Future versions will use them for SMS notifications and invites.</p>
       <h4>Setting the home ground <em>(coach/admin only)</em></h4>
       <p>At the top of the Squad tab, the <strong>Home ground</strong> card lets you set venue name + postcode and fine-tune the map pin. This auto-fills for every Home game.</p>
       <h4>Why fine-tune the map?</h4>
@@ -1151,26 +1159,44 @@ const HELP_SECTIONS = [
       <h4>Tactics</h4>
       <p>Press/Defensive lines (toggle and drag), arrows (click-drag, click to bend), and a movable ball. Use Clear to reset.</p>
       <h4>Saving</h4>
-      <p>The <strong>Save lineup</strong> button is in the match-details popup. Saved lineups appear on the left.</p>
+      <p>The <strong>Save lineup</strong> button is in the match-details popup. Saved lineups appear in <strong>Matches / Lineups</strong> on the left (or, on mobile, just under the pitch).</p>
       <h4>Loading or deleting saved lineups</h4>
-      <p>Click any item in <strong>Saved lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
+      <p>Click any item in <strong>Matches / Lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
+      <h4>What do the coloured rings around player chips mean?</h4>
+      <p>Once availability responses come in, players are visually flagged on the pitch and palette:</p>
+      <ul>
+        <li><strong>Gold ring</strong> — marked Available</li>
+        <li><strong>Red ring</strong> — marked Unavailable</li>
+        <li><strong>Yellow <code>?</code> badge</strong> — marked Maybe</li>
+        <li>No ring — no response yet</li>
+      </ul>
+      <p>The same rings show on the Fixtures pitch.</p>
     `
   },
   {
     id: 'publish', title: 'Publishing & sharing with parents', adminOnly: true,
     body: `
-      <h4>What does Publish do?</h4>
-      <p>Publishing makes the lineup visible to anyone with the share link — no login. Drafts stay private.</p>
-      <h4>How to publish</h4>
-      <p>Open the lineup → <strong>📋 Arrange match</strong> → <strong>Publish lineup</strong>. The card shows a green ● Published indicator.</p>
-      <h4>Sending the link</h4>
-      <p>After publishing, click <strong>🔗 Copy share link for parents</strong>. Paste into WhatsApp/text.</p>
+      <h4>The three visibility states</h4>
+      <p>Every lineup is in one of three states, set via a segmented control at the bottom of <strong>📋 Arrange match</strong>:</p>
+      <ul>
+        <li><strong>Draft</strong> — only coaches can see it. The share link doesn't work.</li>
+        <li><strong>Availability</strong> — parents can open the share link to see match details and mark each of their children as Available, Maybe or Unavailable. The lineup itself is hidden.</li>
+        <li><strong>Show lineup</strong> — parents see the full pitch plus match details. Availability responses still flow in.</li>
+      </ul>
+      <h4>Collecting availability from parents</h4>
+      <p>Once the lineup has a game date, switch to <strong>Availability</strong> and click <strong>🔗 Copy availability link for parents</strong>. Paste into team WhatsApp along with each child's access code (parents only need it once per device — it's remembered after that).</p>
+      <h4>Where do parents get their access code?</h4>
+      <p>From you. Open the <strong>Squad</strong> tab, expand the player's card, and look in the <strong>Access codes</strong> box. Copy the personal code (e.g. <code>JE1234</code>) or family code (5 digits if siblings are linked) and send it via WhatsApp.</p>
+      <h4>Showing the lineup</h4>
+      <p>Once you've picked the squad, switch the segmented control from <strong>Availability</strong> to <strong>Show lineup</strong>. The same link now shows the pitch — no need to re-share.</p>
+      <h4>Taking a lineup offline</h4>
+      <p>Switch the state back to <strong>Draft</strong>. The share link stops working immediately. Availability responses are preserved.</p>
+      <h4>Where do I see the responses?</h4>
+      <p>In the Match details card on Lineups (and on Fixtures) you'll see an <strong>Availability responses</strong> panel with a tally and a per-player breakdown. The pitch chips also get gold/red rings or a <code>?</code> badge.</p>
       <h4>Do I need to re-share if I change something?</h4>
       <p>No. The link always points to the latest version. Changes show up in the parent view within 15 seconds (or instantly via their <strong>↻ Refresh</strong> button).</p>
-      <h4>Unpublishing</h4>
-      <p>Open the lineup → <strong>📋 Arrange match</strong> → <strong>Unpublish</strong>. The link stops working immediately.</p>
       <h4>What parents see</h4>
-      <p>Team vs opponent, date/kick-off/arrival, venue + map + what3words, coach notes, the full pitch with players, and subs. They don't see drafts, other lineups or admin data.</p>
+      <p>Team vs opponent, date/kick-off/arrival, venue + map + what3words, coach notes, an availability form for the children they've unlocked, and (in Show lineup mode) the full pitch with players and subs. They don't see drafts, other lineups or admin data.</p>
     `
   },
   {
@@ -1188,11 +1214,15 @@ const HELP_SECTIONS = [
     id: 'fixtures', title: 'Fixtures tab', adminOnly: false,
     body: `
       <h4>What is it?</h4>
-      <p>An overview of the season. The next game appears big at the top with the pitch and details. Calendar and Upcoming/Recent are collapsible cards below.</p>
-      <h4>Why don't draft lineups show?</h4>
-      <p>Fixtures only shows <strong>published</strong> lineups by default. Coaches/admins can tick <strong>Show draft lineups</strong> at the bottom of Upcoming.</p>
+      <p>An overview of the season. Collapsible <strong>Calendar</strong> and <strong>Matches</strong> cards sit at the top, then the selected game's headline (date, opponent, venue, map links), the parent share button, the availability responses panel, and the pitch with the lineup.</p>
+      <h4>Can I see the lineup even if it isn't published? <em>(coach/admin)</em></h4>
+      <p>Yes — you always see the pitch on Fixtures so you can review at a glance. A small grey banner above the pitch tells you the visibility state ("Availability mode" or "Draft"). The public parent link only shows the pitch once you flip the lineup to <strong>Show lineup</strong>.</p>
+      <h4>Why don't draft lineups show in the calendar? <em>(coach/admin)</em></h4>
+      <p>By default Fixtures only shows fixtures parents can see (Availability or Show lineup). Tick <strong>Show draft lineups</strong> at the bottom of the Matches list to include drafts too.</p>
       <h4>Jumping to a game</h4>
-      <p>Click any highlighted day on the calendar, or any item in Upcoming/Recent.</p>
+      <p>Click any highlighted day on the calendar, or any item in <strong>Matches</strong>. The headline, share button, availability panel and pitch all switch to that fixture.</p>
+      <h4>Sharing or checking availability from Fixtures <em>(coach/admin)</em></h4>
+      <p>Whenever the selected game is in Availability or Show lineup mode, you'll see the <strong>🔗 Copy availability link for parents</strong> button and an <strong>Availability responses</strong> panel right under the headline.</p>
     `
   },
   {
@@ -1221,11 +1251,19 @@ const HELP_SECTIONS = [
       <h4>Do I need to download an app?</h4>
       <p>No. The link opens in any browser. It works on phones, tablets and computers.</p>
       <h4>Do I need to log in?</h4>
-      <p>No. The share link is public.</p>
+      <p>No. The share link is public. To <strong>mark availability</strong> for your child you enter the player's access code once — see below.</p>
+      <h4>What's the access code box?</h4>
+      <p>An unlock prompt above the availability buttons. The first time you open the link you'll see only the match details and an empty code box. Type your child's personal code (<code>JE1234</code> style) or family code (5 digits), tap <strong>Unlock</strong>, and that player's row appears with the ✅ / 🤔 / ❌ buttons. The unlock is remembered on that device so you only do it once.</p>
+      <h4>What does "Add another child" do?</h4>
+      <p>After you've unlocked one player, the same code box label changes to <strong>Add another child</strong>. Paste a second code to add a sibling that wasn't linked, or a different family's child.</p>
+      <h4>What does "Forget this device" do?</h4>
+      <p>Wipes everything the parent view remembers on that device — unlocked players, codes, and saved name. Useful for shared phones. You'll need the access code(s) again next time.</p>
       <h4>How often does it refresh?</h4>
       <p>Automatically every 15 seconds. There's also a <strong>↻ Refresh</strong> button at the bottom.</p>
       <h4>What's the ///what3words link?</h4>
       <p>A three-word address pinpoints a 3m × 3m square. Tap it on a phone for precise directions.</p>
+      <h4>Are the access codes secret?</h4>
+      <p>They're treated as private but they're not high-security secrets — they're WhatsApp-trust friction designed to stop accidental cross-clicks. The full lineup, when published, is still visible to anyone with the link.</p>
     `
   },
   {
@@ -1238,7 +1276,9 @@ const HELP_SECTIONS = [
       <h4>The pitch looks squashed on my phone</h4>
       <p>Scroll the page or refresh your browser; the pitch should resize to fit.</p>
       <h4>A parent says the share link doesn't work <em>(coaches)</em></h4>
-      <p>Check the lineup is still <strong>● Published</strong>. Unpublishing or deleting the lineup breaks the link.</p>
+      <p>Open the lineup and check the visibility state at the bottom of <strong>📋 Arrange match</strong>. <strong>Draft</strong> breaks the link entirely; <strong>Availability</strong> hides the pitch but lets parents mark availability; <strong>Show lineup</strong> shows everything.</p>
+      <h4>A parent says they entered the code but nothing happened <em>(coaches)</em></h4>
+      <p>Double-check the code on the player's card. Codes are case-insensitive and ignore spaces. Personal codes are 2 letters + 4 digits (<code>JE1234</code>); family codes are exactly 5 digits.</p>
       <h4>Where is my data stored?</h4>
       <p>In a Supabase database in the cloud. Only members of your team can read your private team data.</p>
       <h4>What devices does it work on?</h4>
@@ -1249,12 +1289,12 @@ const HELP_SECTIONS = [
     id: 'workflow', title: 'A typical coach week', adminOnly: true,
     body: `
       <ol>
-        <li><strong>Monday</strong> — Squad tab, check player availability. Update notes if anyone's injured.</li>
-        <li><strong>Tuesday</strong> — Lineups → + New lineup. Fill in opponent/date/KO/arrival, pick formation, drag players in, save (don't publish yet).</li>
-        <li><strong>Wed/Thu</strong> — Tweak based on training. Add tactics arrows. Save.</li>
-        <li><strong>Friday</strong> — Arrange match → Publish. Copy share link, paste into team WhatsApp.</li>
-        <li><strong>Match day</strong> — If anything changes, edit the lineup; the parent link auto-updates.</li>
-        <li><strong>Post-match</strong> — Stays in Fixtures as a Recent entry for the season record.</li>
+        <li><strong>Monday</strong> — Lineups → + New lineup. Fill in opponent, date, kick-off, arrival, venue. Save as Draft.</li>
+        <li><strong>Tuesday</strong> — In <strong>📋 Arrange match</strong>, switch to <strong>Availability</strong> and <strong>🔗 Copy availability link for parents</strong>. Paste into WhatsApp along with each child's access code (grab them from the Squad tab).</li>
+        <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (gold/red/<code>?</code> rings appear on chips). Tweak the lineup. Add tactics arrows.</li>
+        <li><strong>Friday</strong> — Switch the state to <strong>Show lineup</strong>. Same parent link now shows the pitch — no need to re-share.</li>
+        <li><strong>Match day</strong> — If anyone drops out, edit the lineup; the parent link auto-updates within 15s.</li>
+        <li><strong>Post-match</strong> — Stays in <strong>Fixtures → Matches → Past</strong> for the season record.</li>
       </ol>
     `
   },
@@ -1262,11 +1302,11 @@ const HELP_SECTIONS = [
     id: 'roadmap', title: 'Roadmap (coming soon)', adminOnly: true,
     body: `
       <ul>
-        <li>Player photos on chips</li>
-        <li>Email notifications when lineups are published or updated</li>
         <li>Admin panel for managing all members in one place</li>
+        <li>Email notifications when lineups are published or updated</li>
         <li>Audit log UI to see who changed what</li>
         <li>Team-wide public page so parents can bookmark one URL for the season</li>
+        <li>A holistic look-and-feel polish pass</li>
       </ul>
     `
   }
@@ -2308,9 +2348,9 @@ function applyAvailabilityDecorations() {
     if (existingBadge) existingBadge.remove();
     if (!s) return;
     if (s === 'available') {
-      chip.style.boxShadow = '0 0 0 3px #d4af37'; // gold ring
+      chip.style.boxShadow = '0 0 0 4px #f4c430'; // gold/yellow ring
     } else if (s === 'unavailable') {
-      chip.style.boxShadow = '0 0 0 3px #c0392b'; // red ring
+      chip.style.boxShadow = '0 0 0 4px #c0392b'; // red ring
     } else if (s === 'maybe') {
       const badge = document.createElement('div');
       badge.className = 'avail-badge';
