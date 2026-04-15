@@ -102,6 +102,9 @@ async function render() {
   }
   renderUserBar(session.user);
 
+  // Claim any pending invites for this user's email (team_members + parent_players rows)
+  await claimPendingInvites(session.user).catch(err => console.warn('claim invites failed', err));
+
   const route = currentRoute();
   if (route.name === 'team') {
     await renderTeamDashboard(session.user, route.teamId);
@@ -115,6 +118,44 @@ supabase.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT') location.hash = '';
   render();
 });
+
+// Look up and claim any pending invites for this user's email.
+// Creates team_members row + parent_players link (for parent invites), marks invite accepted.
+async function claimPendingInvites(user) {
+  if (!user?.email) return;
+  const email = user.email.trim().toLowerCase();
+  const { data: invites, error } = await supabase
+    .from('invites')
+    .select('*')
+    .eq('status', 'pending')
+    .ilike('email', email);
+  if (error) { console.warn('invite lookup error', error); return; }
+  if (!invites || !invites.length) return;
+
+  for (const inv of invites) {
+    // Create team_members (ignore conflicts — user may already be a member)
+    const tmPayload = { team_id: inv.team_id, user_id: user.id, role: inv.role };
+    const tmRes = await supabase.from('team_members').insert(tmPayload);
+    // Ignore duplicate key errors
+    if (tmRes.error && !String(tmRes.error.message || '').match(/duplicate|unique/i)) {
+      console.warn('team_members insert error', tmRes.error);
+    }
+    // Link parent to player if applicable
+    if (inv.role === 'parent' && inv.player_id) {
+      const ppRes = await supabase
+        .from('parent_players')
+        .insert({ parent_id: user.id, player_id: inv.player_id });
+      if (ppRes.error && !String(ppRes.error.message || '').match(/duplicate|unique/i)) {
+        console.warn('parent_players insert error', ppRes.error);
+      }
+    }
+    // Mark accepted
+    await supabase
+      .from('invites')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+      .eq('id', inv.id);
+  }
+}
 
 // ---------- Auth ----------
 function renderAuth() {
@@ -312,6 +353,7 @@ async function renderTeamDashboard(user, teamId) {
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
+      ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
     `;
     tabsEl.querySelectorAll('.h-tab[data-tab]').forEach(b => {
       b.onclick = () => {
@@ -350,6 +392,13 @@ async function renderTeamDashboard(user, teamId) {
       current: newPlayState()
     };
     renderPlaysTab();
+  } else if (activeTab === 'members' && canEdit) {
+    editor = {
+      mode: 'members',
+      team, canEdit, players, lineups, plays, customFormations,
+      current: newLineupState()
+    };
+    renderMembersTab(user);
   }
 }
 
@@ -2436,6 +2485,193 @@ function wirePlayEvents() {
     _playsUi.selectedId = null;
     renderPlaysTab();
   };
+}
+
+// ---------- Members tab (Slice 5 — Step 1: Invites) ----------
+let _membersUi = { invites: [], members: [], loading: true };
+
+async function renderMembersTab(currentUser) {
+  const tabEl = document.getElementById('tab-content');
+  const { team, players } = editor;
+
+  tabEl.innerHTML = `<div style="padding:1rem"><p class="loading">Loading members…</p></div>`;
+
+  // Load invites + members for this team
+  const [invRes, memRes] = await Promise.all([
+    supabase.from('invites').select('*').eq('team_id', team.id).order('created_at', { ascending: false }),
+    supabase.from('team_members').select('user_id, role, created_at').eq('team_id', team.id)
+  ]);
+  _membersUi.invites = invRes.data || [];
+  _membersUi.members = memRes.data || [];
+  _membersUi.loading = false;
+
+  const pending = _membersUi.invites.filter(i => i.status === 'pending');
+  const accepted = _membersUi.invites.filter(i => i.status !== 'pending');
+
+  const playerOpts = players
+    .map(p => `<option value="${p.id}">${escapeHtml(p.name)}${p.number != null ? ' (#' + p.number + ')' : ''}</option>`)
+    .join('');
+
+  const pendingHtml = pending.length
+    ? pending.map(i => {
+        const player = i.player_id ? players.find(p => p.id === i.player_id) : null;
+        return `
+          <div class="lineup-item">
+            <div class="lineup-name">${escapeHtml(i.email)}</div>
+            <div class="lineup-meta">
+              ${escapeHtml(i.role)}
+              ${player ? ' · linked to ' + escapeHtml(player.name) : ''}
+              · sent ${formatDate(i.created_at)}
+            </div>
+            <button class="lineup-del" data-revoke-invite="${i.id}" title="Revoke">✕</button>
+          </div>
+        `;
+      }).join('')
+    : `<p class="muted" style="padding:0.5rem 0">No pending invites.</p>`;
+
+  const acceptedHtml = accepted.length
+    ? accepted.slice(0, 10).map(i => `
+        <div class="lineup-item" style="opacity:0.7">
+          <div class="lineup-name">${escapeHtml(i.email)}</div>
+          <div class="lineup-meta">${escapeHtml(i.role)} · ${escapeHtml(i.status)}${i.accepted_at ? ' · ' + formatDate(i.accepted_at) : ''}</div>
+        </div>
+      `).join('')
+    : '';
+
+  const memberCount = _membersUi.members.length;
+
+  tabEl.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;max-width:900px">
+      <div class="card">
+        <h3 style="margin:0 0 0.5rem">Invite someone</h3>
+        <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">They'll get an email with a magic link. When they sign in, they're automatically added to this team.</p>
+        <label>Email</label>
+        <input type="email" id="inv-email" placeholder="name@example.com" autocomplete="off" />
+        <label style="margin-top:0.5rem">Role</label>
+        <select id="inv-role">
+          <option value="coach">Coach (can edit lineups & plays)</option>
+          <option value="parent">Parent (read-only, linked to a player)</option>
+        </select>
+        <div id="inv-player-wrap" style="display:none;margin-top:0.5rem">
+          <label>Link to player</label>
+          <select id="inv-player">
+            <option value="">— choose a player —</option>
+            ${playerOpts}
+          </select>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+          <button class="primary" id="inv-send">Send invite</button>
+        </div>
+        <div id="inv-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 0.5rem">Pending invites (${pending.length})</h3>
+        <div class="lineup-list">${pendingHtml}</div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 0.5rem">Current members (${memberCount})</h3>
+        <p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem">A full admin panel with role editing is coming next.</p>
+      </div>
+
+      ${acceptedHtml ? `<div class="card">
+        <h3 style="margin:0 0 0.5rem">Recent accepted / revoked</h3>
+        <div class="lineup-list">${acceptedHtml}</div>
+      </div>` : ''}
+    </div>
+  `;
+
+  wireMembersEvents(currentUser);
+}
+
+function wireMembersEvents(currentUser) {
+  const { team } = editor;
+  const tabEl = document.getElementById('tab-content');
+
+  // Show / hide player picker based on role
+  const roleEl = tabEl.querySelector('#inv-role');
+  const playerWrap = tabEl.querySelector('#inv-player-wrap');
+  const toggleWrap = () => { playerWrap.style.display = roleEl.value === 'parent' ? '' : 'none'; };
+  if (roleEl) roleEl.onchange = toggleWrap;
+  toggleWrap();
+
+  // Send invite
+  const sendBtn = tabEl.querySelector('#inv-send');
+  if (sendBtn) sendBtn.onclick = async () => {
+    const msg = tabEl.querySelector('#inv-msg');
+    const email = (tabEl.querySelector('#inv-email').value || '').trim().toLowerCase();
+    const role = tabEl.querySelector('#inv-role').value;
+    const playerId = role === 'parent' ? (tabEl.querySelector('#inv-player').value || '') : '';
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      msg.textContent = 'Valid email required.'; msg.className = 'error'; return;
+    }
+    if (role === 'parent' && !playerId) {
+      msg.textContent = 'Pick a player to link this parent to.'; msg.className = 'error'; return;
+    }
+
+    sendBtn.disabled = true;
+    msg.textContent = 'Sending…'; msg.className = 'muted';
+
+    const payload = {
+      team_id: team.id,
+      email,
+      role,
+      player_id: playerId || null,
+      invited_by: currentUser.id,
+      status: 'pending'
+    };
+    const { data: inviteRow, error: insErr } = await supabase
+      .from('invites')
+      .insert(payload)
+      .select()
+      .single();
+    if (insErr) {
+      sendBtn.disabled = false;
+      msg.textContent = 'Save failed: ' + insErr.message; msg.className = 'error'; return;
+    }
+
+    // Send magic link (also creates the user if new)
+    const { error: otpErr } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: window.location.origin + window.location.pathname
+      }
+    });
+    if (otpErr) {
+      sendBtn.disabled = false;
+      msg.textContent = 'Email send failed: ' + otpErr.message + ' (invite saved — you can resend later).';
+      msg.className = 'error';
+      return;
+    }
+
+    await logAudit(team.id, 'invite', inviteRow.id, 'create', { email, role, player_id: playerId || null });
+    msg.textContent = `✓ Invite sent to ${email}.`; msg.className = 'ok';
+
+    // Reset form, refresh list
+    tabEl.querySelector('#inv-email').value = '';
+    tabEl.querySelector('#inv-role').value = 'coach';
+    const playerEl = tabEl.querySelector('#inv-player');
+    if (playerEl) playerEl.value = '';
+    renderMembersTab(currentUser);
+  };
+
+  // Revoke pending invite
+  tabEl.querySelectorAll('[data-revoke-invite]').forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.dataset.revokeInvite;
+      if (!confirm('Revoke this invite?')) return;
+      const { error } = await supabase
+        .from('invites')
+        .update({ status: 'revoked' })
+        .eq('id', id);
+      if (error) { alert('Revoke failed: ' + error.message); return; }
+      await logAudit(team.id, 'invite', id, 'revoke', {});
+      renderMembersTab(currentUser);
+    };
+  });
 }
 
 // Kick off
