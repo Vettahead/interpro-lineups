@@ -1165,6 +1165,26 @@ function openLoadFromPlay() {
 }
 
 let _chipDragWired = false;
+let _selectedChipPayload = null; // { playerId, fromSlot, fromSub }
+
+function clearChipSelection() {
+  _selectedChipPayload = null;
+  document.querySelectorAll('.chip.selected').forEach(c => c.classList.remove('selected'));
+}
+
+function applySelectedPayloadTo(target) {
+  if (!_selectedChipPayload) return;
+  const payload = _selectedChipPayload;
+  clearChipSelection();
+  if (target.dataset.slot !== undefined) {
+    handleDropToSlot(parseInt(target.dataset.slot, 10), payload);
+  } else if (target.dataset.sub !== undefined) {
+    handleDropToSub(parseInt(target.dataset.sub, 10), payload);
+  } else if (target.id === 'palette' || target.closest?.('#palette')) {
+    handleDropToPalette(payload);
+  }
+}
+
 function wireDragAndDrop() {
   const tabEl = document.getElementById('tab-content');
 
@@ -1174,9 +1194,63 @@ function wireDragAndDrop() {
     chip.ondragstart = e => e.preventDefault();
   });
 
+  // Re-apply selected-class on rerender
+  if (_selectedChipPayload) {
+    tabEl.querySelectorAll('.chip').forEach(chip => {
+      const pid = chip.dataset.playerId;
+      const fromSlot = chip.dataset.fromSlot ?? null;
+      const fromSub = chip.dataset.fromSub ?? null;
+      if (pid === _selectedChipPayload.playerId &&
+          fromSlot === _selectedChipPayload.fromSlot &&
+          fromSub === _selectedChipPayload.fromSub) {
+        chip.classList.add('selected');
+      }
+    });
+  }
+
   // Wire document-level delegation once — persists across rerenders
   if (_chipDragWired) return;
   _chipDragWired = true;
+
+  // Tap-to-move: click handler (fires after pointerdown/up if no drag happened)
+  document.addEventListener('click', (e) => {
+    if (!editor?.canEdit) return;
+    const tab = document.getElementById('tab-content');
+    if (!tab) return;
+
+    const chip = e.target.closest?.('.chip');
+    const dropTarget = e.target.closest?.('[data-slot], [data-sub], #palette');
+
+    // Click on a chip
+    if (chip && tab.contains(chip)) {
+      const pid = chip.dataset.playerId;
+      const fromSlot = chip.dataset.fromSlot ?? null;
+      const fromSub  = chip.dataset.fromSub ?? null;
+
+      // If something already selected, treat this chip's slot/sub as the drop target
+      if (_selectedChipPayload) {
+        const same = _selectedChipPayload.playerId === pid &&
+                     _selectedChipPayload.fromSlot === fromSlot &&
+                     _selectedChipPayload.fromSub === fromSub;
+        if (same) { clearChipSelection(); return; }
+        // Swap: drop selected chip onto this chip's container
+        const container = chip.closest('[data-slot], [data-sub]');
+        if (container) { applySelectedPayloadTo(container); return; }
+      }
+
+      // Otherwise select this chip
+      clearChipSelection();
+      _selectedChipPayload = { playerId: pid, fromSlot, fromSub };
+      chip.classList.add('selected');
+      return;
+    }
+
+    // Click on a drop target with a selected chip
+    if (dropTarget && tab.contains(dropTarget) && _selectedChipPayload) {
+      applySelectedPayloadTo(dropTarget);
+      return;
+    }
+  });
 
   document.addEventListener('pointerdown', (e) => {
     if (!editor?.canEdit) return;
@@ -1186,8 +1260,6 @@ function wireDragAndDrop() {
     if (!chip) return;
     // Only chips in the current tab
     if (!document.getElementById('tab-content')?.contains(chip)) return;
-    e.preventDefault();
-    e.stopPropagation();
 
     const pid = chip.dataset.playerId;
     const fromSlot = chip.dataset.fromSlot;
