@@ -1949,19 +1949,25 @@ function renderFormationEditor(rerender) {
 
   slotsLayer.querySelectorAll('[data-fe-slot]').forEach(el => {
     el.addEventListener('pointerdown', (e) => {
-      // If pointer started on the label, let click handler open the rename prompt
-      if (e.target.closest('[data-fe-label]')) return;
       e.preventDefault();
+      e.stopPropagation();
       const idx = parseInt(el.dataset.feSlot);
       const rect = pitch.getBoundingClientRect();
       const startX = formationEdit.pos[idx][0];
       const startY = formationEdit.pos[idx][1];
       const origX = e.clientX, origY = e.clientY;
+      let moved = false;
+      const DRAG_THRESHOLD = 4;
       el.classList.add('dragging');
 
       const move = (ev) => {
         const dx = (ev.clientX - origX) / rect.width * 100;
         const dy = (ev.clientY - origY) / rect.height * 100;
+        if (!moved) {
+          if (Math.abs(ev.clientX - origX) < DRAG_THRESHOLD &&
+              Math.abs(ev.clientY - origY) < DRAG_THRESHOLD) return;
+          moved = true;
+        }
         const nx = Math.max(2, Math.min(98, startX + dx));
         const ny = Math.max(2, Math.min(98, startY + dy));
         formationEdit.pos[idx] = [nx, ny];
@@ -1973,21 +1979,17 @@ function renderFormationEditor(rerender) {
         document.removeEventListener('pointermove', move);
         document.removeEventListener('pointerup', up);
         document.removeEventListener('pointercancel', up);
+        // If the pointer didn't move, treat as a tap → open rename prompt
+        if (!moved) {
+          const next = prompt('Position label:', formationEdit.lbl[idx] || '');
+          if (next === null) return;
+          formationEdit.lbl[idx] = next.trim().toUpperCase().slice(0, 5);
+          if (rerender) rerender();
+        }
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
       document.addEventListener('pointercancel', up);
-    });
-  });
-
-  slotsLayer.querySelectorAll('[data-fe-label]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const idx = parseInt(el.dataset.feLabel);
-      const next = prompt('Position label:', formationEdit.lbl[idx] || '');
-      if (next === null) return;
-      formationEdit.lbl[idx] = next.trim().toUpperCase().slice(0, 5);
-      if (rerender) rerender();
     });
   });
 }
