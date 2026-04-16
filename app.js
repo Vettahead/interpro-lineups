@@ -597,24 +597,33 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
   // CSS hides the hamburger on desktop (≥900px), so it's safe to unhide here.
   toggle.hidden = false;
 
+  // Header second line: "<display name> · <role label>"
+  const rawName = user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : '');
+  const displayName = rawName || 'Account';
+  // Admin gets the public-facing "Head coach" label (inherits coach); others show the raw role capitalised.
+  const roleLabel = role === 'admin'
+    ? 'Head coach'
+    : (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
+
+  // Drawer tabs match the mockup: Matches / Squad / Plays / Formations / Help-FAQ / Admin (coach-gated) / Sign out.
+  // `fixtures` keeps its internal id — the old "lineups" tab is consolidated into it.
   const tabs = [
-    { id: 'fixtures', label: 'Fixtures', icon: '📅' },
-    { id: 'squad',    label: 'Squad',    icon: '👥' },
-    { id: 'lineups',  label: 'Matches',  icon: '⚽' },
-    { id: 'plays',    label: 'Plays',    icon: '📋' },
-    ...(canEdit ? [{ id: 'members', label: 'Members', icon: '🛡️' }] : []),
-    { id: 'help',     label: 'Help',     icon: '❓' },
+    { id: 'fixtures',   label: 'Matches',    icon: '🌐' },
+    { id: 'squad',      label: 'Squad',      icon: '👥' },
+    { id: 'plays',      label: 'Plays',      icon: '📋' },
+    { id: 'formations', label: 'Formations', icon: '▦' },
+    { id: 'help',       label: 'Help / FAQ', icon: '❓' },
+    ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
+    { id: '__signout',  label: 'Sign out',   icon: '⏻' },
   ];
 
   drawer.innerHTML = `
     <div class="nav-drawer-head">
       <div class="nav-drawer-team">
         <strong>${escapeHtml(team.name)}</strong>
-        <span class="role-chip">${escapeHtml(role)}</span>
+        <span class="nav-drawer-user">${escapeHtml(displayName)} · ${escapeHtml(roleLabel)}</span>
       </div>
-      <button type="button" class="nav-drawer-close" aria-label="Close menu">✕</button>
     </div>
-    <a href="#" class="nav-drawer-back" data-nav-action="back">← Your teams</a>
     <nav class="nav-drawer-tabs">
       ${tabs.map(t => `
         <button type="button" class="nav-drawer-tab ${activeTab === t.id ? 'active' : ''}" data-nav-tab="${t.id}">
@@ -663,18 +672,16 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
     if (drawer.classList.contains('open')) closeDrawer(); else openDrawer();
   };
   overlay.onclick = closeDrawer;
-  drawer.querySelector('.nav-drawer-close').onclick = closeDrawer;
-
-  drawer.querySelector('[data-nav-action="back"]').onclick = (e) => {
-    e.preventDefault();
-    closeDrawer();
-    location.hash = '';
-  };
 
   drawer.querySelectorAll('[data-nav-tab]').forEach(btn => {
     btn.onclick = async () => {
       const next = btn.dataset.navTab;
       closeDrawer();
+      if (next === '__signout') {
+        try { await flushAutosave(); } catch (_) {}
+        await supabase.auth.signOut();
+        return;
+      }
       if (next === activeTab) return;
       try { await flushAutosave(); } catch (_) {}
       activeTab = next;
@@ -859,6 +866,10 @@ async function renderParentView(lineupId, opts = {}) {
   const showAvailability = viewMode === 'avail' && (status === 'availability' || status === 'published');
   // Show pitch only on the 'match' route, and only when published
   const showPitch = viewMode === 'match' && status === 'published';
+  // On the match page, if this device hasn't unlocked any children yet, show a code-entry box
+  // so the parent can reveal the "your child is at X" banner here (mirrors the avail page).
+  const pvUnlockedIdsForCode = showPitch ? (getUnlockedPlayers(lineup.team_id) || []) : [];
+  const pvShowMatchCodeBox = showPitch && pvUnlockedIdsForCode.length === 0;
 
   // Fetch current availability responses (anon-readable) so we can prefill
   let availability = [];
@@ -912,6 +923,18 @@ async function renderParentView(lineupId, opts = {}) {
         <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
       ` : ''}
 
+      ${pvShowMatchCodeBox ? `
+      <div class="pv-card" id="mv-code-card">
+        <h3 class="pv-card-title">Is your child in the squad?</h3>
+        <p class="muted" style="font-size:0.85rem;margin-top:0">Enter your child's access code to see which position they're playing today.</p>
+        <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
+          <input type="text" id="mv-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
+            style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
+          <button type="button" class="primary" id="mv-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
+        </div>
+        <div id="mv-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+      </div>` : ''}
+
       ${showPitch ? `
       <div id="pv-child-notice"></div>
       <div class="pv-card">
@@ -943,6 +966,9 @@ async function renderParentView(lineupId, opts = {}) {
   if (showPitch) {
     renderFixturePitch(lineup);
     highlightMyChildrenOnPitch(lineup, players);
+  }
+  if (pvShowMatchCodeBox) {
+    wireMatchPageUnlock(lineup, players);
   }
 
   document.getElementById('pv-refresh')?.addEventListener('click', () => {
@@ -1198,6 +1224,45 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
       location.reload();
     });
   }
+}
+
+// ---------- Match-page parent unlock (same cookie as avail page) ----------
+// If a parent opens a match link directly and hasn't unlocked on this device yet,
+// we show a small code-entry card (mv-code-*). On successful unlock we reload
+// the page so the full "your child is at X" banner renders via highlightMyChildrenOnPitch.
+function wireMatchPageUnlock(lineup, players) {
+  const btn = document.getElementById('mv-code-submit');
+  const input = document.getElementById('mv-code-input');
+  const msg = document.getElementById('mv-code-msg');
+  if (!btn || !input || !msg) return;
+  const tryUnlock = async () => {
+    const raw = (input.value || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!raw) return;
+    msg.textContent = 'Checking…'; msg.className = 'muted';
+    const { data, error } = await supabase.rpc('validate_player_code', {
+      p_lineup_id: lineup.id,
+      p_code:      raw
+    });
+    if (error) { msg.textContent = 'Check failed: ' + error.message; msg.className = 'error'; return; }
+    const matchedIds = (data || []).map(r => r.player_id || r);
+    if (!matchedIds.length) { msg.textContent = 'Code not recognised. Ask your coach.'; msg.className = 'error'; return; }
+    const matchedNames = players.filter(p => matchedIds.includes(p.id)).map(p => p.name);
+
+    // Persist to the same cookie/localStorage the avail page uses
+    const currentUnlocked = new Set(getUnlockedPlayers(lineup.team_id));
+    matchedIds.forEach(id => currentUnlocked.add(id));
+    setUnlockedPlayers(lineup.team_id, [...currentUnlocked]);
+
+    // Remember the code per player so future availability submissions still work
+    const codes = (() => { try { return JSON.parse(localStorage.getItem('pv_codes_' + lineup.team_id) || '{}'); } catch { return {}; } })();
+    matchedIds.forEach(id => { codes[id] = raw; });
+    try { localStorage.setItem('pv_codes_' + lineup.team_id, JSON.stringify(codes)); } catch {}
+
+    msg.textContent = `✓ Unlocked ${matchedNames.join(', ') || matchedIds.length + ' player(s)'}`; msg.className = 'ok';
+    setTimeout(() => location.reload(), 600);
+  };
+  btn.addEventListener('click', tryUnlock);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); } });
 }
 
 // ---------- Coach availability responses panel (button + modal) ----------
@@ -1475,6 +1540,15 @@ async function renderTeamDashboard(user, teamId) {
     renderMembersTab(user);
   } else if (activeTab === 'help') {
     renderHelpTab(canEdit, role);
+  } else if (activeTab === 'formations') {
+    // Placeholder — full Formations management UI is a later step in the redesign.
+    const host = document.getElementById('tab-content');
+    host.innerHTML = `
+      <div class="card">
+        <h2>Formations</h2>
+        <p class="muted">Formation management will live here soon. For now, you can create and edit custom formations from inside a match — open any match and go to the <strong>Formation</strong> tab.</p>
+      </div>
+    `;
   }
 }
 
