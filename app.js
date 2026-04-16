@@ -3537,38 +3537,48 @@ function openStatusModal() {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   overlay.querySelector('[data-close]').onclick = close;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-  overlay.querySelectorAll('[data-pick-status]').forEach(btn => {
-    btn.onclick = async () => {
-      const nextStatus = btn.dataset.pickStatus;
-      if (nextStatus === currentStatus) { close(); return; }
-      if (nextStatus !== 'draft' && !cur.game_date) {
-        const msg = overlay.querySelector('#status-modal-msg');
-        if (msg) msg.textContent = 'Set a game date before changing status.';
-        return;
-      }
-      // Disable all buttons while saving
-      overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = true);
-      const { data, error } = await supabase.from('lineups')
-        .update({ lineup_status: nextStatus })
-        .eq('id', cur.id).select().single();
-      if (error) {
-        const msg = overlay.querySelector('#status-modal-msg');
-        if (msg) msg.textContent = 'Failed: ' + error.message;
-        overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = false);
-        return;
-      }
-      editor.current.lineup_status = data.lineup_status;
-      editor.current.published = data.published;
-      editor.current.published_at = data.published_at;
-      const idx = editor.lineups.findIndex(l => l.id === data.id);
-      if (idx >= 0) editor.lineups[idx] = data;
-      await logAudit(editor.team.id, 'lineup', data.id, 'status:' + nextStatus, { from: currentStatus });
-      close();
-      rerenderBody();
-      renderLineupsTab();
-    };
+  // Use event delegation so clicks on child elements (icon, text) still trigger
+  overlay.addEventListener('click', async (e) => {
+    // Close on backdrop click
+    if (e.target === overlay) { close(); return; }
+
+    const btn = e.target.closest('[data-pick-status]');
+    if (!btn) return;
+
+    const nextStatus = btn.dataset.pickStatus;
+    if (nextStatus === currentStatus) { close(); return; }
+    if (nextStatus !== 'draft' && !cur.game_date) {
+      const msg = overlay.querySelector('#status-modal-msg');
+      if (msg) msg.textContent = 'Set a game date before changing status.';
+      return;
+    }
+    // Disable all buttons while saving
+    overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = true);
+    const { data, error } = await supabase.from('lineups')
+      .update({ lineup_status: nextStatus })
+      .eq('id', cur.id).select().single();
+    if (error) {
+      const msg = overlay.querySelector('#status-modal-msg');
+      if (msg) msg.textContent = 'Failed: ' + error.message;
+      overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = false);
+      return;
+    }
+    editor.current.lineup_status = data.lineup_status;
+    editor.current.published = data.published;
+    editor.current.published_at = data.published_at;
+    const idx = editor.lineups.findIndex(l => l.id === data.id);
+    if (idx >= 0) editor.lineups[idx] = data;
+    await logAudit(editor.team.id, 'lineup', data.id, 'status:' + nextStatus, { from: currentStatus });
+    close();
+    rerenderBody();
+    renderLineupsTab();
+
+    // After switching to availability, auto-open the share modal
+    // so the coach can immediately send the link to parents
+    if (nextStatus === 'availability') {
+      openShareModal({ lineupId: cur.id });
+    }
   });
 }
 
