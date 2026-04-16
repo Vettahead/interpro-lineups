@@ -15,6 +15,9 @@
 <body>
   <header>
     <div class="header-main">
+      <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" hidden>
+        <span class="nav-toggle-bars" aria-hidden="true"></span>
+      </button>
       <div class="header-title" id="header-title">
         <img src="logo.png" alt="Interpro" class="brand-logo" />
         <h1>Interpro Coach / Manager Assistant</h1>
@@ -24,6 +27,9 @@
     </div>
     <div id="header-tabs" class="header-tabs"></div>
   </header>
+
+  <div id="nav-drawer-overlay" class="nav-drawer-overlay" hidden></div>
+  <aside id="nav-drawer" class="nav-drawer" hidden aria-hidden="true"></aside>
 
   <main id="app">
     <p class="loading">Loading…</p>

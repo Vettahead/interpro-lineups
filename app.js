@@ -136,6 +136,14 @@ function resetHeader() {
   if (tabsEl) tabsEl.innerHTML = '';
   const plusEl = document.getElementById('global-plus');
   if (plusEl) plusEl.innerHTML = '';
+  // Hide the hamburger + drawer on auth/teams-home/parent-view
+  const navToggle = document.getElementById('nav-toggle');
+  if (navToggle) { navToggle.hidden = true; navToggle.setAttribute('aria-expanded', 'false'); }
+  const drawer = document.getElementById('nav-drawer');
+  if (drawer) { drawer.hidden = true; drawer.innerHTML = ''; drawer.classList.remove('open'); }
+  const overlay = document.getElementById('nav-drawer-overlay');
+  if (overlay) { overlay.hidden = true; overlay.classList.remove('open'); }
+  document.body.classList.remove('drawer-open');
 }
 
 async function render() {
@@ -585,6 +593,105 @@ async function handleGlobalPlusAction(action, user, teamId) {
     }
     return;
   }
+}
+
+// ---------- Phone hamburger drawer ----------
+// Shows a slide-in drawer on phone containing the team header + vertical tabs.
+// Desktop layout is untouched (the hamburger button hides via CSS ≥900px).
+function renderNavDrawer(user, teamId, team, role, canEdit) {
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('nav-drawer');
+  const overlay = document.getElementById('nav-drawer-overlay');
+  if (!toggle || !drawer || !overlay) return;
+
+  // CSS hides the hamburger on desktop (≥900px), so it's safe to unhide here.
+  toggle.hidden = false;
+
+  const tabs = [
+    { id: 'fixtures', label: 'Fixtures', icon: '📅' },
+    { id: 'squad',    label: 'Squad',    icon: '👥' },
+    { id: 'lineups',  label: 'Matches',  icon: '⚽' },
+    { id: 'plays',    label: 'Plays',    icon: '📋' },
+    ...(canEdit ? [{ id: 'members', label: 'Members', icon: '🛡️' }] : []),
+    { id: 'help',     label: 'Help',     icon: '❓' },
+  ];
+
+  drawer.innerHTML = `
+    <div class="nav-drawer-head">
+      <div class="nav-drawer-team">
+        <strong>${escapeHtml(team.name)}</strong>
+        <span class="role-chip">${escapeHtml(role)}</span>
+      </div>
+      <button type="button" class="nav-drawer-close" aria-label="Close menu">✕</button>
+    </div>
+    <a href="#" class="nav-drawer-back" data-nav-action="back">← Your teams</a>
+    <nav class="nav-drawer-tabs">
+      ${tabs.map(t => `
+        <button type="button" class="nav-drawer-tab ${activeTab === t.id ? 'active' : ''}" data-nav-tab="${t.id}">
+          <span class="ndt-ico" aria-hidden="true">${t.icon}</span>
+          <span class="ndt-label">${t.label}</span>
+        </button>
+      `).join('')}
+    </nav>
+  `;
+
+  const closeDrawer = () => {
+    drawer.classList.remove('open');
+    overlay.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+    drawer.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('drawer-open');
+    document.removeEventListener('keydown', onKey, true);
+    // Hide after transition so focus can't land on invisible items
+    setTimeout(() => {
+      if (!drawer.classList.contains('open')) {
+        drawer.hidden = true;
+        overlay.hidden = true;
+      }
+    }, 260);
+  };
+  const openDrawer = () => {
+    drawer.hidden = false;
+    overlay.hidden = false;
+    // next frame to allow CSS transition
+    requestAnimationFrame(() => {
+      drawer.classList.add('open');
+      overlay.classList.add('open');
+      toggle.setAttribute('aria-expanded', 'true');
+      drawer.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('drawer-open');
+      document.addEventListener('keydown', onKey, true);
+    });
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') { closeDrawer(); toggle.focus(); }
+  }
+
+  // .onclick assignment replaces any prior handler, safe across re-renders
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    if (drawer.classList.contains('open')) closeDrawer(); else openDrawer();
+  };
+  overlay.onclick = closeDrawer;
+  drawer.querySelector('.nav-drawer-close').onclick = closeDrawer;
+
+  drawer.querySelector('[data-nav-action="back"]').onclick = (e) => {
+    e.preventDefault();
+    closeDrawer();
+    location.hash = '';
+  };
+
+  drawer.querySelectorAll('[data-nav-tab]').forEach(btn => {
+    btn.onclick = async () => {
+      const next = btn.dataset.navTab;
+      closeDrawer();
+      if (next === activeTab) return;
+      try { await flushAutosave(); } catch (_) {}
+      activeTab = next;
+      openCards.clear();
+      renderTeamDashboard(user, teamId);
+    };
+  });
 }
 
 // ---------- Teams home ----------
@@ -1323,6 +1430,9 @@ async function renderTeamDashboard(user, teamId) {
 
   // Global "+" quick-create menu — coaches/admins only
   renderGlobalPlus(user, teamId, canEdit);
+
+  // Phone hamburger drawer — mirrors the horizontal tabs
+  renderNavDrawer(user, teamId, team, role, canEdit);
 
   appEl.innerHTML = `<div id="tab-content"></div>`;
 
