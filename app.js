@@ -528,19 +528,9 @@ function renderGlobalPlus(user, teamId, canEdit) {
 
 async function handleGlobalPlusAction(action, user, teamId) {
   if (action === 'match') {
-    _pendingLineupLoad = null;
-    activeTab = 'lineups';
-    openCards.clear();
-    await renderTeamDashboard(user, teamId);
-    // Explicitly reset the in-memory current lineup to a fresh blank state
-    if (editor && editor.mode === 'lineup') {
-      if (hasUnsaved && typeof hasUnsaved === 'function' && hasUnsaved()) {
-        // keep whatever the user had — they already got redirected, treat as intent
-      }
-      editor.current = newLineupState();
-      try { _lastSavedHash = _lineupContentHash(editor.current); } catch (_) {}
-      renderLineupsTab();
-    }
+    // Open the guided wizard — it stashes values to _pendingLineupLoad and
+    // switches to the Matches tab on Create.
+    openMatchWizard(user, teamId);
     return;
   }
   if (action === 'player') {
@@ -3354,6 +3344,250 @@ async function uploadPlayerPhoto(playerId, file) {
   const updRes = await supabase.from('players').update({ photo_url: publicUrl }).eq('id', playerId).select().single();
   if (updRes.error) throw updRes.error;
   return updRes.data;
+}
+
+// ---------- Match creation wizard ----------
+// A guided 3-step modal for setting up a new match: basics, formation, review.
+// On Create, stashes values into _pendingLineupLoad and switches to Matches tab,
+// so the existing renderLineupsTab pick-up logic applies them to a fresh state.
+function openMatchWizard(user, teamId) {
+  const customFormations = (editor && editor.customFormations) ? editor.customFormations : [];
+  const formations = allFormations(customFormations); // name -> {pos, lbl}
+  const formationNames = Object.keys(formations);
+
+  // Default date = today in local YYYY-MM-DD
+  const today = new Date();
+  const pad2 = n => String(n).padStart(2, '0');
+  const defaultDate = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+
+  const state = {
+    opponent: '',
+    game_date: defaultDate,
+    kickoff_time: '',
+    home_away: 'home',
+    match_type: 'league',
+    formation: formationNames.includes('4-3-3') ? '4-3-3' : formationNames[0],
+    notes: ''
+  };
+  let step = 1;
+  const TOTAL_STEPS = 3;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'mw-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Create a new match');
+  document.body.appendChild(overlay);
+  document.body.classList.add('mw-open');
+
+  function close() {
+    overlay.remove();
+    document.body.classList.remove('mw-open');
+    document.removeEventListener('keydown', onKey, true);
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+  document.addEventListener('keydown', onKey, true);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+
+  function miniPitchSvg(pos, lbl) {
+    // Tiny pitch preview with dots
+    const dots = pos.map((p, i) => {
+      const [x, y] = p;
+      return `<circle cx="${x}" cy="${y}" r="3.5" fill="#1e3a8a" stroke="#fff" stroke-width="0.6"/>`;
+    }).join('');
+    return `
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="mw-mini-pitch" aria-hidden="true">
+        <rect x="0" y="0" width="100" height="100" fill="#2e7d32"/>
+        <rect x="2" y="2" width="96" height="96" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="0.4"/>
+        <line x1="0" y1="50" x2="100" y2="50" stroke="rgba(255,255,255,0.7)" stroke-width="0.4"/>
+        <circle cx="50" cy="50" r="8" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="0.4"/>
+        ${dots}
+      </svg>
+    `;
+  }
+
+  function renderStep1() {
+    return `
+      <div class="mw-body">
+        <h3 class="mw-step-title">Who &amp; when</h3>
+        <p class="mw-step-sub">Fill what you know — you can change it later.</p>
+        <label class="mw-field">
+          <span>Opponent</span>
+          <input type="text" id="mw-opponent" value="${escapeHtml(state.opponent)}" placeholder="e.g. Roverton Rangers" autocomplete="off" />
+        </label>
+        <div class="mw-row">
+          <label class="mw-field">
+            <span>Match date</span>
+            <input type="date" id="mw-date" value="${escapeHtml(state.game_date)}" />
+          </label>
+          <label class="mw-field">
+            <span>Kick-off</span>
+            <input type="time" id="mw-kickoff" value="${escapeHtml(state.kickoff_time)}" />
+          </label>
+        </div>
+        <div class="mw-row">
+          <label class="mw-field">
+            <span>Home / Away</span>
+            <select id="mw-homeaway">
+              <option value="home" ${state.home_away === 'home' ? 'selected' : ''}>Home</option>
+              <option value="away" ${state.home_away === 'away' ? 'selected' : ''}>Away</option>
+            </select>
+          </label>
+          <label class="mw-field">
+            <span>Match type</span>
+            <select id="mw-type">
+              <option value="league"   ${state.match_type === 'league'   ? 'selected' : ''}>League</option>
+              <option value="cup"      ${state.match_type === 'cup'      ? 'selected' : ''}>Cup</option>
+              <option value="friendly" ${state.match_type === 'friendly' ? 'selected' : ''}>Friendly</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStep2() {
+    const cards = formationNames.map(name => {
+      const f = formations[name];
+      const isCustom = !!f._customId;
+      const sel = state.formation === name ? ' selected' : '';
+      return `
+        <button type="button" class="mw-form-card${sel}" data-formation="${escapeHtml(name)}">
+          ${miniPitchSvg(f.pos, f.lbl)}
+          <div class="mw-form-name">
+            ${escapeHtml(name)}
+            ${isCustom ? '<span class="mw-badge">custom</span>' : ''}
+          </div>
+        </button>
+      `;
+    }).join('');
+    return `
+      <div class="mw-body">
+        <h3 class="mw-step-title">Pick a formation</h3>
+        <p class="mw-step-sub">You can switch it any time from the pitch.</p>
+        <div class="mw-form-grid">${cards}</div>
+      </div>
+    `;
+  }
+
+  function renderStep3() {
+    const dateLabel = state.game_date
+      ? new Date(state.game_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+      : '—';
+    const kickoffLabel = state.kickoff_time || '—';
+    return `
+      <div class="mw-body">
+        <h3 class="mw-step-title">Ready to create</h3>
+        <p class="mw-step-sub">We'll open a blank pitch with these settings — you can fill in the lineup next.</p>
+        <div class="mw-summary">
+          <div class="mw-sum-row"><span>Opponent</span><strong>${escapeHtml(state.opponent) || '<em class="muted">(not set)</em>'}</strong></div>
+          <div class="mw-sum-row"><span>Date</span><strong>${escapeHtml(dateLabel)}</strong></div>
+          <div class="mw-sum-row"><span>Kick-off</span><strong>${escapeHtml(kickoffLabel)}</strong></div>
+          <div class="mw-sum-row"><span>Venue</span><strong>${state.home_away === 'home' ? 'Home' : 'Away'}</strong></div>
+          <div class="mw-sum-row"><span>Type</span><strong>${escapeHtml(state.match_type)}</strong></div>
+          <div class="mw-sum-row"><span>Formation</span><strong>${escapeHtml(state.formation)}</strong></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderFooter() {
+    return `
+      <div class="mw-footer">
+        <div class="mw-steps-indicator">
+          ${[1, 2, 3].map(n => `<span class="mw-dot${n === step ? ' active' : n < step ? ' done' : ''}"></span>`).join('')}
+          <span class="mw-step-label">Step ${step} of ${TOTAL_STEPS}</span>
+        </div>
+        <div class="mw-actions">
+          ${step > 1 ? `<button type="button" class="mw-btn" id="mw-back">Back</button>` : `<button type="button" class="mw-btn" id="mw-cancel">Cancel</button>`}
+          ${step < TOTAL_STEPS
+            ? `<button type="button" class="mw-btn mw-primary" id="mw-next">Next →</button>`
+            : `<button type="button" class="mw-btn mw-primary" id="mw-finish">Create match</button>`}
+        </div>
+      </div>
+    `;
+  }
+
+  function render() {
+    const body = step === 1 ? renderStep1() : step === 2 ? renderStep2() : renderStep3();
+    overlay.innerHTML = `
+      <div class="mw-card" role="document">
+        <div class="mw-head">
+          <h2>New match</h2>
+          <button type="button" class="mw-close" aria-label="Close">✕</button>
+        </div>
+        ${body}
+        ${renderFooter()}
+      </div>
+    `;
+    wire();
+  }
+
+  function wire() {
+    overlay.querySelector('.mw-close').onclick = close;
+
+    if (step === 1) {
+      const op = overlay.querySelector('#mw-opponent');
+      const dt = overlay.querySelector('#mw-date');
+      const ko = overlay.querySelector('#mw-kickoff');
+      const ha = overlay.querySelector('#mw-homeaway');
+      const tp = overlay.querySelector('#mw-type');
+      op.addEventListener('input', () => { state.opponent = op.value; });
+      dt.addEventListener('change', () => { state.game_date = dt.value; });
+      ko.addEventListener('change', () => { state.kickoff_time = ko.value; });
+      ha.addEventListener('change', () => { state.home_away = ha.value; });
+      tp.addEventListener('change', () => { state.match_type = tp.value; });
+      setTimeout(() => op.focus(), 40);
+    } else if (step === 2) {
+      overlay.querySelectorAll('.mw-form-card').forEach(btn => {
+        btn.onclick = () => {
+          state.formation = btn.dataset.formation;
+          overlay.querySelectorAll('.mw-form-card').forEach(c => c.classList.remove('selected'));
+          btn.classList.add('selected');
+        };
+      });
+    }
+
+    const backBtn = overlay.querySelector('#mw-back');
+    if (backBtn) backBtn.onclick = () => { step--; render(); };
+    const cancelBtn = overlay.querySelector('#mw-cancel');
+    if (cancelBtn) cancelBtn.onclick = close;
+    const nextBtn = overlay.querySelector('#mw-next');
+    if (nextBtn) nextBtn.onclick = () => { step++; render(); };
+    const finishBtn = overlay.querySelector('#mw-finish');
+    if (finishBtn) finishBtn.onclick = async () => { await finish(); };
+  }
+
+  async function finish() {
+    // Build a partial lineup state to be picked up by renderLineupsTab
+    const payload = {
+      opponent: (state.opponent || '').trim(),
+      game_date: state.game_date,
+      kickoff_time: state.kickoff_time || '',
+      home_away: state.home_away,
+      match_type: state.match_type,
+      formation: state.formation
+    };
+    // If a custom formation is chosen, include its pos/lbl so the lineup renders with them
+    const cf = customFormations.find(f => f.name === state.formation);
+    if (cf && cf.data && Array.isArray(cf.data.pos) && Array.isArray(cf.data.lbl)) {
+      payload.pos = cf.data.pos.map(p => [...p]);
+      payload.lbl = [...cf.data.lbl];
+    }
+    _pendingLineupLoad = payload;
+
+    close();
+    try { await flushAutosave(); } catch (_) {}
+    activeTab = 'lineups';
+    openCards.clear();
+    await renderTeamDashboard(user, teamId);
+  }
+
+  render();
 }
 
 // Photo cropper: shows the picked image in a square frame, lets user drag + zoom,
