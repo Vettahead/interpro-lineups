@@ -3857,7 +3857,8 @@ function applyMatchDecorations(rootEl, motm, goalscorers) {
       star.title = 'Man of the Match';
       star.textContent = '★';
       // Top-left so we don't collide with availability dot (bottom-right) or goal ball (top-right).
-      star.style.cssText = 'position:absolute;top:-6px;left:-6px;width:20px;height:20px;border-radius:50%;background:#ffc107;color:#3a2a00;font-size:13px;line-height:20px;text-align:center;font-weight:900;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none';
+      // Flexbox centering + oversized glyph so the star visually fills the gold disc rather than sitting small in the middle.
+      star.style.cssText = 'position:absolute;top:-7px;left:-7px;width:24px;height:24px;border-radius:50%;background:#ffc107;color:#3a2a00;font-size:20px;line-height:1;font-weight:900;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;text-shadow:0 1px 0 rgba(255,255,255,0.4)';
       chip.appendChild(star);
     }
     const goals = goalsBy[pid];
@@ -3866,8 +3867,8 @@ function applyMatchDecorations(rootEl, motm, goalscorers) {
       ball.className = 'goal-ball';
       ball.title = `${goals} goal${goals === 1 ? '' : 's'}`;
       ball.textContent = String(goals);
-      // White circle with black border + black-pentagon hint via radial-gradient — reads as a soccer ball with the count inside.
-      ball.style.cssText = 'position:absolute;top:-6px;right:-6px;min-width:22px;height:22px;padding:0 3px;border-radius:50%;background:radial-gradient(circle at 70% 30%, #111 0 4px, transparent 5px), radial-gradient(circle at 30% 70%, #111 0 4px, transparent 5px), #fff;color:#000;font-size:12px;line-height:22px;text-align:center;font-weight:900;border:2px solid #111;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none';
+      // Clean black-and-white disc with the number front-and-centre. Earlier radial-gradient "soccer ball" pattern made the digit unreadable; legibility wins.
+      ball.style.cssText = 'position:absolute;top:-7px;right:-7px;min-width:24px;height:24px;padding:0 4px;border-radius:50%;background:#fff;color:#000;font-size:14px;line-height:1;font-weight:900;border:2.5px solid #111;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif';
       chip.appendChild(ball);
     }
   });
