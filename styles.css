@@ -1677,26 +1677,31 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   gap: 0;
 }
 
-/* Desktop top bar: title left, Back / Share / +New right. */
-.me-topbar {
+/* Single unified match header (desktop): title/venue | stats | actions. */
+.me-header {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
+  align-items: center;
+  gap: 1.25rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1.25rem;
+  margin-bottom: 0.9rem;
 }
-.me-title-block { min-width: 0; }
-.me-title {
-  margin: 0;
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: var(--text);
+.me-header-left { min-width: 0; flex: 1 1 auto; }
+.me-summary-opp  { font-weight: 700; font-size: 1.05rem; color: var(--text); }
+.me-summary-meta { font-size: 0.85rem; margin-top: 0.2rem; }
+.me-header-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-shrink: 0;
 }
-.me-subtitle {
-  font-size: 0.85rem;
-  margin-top: 0.15rem;
+.me-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
 }
-.me-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
 .me-btn {
   padding: 0.5rem 0.9rem;
   border-radius: 8px;
@@ -1714,27 +1719,6 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .me-btn-share:hover { background: #162a68; color: #fff; border-color: #162a68; }
 .me-btn-new   { background: #f97316; color: #fff; border-color: #f97316; }
 .me-btn-new:hover { background: #ea6a10; color: #fff; border-color: #ea6a10; }
-
-/* Summary card: opponent/date/venue left, 4 mini-stats right-aligned. */
-.me-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 0.9rem;
-}
-.me-summary-left { min-width: 0; flex: 1 1 auto; }
-.me-summary-opp  { font-weight: 700; font-size: 1.05rem; color: var(--text); }
-.me-summary-meta { font-size: 0.85rem; margin-top: 0.2rem; }
-.me-summary-stats {
-  display: flex;
-  gap: 1.75rem;
-  flex-shrink: 0;
-}
 .me-stat { text-align: right; }
 .me-stat-label {
   font-size: 0.66rem;
@@ -1825,10 +1809,9 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .share-fab { display: none; }
 
 @media (max-width: 899px) {
-  /* On phone: hide the desktop top bar + summary card. The main app header
-     already shows the team name, and sub-tabs cover what the summary would duplicate. */
-  .me-topbar  { display: none; }
-  .me-summary { display: none; }
+  /* On phone: hide the desktop match header. The app's top bar already shows
+     the team name, and sub-tabs cover what the header would duplicate. */
+  .me-header { display: none; }
 
   /* Stack pitch on top, panel below. */
   .me-body { grid-template-columns: 1fr; }

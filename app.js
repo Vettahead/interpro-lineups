@@ -3202,32 +3202,24 @@ function renderLineupsTab() {
 
   tabEl.innerHTML = `
     <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
-      <!-- Desktop editor top bar: title left, Back/Share/+New right. Hidden on phone via CSS. -->
-      <header class="me-topbar">
-        <div class="me-title-block">
-          <h2 class="me-title">${escapeHtml(summaryOpp)}</h2>
-          <div class="me-subtitle muted">${subtitleParts.length ? escapeHtml(subtitleParts.join(' · ')) : 'Unsaved match'}</div>
-        </div>
-        <div class="me-actions">
-          <button type="button" class="me-btn me-btn-back" id="me-btn-back">← Back</button>
-          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
-          ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
-        </div>
-      </header>
-
-      <!-- Summary card: opponent/date/venue left, KICK OFF / ARRIVAL / FORMATION / STATUS right. Desktop-only via CSS. -->
-      <section class="me-summary">
-        <div class="me-summary-left">
+      <!-- Single unified match header: title + venue left, stats middle, actions right. Hidden on phone via CSS. -->
+      <header class="me-header">
+        <div class="me-header-left">
           <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
           <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
         </div>
-        <div class="me-summary-stats">
+        <div class="me-header-stats">
           <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
           <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
           <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
           <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
         </div>
-      </section>
+        <div class="me-header-actions">
+          <button type="button" class="me-btn me-btn-back" id="me-btn-back">← Back</button>
+          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
+          ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
+        </div>
+      </header>
 
       <!-- Body: pitch (top on phone / left on desktop) + sub-tab panel (below on phone / right on desktop). -->
       <div class="me-body">
