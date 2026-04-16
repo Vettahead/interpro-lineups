@@ -1557,3 +1557,28 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 @media (max-width: 480px) {
   .help-tab { padding: 0.75rem; }
 }
+
+/* Availability response count pills on match cards (Matches tab + Fixtures tab) */
+.avail-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+.avail-pills .ap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.3;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.avail-pills .ap-ic { font-weight: 700; opacity: 0.85; }
+.avail-pills .ap-av { background: #e7f5ea; color: #1e5c27; border-color: #bfe0c6; }
+.avail-pills .ap-mb { background: #fff7e0; color: #7a5a00; border-color: #f1e0a0; }
+.avail-pills .ap-un { background: #fde8e8; color: #7a1f1f; border-color: #f2bdbd; }
+.avail-pills .ap-nr { background: #eef0f3; color: #555; border-color: #d9dde3; }

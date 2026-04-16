@@ -1149,7 +1149,7 @@ async function renderTeamDashboard(user, teamId) {
     tabsEl.innerHTML = `
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
-      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Lineups</button>
+      <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
       <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
@@ -2738,6 +2738,20 @@ function renderLineupsTab() {
     editor.availability = {};
     applyAvailabilityDecorations(); // clears any stale rings
   }
+
+  // Decorate the saved-matches list on the left with availability response pills
+  const pillIds = lineups
+    .filter(l => {
+      const st = l.lineup_status || (l.published ? 'published' : 'draft');
+      return st === 'availability' || st === 'published';
+    })
+    .map(l => l.id);
+  decorateCardsWithAvailabilityCounts(
+    '#tab-content .lineup-item[data-lineup]',
+    'lineup',
+    pillIds,
+    players.length
+  );
 }
 
 // Fetch + cache availability per lineup id. Only re-fetches when the lineup changes.
@@ -2753,30 +2767,87 @@ async function ensureAvailabilityForLineup(lineupId) {
   editor.availability = Object.fromEntries((data || []).map(a => [a.player_id, a.status]));
 }
 
-// Apply/refresh gold/red/maybe markers on every chip in the current tab.
+// Apply/refresh availability dots on every chip in the current tab.
+// Green = available, amber = maybe, red = unavailable. Dots are small and sit in the
+// bottom-right corner so they don't obscure the player's name/number/photo.
+// Kept on [data-player-id] chips only (chipHtml output) — Squad tab chips use
+// data-player and are intentionally left clean (no match context to show).
 function applyAvailabilityDecorations() {
   const map = editor?.availability || {};
   document.querySelectorAll('[data-player-id]').forEach(chip => {
     const pid = chip.dataset.playerId;
     const s = map[pid];
-    // Clear previous decoration
+    // Clear previous decoration (supports rollback from older ring/badge style too)
     chip.style.boxShadow = '';
     chip.style.outline = '';
-    const existingBadge = chip.querySelector('.avail-badge');
-    if (existingBadge) existingBadge.remove();
+    const oldBadge = chip.querySelector('.avail-badge');
+    if (oldBadge) oldBadge.remove();
+    const oldDot = chip.querySelector('.avail-dot');
+    if (oldDot) oldDot.remove();
     if (!s) return;
-    if (s === 'available') {
-      chip.style.boxShadow = '0 0 0 4px #f4c430'; // gold/yellow ring
-    } else if (s === 'unavailable') {
-      chip.style.boxShadow = '0 0 0 4px #c0392b'; // red ring
-    } else if (s === 'maybe') {
-      const badge = document.createElement('div');
-      badge.className = 'avail-badge';
-      badge.textContent = '?';
-      badge.style.cssText = 'position:absolute;top:-8px;right:-8px;width:18px;height:18px;border-radius:50%;background:#b88800;color:#fff;font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,0.35);z-index:2;pointer-events:none';
-      if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
-      chip.appendChild(badge);
-    }
+    const colour = s === 'available' ? '#2e7d32'
+                 : s === 'maybe'     ? '#f9a825'
+                 : s === 'unavailable' ? '#c62828'
+                 : null;
+    if (!colour) return;
+    const dot = document.createElement('div');
+    dot.className = 'avail-dot';
+    dot.style.cssText = `position:absolute;bottom:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:${colour};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);z-index:3;pointer-events:none`;
+    if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
+    chip.appendChild(dot);
+  });
+}
+
+// Batch-fetch availability rows for a set of lineup ids and return
+// { lineupId: { available, maybe, unavailable } } counts.
+async function loadAvailabilityCountsForLineups(lineupIds) {
+  const out = {};
+  if (!lineupIds || !lineupIds.length) return out;
+  for (const id of lineupIds) out[id] = { available: 0, maybe: 0, unavailable: 0 };
+  const { data, error } = await supabase
+    .from('player_availability')
+    .select('lineup_id,status')
+    .in('lineup_id', lineupIds);
+  if (error) { console.warn('avail counts fetch failed', error); return out; }
+  for (const r of data || []) {
+    const bucket = out[r.lineup_id];
+    if (!bucket) continue;
+    if (r.status === 'available') bucket.available++;
+    else if (r.status === 'maybe') bucket.maybe++;
+    else if (r.status === 'unavailable') bucket.unavailable++;
+  }
+  return out;
+}
+
+// Render a compact row of counters (✓ ? ✗ —) summarising availability responses
+// for a given match. rosterSize lets us surface "no response yet" as a 4th number.
+function availPillsHtml(counts, rosterSize) {
+  const av = counts?.available || 0;
+  const mb = counts?.maybe || 0;
+  const un = counts?.unavailable || 0;
+  const nr = Math.max(0, (rosterSize || 0) - av - mb - un);
+  return `<div class="avail-pills" aria-label="Availability responses">
+      <span class="ap ap-av" title="Available">${av} <span class="ap-ic">✓</span></span>
+      <span class="ap ap-mb" title="Maybe">${mb} <span class="ap-ic">?</span></span>
+      <span class="ap ap-un" title="Unavailable">${un} <span class="ap-ic">✗</span></span>
+      <span class="ap ap-nr" title="No response">${nr} <span class="ap-ic">—</span></span>
+    </div>`;
+}
+
+// Lazy post-render enhancement: for each rendered match card matching the selector,
+// inject a small pill row showing response counts. Runs asynchronously after the
+// main paint so it never blocks the UI, and is a no-op if the DOM has moved on.
+async function decorateCardsWithAvailabilityCounts(selector, datasetKey, lineupIds, rosterSize) {
+  if (!lineupIds || !lineupIds.length) return;
+  const counts = await loadAvailabilityCountsForLineups(lineupIds);
+  document.querySelectorAll(selector).forEach(el => {
+    const id = el.dataset[datasetKey];
+    if (!id || !counts[id]) return;
+    if (el.querySelector('.avail-pills')) return;
+    const meta = el.querySelector('.lineup-meta');
+    const html = availPillsHtml(counts[id], rosterSize);
+    if (meta) meta.insertAdjacentHTML('afterend', html);
+    else el.insertAdjacentHTML('beforeend', html);
   });
 }
 
@@ -5249,6 +5320,21 @@ function renderFixturesTab() {
     editor.availability = {};
     applyAvailabilityDecorations();
   }
+
+  // Decorate upcoming + past match cards with response-count pills
+  const fixPillIds = [...upcomingList, ...pastList]
+    .filter(l => {
+      const st = l.lineup_status || (l.published ? 'published' : 'draft');
+      return st === 'availability' || st === 'published';
+    })
+    .map(l => l.id);
+  decorateCardsWithAvailabilityCounts(
+    '#tab-content .lineup-item[data-fix]',
+    'fix',
+    fixPillIds,
+    players.length
+  );
+
   wireFixtureEvents();
 }
 
