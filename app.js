@@ -1629,10 +1629,9 @@ async function renderTeamDashboard(user, teamId) {
       _lineupPhoneTab = 'squad';
     } else {
       current = base;
-      // No match pre-loaded → land on the Matches list so the coach can pick one
-      // (or create one). This is the primary landing state for the sidebar's
-      // "Matches" click.
-      _lineupPhoneTab = 'matches';
+      // No match pre-loaded → default sub-tab to squad (the card list is always
+      // visible at the top, so the coach picks from it first).
+      _lineupPhoneTab = 'squad';
     }
     _pendingLineupLoad = null;
     editor = {
@@ -3058,15 +3057,14 @@ function wireMatchDetailsFields(closeModal) {
 
 // Active sub-tab inside the match editor (works on both phone and desktop post-redesign).
 // Survives re-renders so the coach doesn't get bounced back to Squad.
-// Default to 'matches' so fresh sessions land on the fixtures list rather than
-// a blank Squad picker. Once a lineup is loaded, the click handler switches to 'squad'.
-let _lineupPhoneTab = 'matches';
+// Active sub-tab inside the editor panel (below the card list). Availability is
+// no longer a sub-tab — it sits permanently above the strip. Matches are the card
+// list at the top, not a sub-tab.
+let _lineupPhoneTab = 'squad';
 const _LINEUP_PHONE_TABS = [
-  { key: 'matches',   label: 'Matches',      icon: '' },
   { key: 'squad',     label: 'Squad',        icon: '' },
   { key: 'subs',      label: 'Subs',         icon: '' },
   { key: 'formation', label: 'Formation',    icon: '' },
-  { key: 'avail',     label: 'Availability', icon: '' },
   { key: 'info',      label: 'Info',         icon: '' },
 ];
 
@@ -3130,19 +3128,17 @@ function renderLineupsTab() {
     <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
   `) : '';
 
-  // Availability state for this match and count for the sub-tab badge.
+  // Availability state for this match.
   const curStatusForAvail = current?.lineup_status || (current?.published ? 'published' : 'draft');
   const availableOnThisMatch = !!current?.id && (curStatusForAvail === 'availability' || curStatusForAvail === 'published');
   const availCount = current?.id ? Object.keys(editor.availability || {}).length : 0;
 
-  // Sub-tab strip — now shown on both phone and desktop. `lineup-phone-tab[data-ptab]` class names
-  // are kept stable so wireLineupEvents selector logic still binds correctly.
+  // Sub-tab strip — Squad / Subs / Formation / Info. Availability is no longer a
+  // sub-tab; it sits permanently above this strip when a match is open.
   const subTabsHtml = `
     <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Match editor sections">
       ${_LINEUP_PHONE_TABS.map(t => {
-        const label = t.key === 'avail'
-          ? `Availability${availCount ? ` <span class="me-subtab-count">${availCount}</span>` : ''}`
-          : escapeHtml(t.label);
+        const label = escapeHtml(t.label);
         return `
           <button class="lineup-phone-tab ${_lineupPhoneTab === t.key ? 'active' : ''}"
                   role="tab"
@@ -3190,20 +3186,36 @@ function renderLineupsTab() {
   _past.sort((a, b) => (b.game_date || '').localeCompare(a.game_date || ''));
 
   const _matchCardHtml = (l) => {
-    const tLbl = l.match_type === 'friendly' ? 'Friendly' : l.match_type === 'cup' ? 'Cup' : 'League';
-    const haLbl = l.home_away === 'away' ? '(A)' : '(H)';
-    const title = (l.opponent ? 'vs ' + escapeHtml(l.opponent) : '—') + ' <span class="me-match-ha">' + haLbl + '</span>';
+    const haLbl = l.home_away === 'away' ? 'Away' : 'Home';
+    const title = l.opponent ? 'vs ' + escapeHtml(l.opponent) : '—';
     const metaParts = [
-      tLbl,
-      l.game_date ? formatDate(l.game_date) : '',
+      haLbl,
+      l.kickoff_time ? 'KO ' + escapeHtml(l.kickoff_time) : '',
       l.data?.formation ? l.data.formation : '',
     ].filter(Boolean);
     const st = l.lineup_status || (l.published ? 'published' : 'draft');
     const stLbl = st === 'published' ? 'Published' : st === 'availability' ? 'Availability' : 'Draft';
+
+    // Date block: SAT / 18 / APR — or blank if no date.
+    let dateBlock = '<div class="mc-date mc-date-none">—</div>';
+    if (l.game_date) {
+      const d = new Date(l.game_date + 'T12:00:00'); // avoid TZ shift
+      const dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+      const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      dateBlock = `<div class="mc-date">
+        <span class="mc-day">${dayNames[d.getDay()]}</span>
+        <span class="mc-num">${d.getDate()}</span>
+        <span class="mc-mon">${monthNames[d.getMonth()]}</span>
+      </div>`;
+    }
+
     return `
       <div class="me-match-card ${current?.id === l.id ? 'active' : ''}" data-me-lineup="${l.id}">
-        <div class="me-match-title">${title}</div>
-        <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
+        ${dateBlock}
+        <div class="mc-body">
+          <div class="me-match-title">${title}</div>
+          <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
+        </div>
         <div class="me-match-status me-match-status-${st}">${stLbl}</div>
         ${canEdit ? `<button class="me-match-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
       </div>
@@ -3266,69 +3278,74 @@ function renderLineupsTab() {
     ${tacticsCardHtml}
   `;
 
-  const availPanelHtml = availableOnThisMatch
-    ? `<div id="availability-panel"></div>`
-    : `<p class="muted" style="font-size:0.85rem;margin:0.25rem 0 0">No responses yet — open availability from <em>Arrange match</em> to let parents submit.</p>`;
+  // Availability bar — always visible above the editor sub-tabs when a match is open.
+  const availBarHtml = current?.id
+    ? (availableOnThisMatch
+        ? `<div class="me-avail-bar" id="availability-panel"></div>`
+        : `<div class="me-avail-bar"><p class="muted" style="font-size:0.85rem;margin:0">No availability responses yet — open availability from <em>Arrange match</em> (Info tab).</p></div>`)
+    : '';
 
   // Info panel: just the match-summary card (Arrange / Share buttons + save-msg).
-  // The old "Other saved lineups" section was removed — the Matches sub-tab above
-  // now owns the saved-lineups list, so it's redundant here.
   const infoPanelHtml = `
     <div class="me-info-block">
       ${matchSummaryHtml(current, team, canEdit)}
     </div>
   `;
 
+  // Does a saved match currently exist in the editor?
+  const hasLoadedMatch = !!current?.id;
+
   tabEl.innerHTML = `
     <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
-      <!-- Single unified match header: title + venue left, stats middle, actions right. Hidden on phone via CSS. -->
-      <header class="me-header">
-        <div class="me-header-left">
-          <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
-          <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
-        </div>
-        <div class="me-header-stats">
-          <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
-          <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
-          <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
-          <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
-        </div>
-        <div class="me-header-actions">
-          <button type="button" class="me-btn me-btn-back" id="me-btn-back">← Back</button>
-          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
-          ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
-        </div>
-      </header>
+      <!-- Card list — always visible at the top -->
+      ${matchesPanelHtml}
 
-      <!-- Body: pitch (top on phone / left on desktop) + sub-tab panel (below on phone / right on desktop). -->
-      <div class="me-body">
-        <div class="me-pitch-col">
-          <div class="card pitch-card">
-            <div class="pitch" id="pitch">
-              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-              <div class="slots-layer" id="slots-layer"></div>
-              <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
-              <div class="ball-el" id="ball-el"></div>
+      ${hasLoadedMatch ? `
+        <!-- Match header: title + stats + actions. Desktop only (hidden on phone). -->
+        <header class="me-header">
+          <div class="me-header-left">
+            <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
+            <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
+          </div>
+          <div class="me-header-stats">
+            <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
+            <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
+            <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
+            <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
+          </div>
+          <div class="me-header-actions">
+            ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
+            ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
+          </div>
+        </header>
+
+        <!-- Availability — always visible above the sub-tab strip -->
+        ${availBarHtml}
+
+        <!-- Editor body: pitch left + sub-tab panel right (desktop), stacked (phone) -->
+        <div class="me-body">
+          <div class="me-pitch-col">
+            <div class="card pitch-card">
+              <div class="pitch" id="pitch">
+                <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+                <div class="slots-layer" id="slots-layer"></div>
+                <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+                <div class="ball-el" id="ball-el"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="me-panel-col">
+            ${subTabsHtml}
+            <div class="me-panel card">
+              <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
+              <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
+              <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
+              <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
             </div>
           </div>
         </div>
 
-        <div class="me-panel-col">
-          ${subTabsHtml}
-          <div class="me-panel card">
-            <!-- Matches sub-tab: fixtures list as cards. When active, CSS hides the
-                 pitch column and lets this panel span the full width. -->
-            <div data-phone-group="matches" class="me-panel-body me-panel-body-matches">${matchesPanelHtml}</div>
-            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
-            <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
-            <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
-            <div data-phone-group="avail" class="me-panel-body">${availPanelHtml}</div>
-            <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
-          </div>
-        </div>
-      </div>
-
-      ${current?.id ? `
         <!-- Floating Share pill (phone only). Visible once a lineup is saved. -->
         <button type="button" class="share-fab" id="me-share-fab" aria-label="Share match">
           <span class="share-fab-ic" aria-hidden="true">🔗</span>
@@ -4489,9 +4506,15 @@ function wireLineupEvents() {
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       _lastSavedHash = _lineupContentHash(editor.current);
-      // Jump to Squad so the coach can immediately edit the selected match.
+      // Re-render — the editor section will appear inline below the card list
+      // with the Squad sub-tab active by default.
       _lineupPhoneTab = 'squad';
       renderLineupsTab();
+      // Scroll the editor into view (the card list stays above).
+      setTimeout(() => {
+        const editorBody = document.querySelector('.me-body');
+        if (editorBody) editorBody.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 60);
     };
   });
 

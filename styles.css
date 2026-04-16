@@ -1798,20 +1798,22 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   border-bottom-color: #f97316; /* orange-500 underline */
 }
 
-/* Sub-tab filtering applies at ALL widths now (not just phone). */
-.lineup-layout[data-phone-tab="matches"]   [data-phone-group]:not([data-phone-group="matches"])   { display: none !important; }
+/* Sub-tab filtering applies at ALL widths (Squad/Subs/Formation/Info).
+   Matches is the card list always visible at the top; Availability is a
+   permanent bar above the sub-tab strip — neither is a sub-tab. */
 .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
 .lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
 .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
-.lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
 .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
 
-/* Matches sub-tab is a full-width list, not a side panel — hide the pitch column
-   and the match header (irrelevant when browsing), and let the panel take the whole row. */
-.lineup-layout[data-phone-tab="matches"] .me-pitch-col { display: none; }
-.lineup-layout[data-phone-tab="matches"] .me-header    { display: none; }
-.lineup-layout[data-phone-tab="matches"] .me-body      { grid-template-columns: 1fr; }
-.lineup-layout[data-phone-tab="matches"] .me-panel     { padding: 0.5rem 0.75rem; }
+/* Availability bar — always visible above the editor sub-tabs when a match is open. */
+.me-avail-bar {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.6rem;
+}
 
 /* Floating Share pill — phone only, visible once a lineup is saved. */
 .share-fab { display: none; }
@@ -2533,27 +2535,26 @@ body.mw-open { overflow: hidden; }
   padding: 0 0.1rem;
 }
 
-/* 2-col grid on desktop, single column on phone. */
+/* Single-column list matching the phone mockup — even on desktop this reads
+   cleanly since the cards now have horizontal date-block + body layout. */
 .me-matches-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.6rem;
-}
-@media (min-width: 700px) {
-  .me-matches-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .me-match-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.85rem 1rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
   text-align: left;
 }
 .me-match-card:hover {
@@ -2564,20 +2565,54 @@ body.mw-open { overflow: hidden; }
   border-color: #f97316;
   box-shadow: 0 0 0 1px #f97316;
 }
+
+/* Date block on the left. */
+.mc-date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  width: 44px;
+  line-height: 1.15;
+}
+.mc-date-none { font-size: 1.3rem; color: var(--muted); justify-content: center; }
+.mc-day {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.mc-num {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.1;
+}
+.mc-mon {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* Body: opponent name + meta line. */
+.mc-body { flex: 1 1 auto; min-width: 0; }
 .me-match-title {
   font-weight: 700;
   font-size: 0.95rem;
   color: var(--text);
   padding-right: 1.5rem; /* leave room for the delete button */
-}
-.me-match-ha {
-  font-weight: 500;
-  font-size: 0.82rem;
-  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .me-match-meta {
   font-size: 0.8rem;
   color: var(--muted);
+  margin-top: 0.1rem;
 }
 
 /* Status pill inside a match card. */
@@ -2617,21 +2652,20 @@ body.mw-open { overflow: hidden; }
 .me-match-card:hover .me-match-del { opacity: 1; }
 .me-match-del:hover { background: #fee2e2; color: #b91c1c; }
 
-/* "+ New match" card — distinct styling so it reads as an action, not a real match. */
+/* "+ New match" card — dashed border, horizontal layout matching other cards. */
 .me-match-new {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
-  padding: 1.1rem 1rem;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
   background: #fff;
   border: 2px dashed var(--border);
   border-radius: 8px;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  min-height: 88px;
 }
 .me-match-new:hover {
   border-color: #f97316;
@@ -2639,7 +2673,7 @@ body.mw-open { overflow: hidden; }
   background: #fff7ed;
 }
 .me-match-new-ico {
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   font-weight: 300;
   line-height: 1;
 }
