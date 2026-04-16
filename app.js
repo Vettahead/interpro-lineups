@@ -872,6 +872,11 @@ async function renderTeamsHome(user) {
 // ---------- Parent / public view ----------
 let _parentViewPoll = null;
 let _parentViewLastHash = null;
+// Coach-side poll for live availability updates while the lineup editor is open on a
+// match in availability/published status. Cleared whenever a different lineup loads,
+// status drops to draft, or the user leaves the lineup editor entirely.
+let _coachAvailabilityPoll = null;
+let _coachAvailabilityPollLineupId = null;
 
 async function renderParentView(lineupId, opts = {}) {
   // Stop any existing poll if we're navigating away or re-rendering fresh
@@ -1065,7 +1070,7 @@ async function renderParentView(lineupId, opts = {}) {
 
       <div class="pv-footer">
         <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
-        <div class="muted" style="margin-top:0.5rem;font-size:0.7rem">Auto-updates every 15s · Last loaded ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+        <div class="muted" style="margin-top:0.5rem;font-size:0.7rem">Auto-updates every 6s · Last loaded ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
       </div>
     </div>
   `;
@@ -1114,7 +1119,7 @@ async function renderParentView(lineupId, opts = {}) {
         clearInterval(_parentViewPoll); _parentViewPoll = null; return;
       }
       renderParentView(lineupId, { fromPoll: true, mode: viewMode }).catch(e => console.warn('poll failed', e));
-    }, 15000);
+    }, 6000);
   }
 }
 
@@ -3769,9 +3774,11 @@ function renderLineupsTab() {
   if (current?.id && (curStatus === 'availability' || curStatus === 'published')) {
     renderCoachAvailabilityPanel();
     ensureAvailabilityForLineup(current.id).then(() => applyAvailabilityDecorations());
+    startCoachAvailabilityPoll(current.id);
   } else {
     editor.availability = {};
     applyAvailabilityDecorations(); // clears any stale rings
+    stopCoachAvailabilityPoll();
   }
 
   // Decorate the match cards in the Matches sub-tab with availability response pills
@@ -3789,10 +3796,12 @@ function renderLineupsTab() {
   );
 }
 
-// Fetch + cache availability per lineup id. Only re-fetches when the lineup changes.
+// Fetch availability for a lineup. Always re-fetches (the previous lineupId-keyed cache
+// silently returned stale data: once cached, parent submissions never showed up on the
+// coach's chips until they navigated away and back). The fetch is small (player_id + status)
+// so the round-trip cost is negligible vs. correctness.
 async function ensureAvailabilityForLineup(lineupId) {
   if (!lineupId) { editor.availability = {}; return; }
-  if (editor._availabilityFor === lineupId && editor.availability) return;
   editor._availabilityFor = lineupId;
   const { data, error } = await supabase
     .from('player_availability')
@@ -3832,6 +3841,35 @@ function applyAvailabilityDecorations() {
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     chip.appendChild(dot);
   });
+}
+
+// Start a coach-side poll for fresh availability data while a lineup editor is open.
+// Re-fetches every 10s, refreshes chip dots and the responses-panel tally button.
+// Idempotent: if already polling the same lineup, do nothing. If a different lineup,
+// stops the previous poll and starts a new one. Auto-stops if the editor disappears
+// or the lineup id changes underfoot.
+function startCoachAvailabilityPoll(lineupId) {
+  if (!lineupId) { stopCoachAvailabilityPoll(); return; }
+  if (_coachAvailabilityPoll && _coachAvailabilityPollLineupId === lineupId) return;
+  stopCoachAvailabilityPoll();
+  _coachAvailabilityPollLineupId = lineupId;
+  _coachAvailabilityPoll = setInterval(async () => {
+    // Bail out if the user has navigated away from the lineup editor or switched lineup
+    const stillOpen = editor && editor.current && editor.current.id === lineupId;
+    if (!stillOpen) { stopCoachAvailabilityPoll(); return; }
+    const st = editor.current.lineup_status || (editor.current.published ? 'published' : 'draft');
+    if (st !== 'availability' && st !== 'published') { stopCoachAvailabilityPoll(); return; }
+    try {
+      await ensureAvailabilityForLineup(lineupId);
+      applyAvailabilityDecorations();
+      // Refresh the tally button text so coaches see new ✅/🤔/❌ counts without reopening the modal
+      renderCoachAvailabilityPanel();
+    } catch (e) { /* swallow — next tick will retry */ }
+  }, 10000);
+}
+function stopCoachAvailabilityPoll() {
+  if (_coachAvailabilityPoll) { clearInterval(_coachAvailabilityPoll); _coachAvailabilityPoll = null; }
+  _coachAvailabilityPollLineupId = null;
 }
 
 // Decorate match-context chips with MOTM star (top-left) and goal-count ball (top-right).
