@@ -3253,6 +3253,7 @@ function renderLineupsTab() {
   const squadPanelHtml = `
     <p class="muted me-hint">Tap an empty slot on the pitch, then tap a player here to assign. Dot colour = availability.</p>
     <div class="palette" id="palette">${paletteHtml}</div>
+    ${canEdit ? `<button type="button" class="btn-full me-btn-clear-pitch" id="clear-pitch-squad">Clear pitch</button>` : ''}
   `;
 
   const subsPanelHtml = `
@@ -4529,11 +4530,14 @@ function wireLineupEvents() {
   };
 
   const clearBtn = document.getElementById('clear-pitch');
-  if (clearBtn) clearBtn.onclick = () => {
+  const clearBtn2 = document.getElementById('clear-pitch-squad');
+  const doClear = () => {
     editor.current.slots = {};
     editor.current.subs = [];
     renderLineupsTab();
   };
+  if (clearBtn) clearBtn.onclick = doClear;
+  if (clearBtn2) clearBtn2.onclick = doClear;
 
   const saveBtn = document.getElementById('save-lineup');
   if (saveBtn) saveBtn.onclick = saveLineup;
