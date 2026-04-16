@@ -1494,7 +1494,11 @@ function _lineupContentHash(c) {
     match_type: c.match_type, home_away: c.home_away,
     kickoff_time: c.kickoff_time, arrival_time: c.arrival_time, notes: c.notes,
     location_name: c.location_name, location_postcode: c.location_postcode,
-    location_lat: c.location_lat, location_lng: c.location_lng
+    location_lat: c.location_lat, location_lng: c.location_lng,
+    // include result fields so autosave fires when coach enters a score / scorers
+    our_score_ht: c.our_score_ht, opp_score_ht: c.opp_score_ht,
+    our_score_ft: c.our_score_ft, opp_score_ft: c.opp_score_ft,
+    goalscorers: c.goalscorers
   });
 }
 function scheduleAutosaveIfPublished() {
@@ -1652,7 +1656,12 @@ async function renderTeamDashboard(user, teamId) {
           location_name: l.location_name || '',
           location_postcode: l.location_postcode || '',
           location_lat: l.location_lat ?? null,
-          location_lng: l.location_lng ?? null
+          location_lng: l.location_lng ?? null,
+          our_score_ht: l.our_score_ht ?? null,
+          opp_score_ht: l.opp_score_ht ?? null,
+          our_score_ft: l.our_score_ft ?? null,
+          opp_score_ft: l.opp_score_ft ?? null,
+          goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
         };
         _lastSavedHash = _lineupContentHash(current);
         _lineupPhoneTab = 'squad';
@@ -1798,6 +1807,8 @@ const HELP_SECTIONS = [
       <p>The <strong>Save lineup</strong> button is in the match-details popup. Saved lineups appear in <strong>Matches / Lineups</strong> on the left (or, on mobile, just under the pitch).</p>
       <h4>Loading or deleting saved lineups</h4>
       <p>Click any item in <strong>Matches / Lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
+      <h4>Recording the result after the game</h4>
+      <p>Once kick-off has passed, an <strong>⚽ Result</strong> section appears at the bottom of <strong>✎ Edit match</strong>. Enter the half-time and full-time scores, and use the <strong>+ / −</strong> buttons next to each player to log who scored for our team (opposition is just a total). The picker shows the matchday squad if one was picked, or the whole squad if you skipped that step. The result then appears as a coloured chip on the match card list (green W, red L, grey D) and at the top of the Info card.</p>
       <h4>What do the coloured rings around player chips mean?</h4>
       <p>Once availability responses come in, players are visually flagged on the pitch and palette:</p>
       <ul>
@@ -2424,6 +2435,54 @@ function renderSquadTab(team, canEdit, players) {
 }
 
 // ---------- Lineups tab ----------
+// Has the match's kick-off (or end of day, if no time set) already passed?
+// Used to decide whether to show the post-match Result form on the Match details modal.
+function matchHasBeenPlayed(current) {
+  if (!current?.game_date) return false;
+  const today = new Date();
+  const pad2 = n => String(n).padStart(2, '0');
+  const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+  if (current.game_date < todayStr) return true;
+  if (current.game_date > todayStr) return false;
+  // Same day — if we have a kickoff time, treat the match as "playable to score"
+  // from kickoff onwards. If no time set, fall back to "after midday".
+  const ko = current.kickoff_time || '12:00';
+  const [hh, mm] = ko.split(':').map(Number);
+  const koDate = new Date();
+  koDate.setHours(hh || 0, mm || 0, 0, 0);
+  return new Date() >= koDate;
+}
+
+// Result helper: is at least one score field populated?
+function matchHasResult(current) {
+  return current && (
+    current.our_score_ht != null || current.opp_score_ht != null ||
+    current.our_score_ft != null || current.opp_score_ft != null ||
+    (Array.isArray(current.goalscorers) && current.goalscorers.length > 0)
+  );
+}
+
+// Builds a compact "FT 3-2 W" / "HT 1-0" badge for a lineup row. Returns
+// { text, outcome, color } where outcome is 'W' | 'D' | 'L' | null and color
+// is the chip background. Returns null when there's no score to show yet.
+// Accepts a lineup row from the DB OR a `current` editor state.
+function matchResultBadge(l) {
+  if (!l) return null;
+  const us = l.our_score_ft, them = l.opp_score_ft;
+  if (us != null && them != null) {
+    let outcome = 'D', color = '#888';
+    if (us > them) { outcome = 'W'; color = '#2a7'; }
+    else if (us < them) { outcome = 'L'; color = '#c33'; }
+    return { text: `FT ${us}-${them} ${outcome}`, outcome, color };
+  }
+  // No FT yet — fall back to half-time if entered
+  const usHt = l.our_score_ht, themHt = l.opp_score_ht;
+  if (usHt != null && themHt != null) {
+    return { text: `HT ${usHt}-${themHt}`, outcome: null, color: '#b88800' };
+  }
+  return null;
+}
+
 function newLineupState() {
   return {
     id: null,
@@ -2450,7 +2509,13 @@ function newLineupState() {
     location_name: '',
     location_postcode: '',
     location_lat: null,
-    location_lng: null
+    location_lng: null,
+    // post-match result (only filled in after the game is played)
+    our_score_ht: null,     // half-time goals for us
+    opp_score_ht: null,     // half-time goals against
+    our_score_ft: null,     // full-time goals for us
+    opp_score_ft: null,     // full-time goals against
+    goalscorers: []         // [{ player_id, count }] — only our scorers, opposition is just a total
   };
 }
 
@@ -2813,6 +2878,28 @@ function matchSummaryHtml(current, team, canEdit) {
       status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
     : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
     :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
+  // Result line — only when a score has been entered. Lists scorers underneath if any.
+  const resBadge = matchResultBadge(current);
+  let resultLine = '';
+  if (resBadge) {
+    const playersById = Object.fromEntries((editor?.players || []).map(p => [p.id, p]));
+    const scorerLine = (current.goalscorers || [])
+      .map(g => {
+        const p = playersById[g.player_id];
+        if (!p) return null;
+        const c = parseInt(g.count, 10) || 0;
+        if (c <= 0) return null;
+        return escapeHtml(p.name || '—') + (c > 1 ? ` (${c})` : '');
+      })
+      .filter(Boolean)
+      .join(', ');
+    resultLine = `
+      <div style="margin-top:0.4rem;padding:0.35rem 0.5rem;background:${resBadge.color};color:#fff;border-radius:4px;font-size:0.85rem;font-weight:700;text-align:center">
+        ${escapeHtml(resBadge.text)}
+      </div>
+      ${scorerLine ? `<div class="muted" style="font-size:0.75rem;margin-top:0.25rem">⚽ ${scorerLine}</div>` : ''}
+    `;
+  }
   const draftDisabled = status === 'draft';
   const availStyle = draftDisabled
     ? 'margin-top:0.35rem;opacity:0.5;cursor:not-allowed;background:#f0f0f0;color:#888'
@@ -2826,6 +2913,7 @@ function matchSummaryHtml(current, team, canEdit) {
       <div class="muted" style="font-size:0.8rem">${tLbl} · ${haLbl} · ${escapeHtml(dateStr)}</div>
       ${venueLine}
       ${pubLine}
+      ${resultLine}
     </div>
     ${(current.kickoff_time || current.arrival_time) ? `
       <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">
@@ -2890,6 +2978,8 @@ function matchDetailsFormHtml(current, team, canEdit) {
       ${v.lat && v.lng ? `✓ ${Number(v.lat).toFixed(5)}, ${Number(v.lng).toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${v.lat},${v.lng}" target="_blank" rel="noopener">what3words</a>` : ''}
     </div>
 
+    ${matchResultSectionHtml(current, canEdit)}
+
     <div class="lineup-actions" style="margin-top:0.75rem">
       ${canEdit ? `<button class="primary" id="save-lineup">${current.id ? 'Save' : 'Save lineup'}</button>` : ''}
       ${canEdit ? `<button class="btn-secondary" id="clear-pitch">Clear pitch</button>` : ''}
@@ -2914,6 +3004,112 @@ function matchDetailsFormHtml(current, team, canEdit) {
       `;
     })() : ''}
     <div id="md-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
+  `;
+}
+
+// Renders the post-match Result section inside the Match details modal.
+// Hidden until the match has been played (kick-off has passed) — but if the
+// coach has already entered a score, we always render it so they can edit.
+//
+// Goalscorer picker uses the matchday squad (lineup slots + subs). If the
+// match is still in availability/draft (no squad picked yet) we fall back to
+// the whole team squad so the coach isn't blocked from recording who scored.
+function matchResultSectionHtml(current, canEdit) {
+  if (!current?.id) return ''; // can't record a result on an unsaved lineup
+  const played = matchHasBeenPlayed(current);
+  const hasResult = matchHasResult(current);
+  if (!played && !hasResult) return '';
+
+  // Build candidate scorer list per the rule above.
+  const players = (editor?.players || []);
+  const slotIds = current.slots ? Object.values(current.slots).filter(Boolean) : [];
+  const subIds = Array.isArray(current.subs) ? current.subs.filter(Boolean) : [];
+  const matchdayIds = new Set([...slotIds, ...subIds]);
+  const useMatchday = matchdayIds.size > 0;
+  const candidatePlayers = useMatchday
+    ? players.filter(p => matchdayIds.has(p.id))
+    : players;
+  // Sort by number then name for a stable list.
+  candidatePlayers.sort((a, b) => {
+    const an = (a.number == null) ? 99 : a.number;
+    const bn = (b.number == null) ? 99 : b.number;
+    if (an !== bn) return an - bn;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  // Map of player_id -> count for quick lookup.
+  const scorerMap = {};
+  (current.goalscorers || []).forEach(g => {
+    if (g && g.player_id) scorerMap[g.player_id] = parseInt(g.count, 10) || 0;
+  });
+
+  const num = (v) => (v === '' || v == null) ? '' : String(v);
+  const dis = canEdit ? '' : 'disabled';
+
+  // Goal-tally sanity check — sum of our scorers vs full-time goals for us
+  let scorerTotal = 0;
+  Object.values(scorerMap).forEach(c => { scorerTotal += c; });
+  const ftUs = current.our_score_ft;
+  const tallyMismatch = (ftUs != null && ftUs !== '' && scorerTotal !== parseInt(ftUs, 10));
+
+  const playerRowsHtml = candidatePlayers.map(p => {
+    const count = scorerMap[p.id] || 0;
+    const numBadge = (p.number != null) ? `<span style="display:inline-block;min-width:1.4em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.7rem;padding:0.05em 0.3em;border-radius:3px;margin-right:0.4em">${p.number}</span>` : '';
+    return `
+      <div class="md-scorer-row" data-player-id="${escapeHtml(p.id)}" style="display:flex;align-items:center;gap:0.4rem;padding:0.25rem 0;border-top:1px solid #eee">
+        <div style="flex:1;font-size:0.85rem">${numBadge}${escapeHtml(p.name || '—')}</div>
+        <button type="button" class="md-scorer-minus" ${dis} aria-label="Decrease goals" style="width:1.7em;height:1.7em;border:1px solid #ccc;background:#fff;border-radius:4px;cursor:pointer">−</button>
+        <input type="number" class="md-scorer-count" value="${count}" min="0" step="1" ${dis}
+          style="width:3em;text-align:center;padding:0.2em;font-size:0.85rem" />
+        <button type="button" class="md-scorer-plus" ${dis} aria-label="Increase goals" style="width:1.7em;height:1.7em;border:1px solid #ccc;background:#fff;border-radius:4px;cursor:pointer">+</button>
+      </div>`;
+  }).join('');
+
+  const scorerSourceLine = useMatchday
+    ? `<div class="muted" style="font-size:0.7rem;margin-bottom:0.25rem">Showing matchday squad (${candidatePlayers.length} players). Add a sub on the Subs tab if a scorer is missing.</div>`
+    : `<div class="muted" style="font-size:0.7rem;margin-bottom:0.25rem">No matchday squad picked yet — showing whole squad.</div>`;
+
+  return `
+    <div style="margin-top:1rem;padding-top:0.75rem;border-top:2px solid #1e3a8a">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem">
+        <strong style="font-size:0.95rem">⚽ Result</strong>
+        ${!played ? '<span class="muted" style="font-size:0.7rem">(KO not yet — entering early)</span>' : ''}
+      </div>
+
+      <div class="sc-row-2" style="gap:0.5rem">
+        <div>
+          <label style="font-size:0.75rem">Half-time — Us</label>
+          <input type="number" id="l-ht-us" value="${escapeHtml(num(current.our_score_ht))}" min="0" step="1" placeholder="—" ${dis} />
+        </div>
+        <div>
+          <label style="font-size:0.75rem">Half-time — ${escapeHtml(current.opponent || 'Them')}</label>
+          <input type="number" id="l-ht-opp" value="${escapeHtml(num(current.opp_score_ht))}" min="0" step="1" placeholder="—" ${dis} />
+        </div>
+      </div>
+
+      <div class="sc-row-2" style="gap:0.5rem;margin-top:0.4rem">
+        <div>
+          <label style="font-size:0.75rem">Full-time — Us</label>
+          <input type="number" id="l-ft-us" value="${escapeHtml(num(current.our_score_ft))}" min="0" step="1" placeholder="—" ${dis} />
+        </div>
+        <div>
+          <label style="font-size:0.75rem">Full-time — ${escapeHtml(current.opponent || 'Them')}</label>
+          <input type="number" id="l-ft-opp" value="${escapeHtml(num(current.opp_score_ft))}" min="0" step="1" placeholder="—" ${dis} />
+        </div>
+      </div>
+
+      <div style="margin-top:0.6rem">
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <strong style="font-size:0.85rem">Our goalscorers</strong>
+          <span class="muted" style="font-size:0.7rem">Total: <strong${tallyMismatch ? ' style="color:#c33"' : ''}>${scorerTotal}</strong>${ftUs != null && ftUs !== '' ? ` / ${ftUs}` : ''}</span>
+        </div>
+        ${scorerSourceLine}
+        ${candidatePlayers.length === 0
+          ? `<div class="muted" style="font-size:0.8rem;font-style:italic;padding:0.4rem 0">No players in the squad yet.</div>`
+          : `<div id="md-scorers-list">${playerRowsHtml}</div>`}
+        ${tallyMismatch ? `<div class="muted" style="font-size:0.7rem;color:#c33;margin-top:0.25rem">⚠ Scorer total (${scorerTotal}) doesn't match full-time goals (${ftUs}).</div>` : ''}
+      </div>
+    </div>
   `;
 }
 
@@ -3027,6 +3223,53 @@ function wireMatchDetailsFields(closeModal) {
     const msg = overlay.querySelector('#l-venue-msg');
     if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
   };
+
+  // ----- Post-match Result inputs -----
+  // Wired only when the game has actually been played (the section is rendered
+  // by matchResultSectionHtml). Inputs autosave via the standard hash mechanism,
+  // so we don't need an explicit Save click here — typing is enough once the
+  // lineup has an id. We re-render the body when goals change so the totals
+  // and the tally-mismatch warning update live.
+  const intOrNull = (v) => {
+    const s = String(v || '').trim();
+    if (s === '') return null;
+    const n = parseInt(s, 10);
+    return isNaN(n) ? null : n;
+  };
+  const htUsEl  = overlay.querySelector('#l-ht-us');
+  const htOppEl = overlay.querySelector('#l-ht-opp');
+  const ftUsEl  = overlay.querySelector('#l-ft-us');
+  const ftOppEl = overlay.querySelector('#l-ft-opp');
+  if (htUsEl)  htUsEl.oninput  = e => { editor.current.our_score_ht = intOrNull(e.target.value); };
+  if (htOppEl) htOppEl.oninput = e => { editor.current.opp_score_ht = intOrNull(e.target.value); };
+  // FT us drives the tally-vs-scorers warning. Don't rerender on every keystroke
+  // (it would steal focus from the number input mid-typing) — refresh on blur.
+  if (ftUsEl) {
+    ftUsEl.oninput = e => { editor.current.our_score_ft = intOrNull(e.target.value); };
+    ftUsEl.onblur  = () => rerenderBody();
+  }
+  if (ftOppEl) ftOppEl.oninput = e => { editor.current.opp_score_ft = intOrNull(e.target.value); };
+
+  overlay.querySelectorAll('.md-scorer-row').forEach(row => {
+    const pid = row.dataset.playerId;
+    // Update editor state without rerendering — used while typing into the number
+    // input so the field doesn't lose focus mid-keystroke.
+    const writeOnly = (n) => {
+      const safe = Math.max(0, parseInt(n, 10) || 0);
+      editor.current.goalscorers = (editor.current.goalscorers || []).filter(g => g.player_id !== pid);
+      if (safe > 0) editor.current.goalscorers.push({ player_id: pid, count: safe });
+    };
+    const setCount = (n) => { writeOnly(n); rerenderBody(); };
+    const countEl = row.querySelector('.md-scorer-count');
+    const minusEl = row.querySelector('.md-scorer-minus');
+    const plusEl  = row.querySelector('.md-scorer-plus');
+    if (countEl) {
+      countEl.oninput = e => writeOnly(e.target.value);
+      countEl.onblur  = () => rerenderBody();
+    }
+    if (minusEl) minusEl.onclick = () => setCount((parseInt(countEl?.value, 10) || 0) - 1);
+    if (plusEl)  plusEl.onclick  = () => setCount((parseInt(countEl?.value, 10) || 0) + 1);
+  });
 
   overlay.querySelectorAll('.lineup-status-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -3249,6 +3492,14 @@ function renderLineupsTab() {
       </div>`;
     }
 
+    // Result chip — shown only when a score has been entered. Sits above the
+    // status pill on past matches so the season-at-a-glance is the score, not
+    // the publish state.
+    const resBadge = matchResultBadge(l);
+    const resChipHtml = resBadge
+      ? `<div class="me-match-result" style="font-weight:700;font-size:0.78rem;color:#fff;background:${resBadge.color};padding:0.15rem 0.4rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em">${escapeHtml(resBadge.text)}</div>`
+      : '';
+
     return `
       <div class="me-match-card ${current?.id === l.id ? 'active' : ''}" data-me-lineup="${l.id}">
         ${dateBlock}
@@ -3256,7 +3507,10 @@ function renderLineupsTab() {
           <div class="me-match-title">${title}</div>
           <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
         </div>
-        <div class="me-match-status me-match-status-${st}">${stLbl}</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.2rem">
+          ${resChipHtml}
+          <div class="me-match-status me-match-status-${st}">${stLbl}</div>
+        </div>
         ${canEdit ? `<button class="me-match-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
       </div>
     `;
@@ -3939,8 +4193,26 @@ async function uploadPlayerPhoto(playerId, file) {
 // A guided 3-step modal for setting up a new match: basics, formation, review.
 // On Create, stashes values into _pendingLineupLoad and switches to Matches tab,
 // so the existing renderLineupsTab pick-up logic applies them to a fresh state.
-function openMatchWizard(user, teamId) {
-  const customFormations = (editor && editor.customFormations) ? editor.customFormations : [];
+async function openMatchWizard(user, teamId) {
+  // Always fetch fresh custom formations from the DB. Previously we read from
+  // editor.customFormations, but that was only populated when certain tabs
+  // (Matches/Plays/Members/Fixtures) were the *current* render. Opening the
+  // wizard via the desktop sidebar "+" while sat on Squad/Help/Formations/Admin
+  // would silently fall back to "[]" — i.e. preset formations only. Fetching
+  // here makes the wizard correct regardless of which tab launched it.
+  let customFormations = (editor && editor.customFormations) ? editor.customFormations : [];
+  try {
+    const { data, error } = await supabase
+      .from('formations')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('created_at', { ascending: true });
+    if (!error && Array.isArray(data)) {
+      customFormations = data;
+      // Cache back so other code paths see the fresh list too.
+      if (editor) editor.customFormations = customFormations;
+    }
+  } catch (_) { /* fall through with whatever we already had in editor */ }
   const formations = allFormations(customFormations); // name -> {pos, lbl}
   const formationNames = Object.keys(formations);
   const team = editor?.team || null;
@@ -4930,7 +5202,12 @@ function wireLineupEvents() {
         location_name: l.location_name || '',
         location_postcode: l.location_postcode || '',
         location_lat: l.location_lat ?? null,
-        location_lng: l.location_lng ?? null
+        location_lng: l.location_lng ?? null,
+        our_score_ht: l.our_score_ht ?? null,
+        opp_score_ht: l.opp_score_ht ?? null,
+        our_score_ft: l.our_score_ft ?? null,
+        opp_score_ft: l.opp_score_ft ?? null,
+        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       // Mark this state as already-saved so autosave doesn't fire on first render
@@ -4975,7 +5252,12 @@ function wireLineupEvents() {
         location_name: l.location_name || '',
         location_postcode: l.location_postcode || '',
         location_lat: l.location_lat ?? null,
-        location_lng: l.location_lng ?? null
+        location_lng: l.location_lng ?? null,
+        our_score_ht: l.our_score_ht ?? null,
+        opp_score_ht: l.opp_score_ht ?? null,
+        our_score_ft: l.our_score_ft ?? null,
+        opp_score_ft: l.opp_score_ft ?? null,
+        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       _lastSavedHash = _lineupContentHash(editor.current);
@@ -5898,6 +6180,13 @@ async function saveLineupWithMsg(msgEl) {
     locLng = team.home_ground_lng ?? null;
   }
 
+  // Normalise goalscorers: drop 0-count entries, coerce count to int.
+  const cleanScorers = Array.isArray(current.goalscorers)
+    ? current.goalscorers
+        .map(g => ({ player_id: g.player_id, count: parseInt(g.count, 10) || 0 }))
+        .filter(g => g.player_id && g.count > 0)
+    : [];
+
   const payload = {
     team_id: team.id,
     name,
@@ -5913,6 +6202,11 @@ async function saveLineupWithMsg(msgEl) {
     location_postcode: (locPost || '').trim().toUpperCase() || null,
     location_lat: locLat ?? null,
     location_lng: locLng ?? null,
+    // Post-match result columns. null until the coach enters a value.
+    our_score_ht: (current.our_score_ht === '' || current.our_score_ht == null) ? null : parseInt(current.our_score_ht, 10),
+    opp_score_ht: (current.opp_score_ht === '' || current.opp_score_ht == null) ? null : parseInt(current.opp_score_ht, 10),
+    our_score_ft: (current.our_score_ft === '' || current.our_score_ft == null) ? null : parseInt(current.our_score_ft, 10),
+    opp_score_ft: (current.opp_score_ft === '' || current.opp_score_ft == null) ? null : parseInt(current.opp_score_ft, 10),
     data: {
       formation: current.formation,
       slots: current.slots,
@@ -5922,7 +6216,9 @@ async function saveLineupWithMsg(msgEl) {
       arrows: current.arrows,
       zoneLines: current.zoneLines,
       ballVisible: current.ballVisible,
-      ballPos: current.ballPos
+      ballPos: current.ballPos,
+      // Goalscorers go in JSONB so we don't need a separate table for the v1.
+      goalscorers: cleanScorers
     },
     updated_at: new Date().toISOString()
   };
