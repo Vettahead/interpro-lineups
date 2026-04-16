@@ -3364,6 +3364,7 @@ function openMatchWizard(user, teamId) {
     opponent: '',
     game_date: defaultDate,
     kickoff_time: '',
+    arrival_time: '',
     home_away: 'home',
     match_type: 'league',
     formation: formationNames.includes('4-3-3') ? '4-3-3' : formationNames[0],
@@ -3419,10 +3420,14 @@ function openMatchWizard(user, teamId) {
           <span>Opponent</span>
           <input type="text" id="mw-opponent" value="${escapeHtml(state.opponent)}" placeholder="e.g. Roverton Rangers" autocomplete="off" />
         </label>
+        <label class="mw-field">
+          <span>Match date</span>
+          <input type="date" id="mw-date" value="${escapeHtml(state.game_date)}" />
+        </label>
         <div class="mw-row">
           <label class="mw-field">
-            <span>Match date</span>
-            <input type="date" id="mw-date" value="${escapeHtml(state.game_date)}" />
+            <span>Arrival time</span>
+            <input type="time" id="mw-arrival" value="${escapeHtml(state.arrival_time)}" />
           </label>
           <label class="mw-field">
             <span>Kick-off</span>
@@ -3479,6 +3484,7 @@ function openMatchWizard(user, teamId) {
       ? new Date(state.game_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
       : '—';
     const kickoffLabel = state.kickoff_time || '—';
+    const arrivalLabel = state.arrival_time || '—';
     return `
       <div class="mw-body">
         <h3 class="mw-step-title">Ready to create</h3>
@@ -3486,6 +3492,7 @@ function openMatchWizard(user, teamId) {
         <div class="mw-summary">
           <div class="mw-sum-row"><span>Opponent</span><strong>${escapeHtml(state.opponent) || '<em class="muted">(not set)</em>'}</strong></div>
           <div class="mw-sum-row"><span>Date</span><strong>${escapeHtml(dateLabel)}</strong></div>
+          <div class="mw-sum-row"><span>Arrival</span><strong>${escapeHtml(arrivalLabel)}</strong></div>
           <div class="mw-sum-row"><span>Kick-off</span><strong>${escapeHtml(kickoffLabel)}</strong></div>
           <div class="mw-sum-row"><span>Venue</span><strong>${state.home_away === 'home' ? 'Home' : 'Away'}</strong></div>
           <div class="mw-sum-row"><span>Type</span><strong>${escapeHtml(state.match_type)}</strong></div>
@@ -3533,11 +3540,13 @@ function openMatchWizard(user, teamId) {
     if (step === 1) {
       const op = overlay.querySelector('#mw-opponent');
       const dt = overlay.querySelector('#mw-date');
+      const ar = overlay.querySelector('#mw-arrival');
       const ko = overlay.querySelector('#mw-kickoff');
       const ha = overlay.querySelector('#mw-homeaway');
       const tp = overlay.querySelector('#mw-type');
       op.addEventListener('input', () => { state.opponent = op.value; });
       dt.addEventListener('change', () => { state.game_date = dt.value; });
+      ar.addEventListener('change', () => { state.arrival_time = ar.value; });
       ko.addEventListener('change', () => { state.kickoff_time = ko.value; });
       ha.addEventListener('change', () => { state.home_away = ha.value; });
       tp.addEventListener('change', () => { state.match_type = tp.value; });
@@ -3568,10 +3577,19 @@ function openMatchWizard(user, teamId) {
       opponent: (state.opponent || '').trim(),
       game_date: state.game_date,
       kickoff_time: state.kickoff_time || '',
+      arrival_time: state.arrival_time || '',
       home_away: state.home_away,
       match_type: state.match_type,
       formation: state.formation
     };
+    // Home match: auto-populate venue from the team's home ground, matching
+    // the existing home/away selector behaviour in the lineup editor.
+    if (state.home_away === 'home' && editor && editor.team) {
+      payload.location_name     = editor.team.home_ground_name     || '';
+      payload.location_postcode = editor.team.home_ground_postcode || '';
+      payload.location_lat      = editor.team.home_ground_lat      ?? null;
+      payload.location_lng      = editor.team.home_ground_lng      ?? null;
+    }
     // If a custom formation is chosen, include its pos/lbl so the lineup renders with them
     const cf = customFormations.find(f => f.name === state.formation);
     if (cf && cf.data && Array.isArray(cf.data.pos) && Array.isArray(cf.data.lbl)) {
