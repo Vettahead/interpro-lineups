@@ -1776,7 +1776,7 @@ const HELP_SECTIONS = [
       <h4>Creating a lineup</h4>
       <p>Open <strong>Lineups</strong> → <strong>+ New lineup</strong>. Fill in match details and arrange players on the pitch.</p>
       <h4>Setting match details</h4>
-      <p>Click the blue <strong>📋 Arrange match</strong> button. The popup has Opponent, Match type (Friendly/League/Cup), Home/Away, Game date, Kick off, Team arrival, Notes, and Venue. For Home games the venue auto-fills from your Squad-tab home ground; for Away games you can set venue + fine-tune the map.</p>
+      <p>Click the blue <strong>✎ Edit match</strong> button. The popup has Opponent, Match type (Friendly/League/Cup), Home/Away, Game date, Kick off, Team arrival, Notes, and Venue. For Home games the venue auto-fills from your Squad-tab home ground; for Away games you can set venue + fine-tune the map.</p>
       <h4>Adding players to the pitch</h4>
       <p>Drag a player from <strong>Available players</strong> onto a position slot. Drag one onto another to swap. Drag back to the list to remove.</p>
       <h4>Changing formation</h4>
@@ -1813,7 +1813,7 @@ const HELP_SECTIONS = [
     id: 'publish', title: 'Publishing & sharing with parents', adminOnly: true,
     body: `
       <h4>The three visibility states</h4>
-      <p>Every lineup is in one of three states, set via a segmented control at the bottom of <strong>📋 Arrange match</strong>:</p>
+      <p>Every lineup is in one of three states, set via a segmented control at the bottom of <strong>✎ Edit match</strong>:</p>
       <ul>
         <li><strong>Draft</strong> — only coaches can see it. The share link doesn't work.</li>
         <li><strong>Availability</strong> — parents can open the share link to see match details and mark each of their children as Available, Maybe or Unavailable. The lineup itself is hidden.</li>
@@ -1912,7 +1912,7 @@ const HELP_SECTIONS = [
       <h4>The pitch looks squashed on my phone</h4>
       <p>Scroll the page or refresh your browser; the pitch should resize to fit.</p>
       <h4>A parent says the share link doesn't work <em>(coaches)</em></h4>
-      <p>Open the lineup and check the visibility state at the bottom of <strong>📋 Arrange match</strong>. <strong>Draft</strong> breaks the link entirely; <strong>Availability</strong> hides the pitch but lets parents mark availability; <strong>Show lineup</strong> shows everything.</p>
+      <p>Open the lineup and check the visibility state at the bottom of <strong>✎ Edit match</strong>. <strong>Draft</strong> breaks the link entirely; <strong>Availability</strong> hides the pitch but lets parents mark availability; <strong>Show lineup</strong> shows everything.</p>
       <h4>A parent says they entered the code but nothing happened <em>(coaches)</em></h4>
       <p>Double-check the code on the player's card. Codes are case-insensitive and ignore spaces. Personal codes are 2 letters + 4 digits (<code>JE1234</code>); family codes are exactly 5 digits.</p>
       <h4>Where is my data stored?</h4>
@@ -1926,7 +1926,7 @@ const HELP_SECTIONS = [
     body: `
       <ol>
         <li><strong>Monday</strong> — Lineups → + New lineup. Fill in opponent, date, kick-off, arrival, venue. Save as Draft.</li>
-        <li><strong>Tuesday</strong> — In <strong>📋 Arrange match</strong>, switch to <strong>Availability</strong> and <strong>🔗 Copy availability link for parents</strong>. Paste into WhatsApp along with each child's access code (grab them from the Squad tab).</li>
+        <li><strong>Tuesday</strong> — In <strong>✎ Edit match</strong>, switch to <strong>Availability</strong> and <strong>🔗 Copy availability link for parents</strong>. Paste into WhatsApp along with each child's access code (grab them from the Squad tab).</li>
         <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (gold/red/<code>?</code> rings appear on chips). Tweak the lineup. Add tactics arrows.</li>
         <li><strong>Friday</strong> — Switch the state to <strong>Show lineup</strong>. Same parent link now shows the pitch — no need to re-share.</li>
         <li><strong>Match day</strong> — If anyone drops out, edit the lineup; the parent link auto-updates within 15s.</li>
@@ -2653,7 +2653,7 @@ function _openIcsInline(payload) {
 
 function downloadLineupIcs(lineupOrCurrent, team, lineupId) {
   const payload = _buildCalendarPayload(lineupOrCurrent, team, lineupId);
-  if (!payload) { alert('No game date set — open Arrange match and add one first.'); return; }
+  if (!payload) { alert('No game date set — open Edit match and add one first.'); return; }
 
   const ua = navigator.userAgent || '';
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Mac') && 'ontouchend' in document);
@@ -2833,7 +2833,7 @@ function matchSummaryHtml(current, team, canEdit) {
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">✎ Edit match</button>` : ''}
     ${current.id ? `<button class="primary btn-full" id="open-share-modal" style="margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600">📤 Share match</button>` : ''}
-    ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state in <em>Arrange match</em>.</div>` : ''}
+    ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state in <em>Edit match</em>.</div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
 }
