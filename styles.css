@@ -1667,3 +1667,58 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 @media (max-width: 480px) {
   .share-actions .share-btn { flex: 1 1 100%; }
 }
+
+/* ---------- Matches editor: phone-only tab strip ---------- */
+/* Desktop: hide the phone tabs completely — full three-column layout stays as-is */
+.lineup-phone-tabs { display: none; }
+
+@media (max-width: 899px) {
+  /* Sticky tab strip that sits just below the pitch so it's always within thumb reach */
+  .lineup-phone-tabs {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.4rem 0.1rem;
+    margin: 0.25rem 0 0.6rem;
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--surface, #fff);
+    border-bottom: 1px solid var(--border);
+    /* The CSS grid is 1-column on phone; tabs go in the natural order (after pitch). */
+    order: 2;
+  }
+  /* Push pitch above tabs, tabs above cards */
+  .lineup-layout > .lineup-center { order: 1; }
+  .lineup-layout > .lineup-phone-tabs { order: 2; }
+  .lineup-layout > .lineup-left     { order: 3; }
+  .lineup-layout > .lineup-right    { order: 4; }
+
+  .lineup-phone-tab {
+    flex: 0 0 auto;
+    padding: 0.5rem 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--text, #222);
+    line-height: 1.1;
+  }
+  .lineup-phone-tab .lpt-ic { margin-right: 0.25rem; }
+  .lineup-phone-tab.active {
+    background: var(--blue-2, #1e3a8a);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+
+  /* Only show the phone-group matching the active tab */
+  .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
+  .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
+  .lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
+  .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
+}

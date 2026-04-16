@@ -2340,7 +2340,6 @@ function matchSummaryHtml(current, team, canEdit) {
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
     ${current.id ? `<button class="primary btn-full" id="open-share-modal" style="margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600">📤 Share match</button>` : ''}
     ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state in <em>Arrange match</em>.</div>` : ''}
-    ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
 }
@@ -2602,6 +2601,17 @@ function wireMatchDetailsFields(closeModal) {
   };
 }
 
+// Which phone-only tab is active in the Matches editor. Survives re-renders
+// (e.g. clicking a saved lineup) so the coach doesn't get bounced back to Squad.
+// On desktop this attribute is ignored by CSS and the full three-column layout is shown.
+let _lineupPhoneTab = 'squad';
+const _LINEUP_PHONE_TABS = [
+  { key: 'squad',     label: 'Squad',     icon: '👥' },
+  { key: 'formation', label: 'Formation', icon: '📐' },
+  { key: 'avail',     label: 'Avail',     icon: '📅' },
+  { key: 'info',      label: 'Info',      icon: 'ℹ' },
+];
+
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, players, lineups, plays, customFormations, current } = editor;
@@ -2662,15 +2672,48 @@ function renderLineupsTab() {
     <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
   `) : '';
 
-  tabEl.innerHTML = `
-    <div class="lineup-layout">
-      <aside class="lineup-left">
-        ${collapsibleCard('lineup-saved', 'Matches / Lineups', `
-          <div class="lineup-list">${lineupsListHtml}</div>
-          ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
-        `)}
+  // Phone tab strip markup (hidden on desktop via CSS). Lets the coach jump
+  // between Squad / Formation / Avail / Info without scrolling through them all.
+  const curStatusForAvail = current?.lineup_status || (current?.published ? 'published' : 'draft');
+  const availableOnThisMatch = !!current?.id && (curStatusForAvail === 'availability' || curStatusForAvail === 'published');
+  const phoneTabsHtml = `
+    <nav class="lineup-phone-tabs" role="tablist" aria-label="Match editor sections">
+      ${_LINEUP_PHONE_TABS.map(t => `
+        <button class="lineup-phone-tab ${_lineupPhoneTab === t.key ? 'active' : ''}"
+                role="tab"
+                aria-selected="${_lineupPhoneTab === t.key ? 'true' : 'false'}"
+                data-ptab="${t.key}">
+          <span class="lpt-ic" aria-hidden="true">${t.icon}</span> ${escapeHtml(t.label)}
+        </button>
+      `).join('')}
+    </nav>
+  `;
 
-        ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
+  // Availability card: only meaningful once the match is open to parents. We still
+  // render the card wrapper so the Avail tab has something to show (with a hint
+  // pointing the coach to open availability) when in draft.
+  const availabilityCardHtml = `
+    <div data-phone-group="avail">
+      ${collapsibleCard('lineup-availability', 'Availability', availableOnThisMatch
+        ? `<div id="availability-panel"></div>`
+        : `<p class="muted" style="font-size:0.85rem;margin:0">No responses yet — open availability from <em>Arrange match</em> to let parents submit.</p>`
+      )}
+    </div>
+  `;
+
+  tabEl.innerHTML = `
+    <div class="lineup-layout" data-phone-tab="${_lineupPhoneTab}">
+      ${phoneTabsHtml}
+
+      <aside class="lineup-left">
+        <div data-phone-group="info">
+          ${collapsibleCard('lineup-saved', 'Matches / Lineups', `
+            <div class="lineup-list">${lineupsListHtml}</div>
+            ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
+          `)}
+          ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
+        </div>
+        ${availabilityCardHtml}
       </aside>
 
       <div class="lineup-center">
@@ -2689,26 +2732,30 @@ function renderLineupsTab() {
       </div>
 
       <aside class="lineup-right">
-        ${tacticsCardHtml}
-        ${collapsibleCard('lineup-formation', 'Formation', `
-          <div class="f-btns f-btns-col">${formationBtns}</div>
-          ${canEdit ? `
-            <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
-              ${_posEditMode
-                ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
-                   <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
-                   <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
-                   <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
-                   <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
-                : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
-              }
-            </div>
-          ` : ''}
-        `)}
-        ${collapsibleCard('lineup-players', 'Available players', `
-          <div class="palette" id="palette">${paletteHtml}</div>
-          ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Tap a position on the pitch to pick a player, or drag on desktop.</p>` : ''}
-        `)}
+        <div data-phone-group="formation">
+          ${tacticsCardHtml}
+          ${collapsibleCard('lineup-formation', 'Formation', `
+            <div class="f-btns f-btns-col">${formationBtns}</div>
+            ${canEdit ? `
+              <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+                ${_posEditMode
+                  ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
+                     <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+                     <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
+                     <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
+                     <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
+                  : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
+                }
+              </div>
+            ` : ''}
+          `)}
+        </div>
+        <div data-phone-group="squad">
+          ${collapsibleCard('lineup-players', 'Available players', `
+            <div class="palette" id="palette">${paletteHtml}</div>
+            ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Tap a position on the pitch to pick a player, or drag on desktop.</p>` : ''}
+          `)}
+        </div>
       </aside>
     </div>
   `;
@@ -3420,6 +3467,23 @@ function renderSubsBar() {
 function wireLineupEvents() {
   const { canEdit, team, lineups } = editor;
   const tabEl = document.getElementById('tab-content');
+
+  // Phone-only tab strip: toggle active group without re-rendering the editor
+  // (keeps pitch DOM, tactics canvas state and event handlers intact).
+  const layoutEl = tabEl.querySelector('.lineup-layout');
+  tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.ptab;
+      if (!key || _lineupPhoneTab === key) return;
+      _lineupPhoneTab = key;
+      if (layoutEl) layoutEl.setAttribute('data-phone-tab', key);
+      tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(b => {
+        const on = b.dataset.ptab === key;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    };
+  });
 
   // Formation buttons
   tabEl.querySelectorAll('[data-formation]').forEach(b => {
