@@ -2338,11 +2338,8 @@ function matchSummaryHtml(current, team, canEdit) {
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
     ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-availability-link" style="${availStyle}" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup to share"' : ''}>🔗 Availability link</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-lineup-link" style="${lineupStyle}" ${draftDisabled ? 'disabled title="Switch to Show lineup to share"' : ''}>🔗 Match link</button>` : ''}
-    ${current.id ? `<button class="btn-full" id="copy-whatsapp" style="margin-top:0.35rem;background:#25D366;color:#fff;border:none;font-weight:600" ${draftDisabled ? 'disabled title="Switch to Availability or Show lineup first"' : ''}>💬 Send via WhatsApp</button>` : ''}
-    ${current.id && current.game_date ? `<button class="btn-full" id="add-to-calendar" style="margin-top:0.35rem;background:#fff;color:var(--text);border:1px solid var(--border);font-weight:500">📅 Add to calendar</button>` : ''}
-    ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state.</div>` : ''}
+    ${current.id ? `<button class="primary btn-full" id="open-share-modal" style="margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600">📤 Share match</button>` : ''}
+    ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state in <em>Arrange match</em>.</div>` : ''}
     ${current.id && (status === 'availability' || status === 'published') ? `<div id="availability-panel" style="margin-top:0.5rem"></div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
   `;
@@ -2835,6 +2832,159 @@ function availPillsHtml(counts, rosterSize) {
     </div>`;
 }
 
+// ---------- Share modal ----------
+// One popup, two clearly-labelled sections: Availability link + Match link.
+// Keeps every existing action — Copy, WhatsApp (combined message), Add to calendar.
+// Locked state if the lineup isn't in the right status to be shared (e.g. draft).
+function openShareModal(opts = {}) {
+  const id = opts.lineupId || editor?.current?.id;
+  if (!id) return;
+  const fromList = (editor?.lineups || []).find(l => l.id === id);
+  const lineup = fromList || editor?.current || null;
+  if (!lineup) return;
+  const team = editor?.team;
+  const status = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
+  const base = location.origin + location.pathname;
+  const availUrl = `${base}#/avail/${id}`;
+  const matchUrl = `${base}#/view/${id}`;
+  const availOpen = status === 'availability' || status === 'published';
+  const lineupOpen = status === 'published';
+  const canWebShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  const statusBadge = (open, kind) => {
+    if (!open) return `<span class="share-status locked">○ Locked</span>`;
+    if (kind === 'avail' && status === 'availability') return `<span class="share-status ok">◐ Open</span>`;
+    return `<span class="share-status ok">● Open</span>`;
+  };
+
+  const section = (kind) => {
+    const isAvail = kind === 'avail';
+    const open = isAvail ? availOpen : lineupOpen;
+    const url = isAvail ? availUrl : matchUrl;
+    const title = isAvail ? 'Availability link' : 'Match link (lineup + details)';
+    const desc = isAvail
+      ? "Parents tap this to say whether their child can play."
+      : "Parents see the lineup, tactics and match info.";
+    const lockedHint = isAvail
+      ? 'Switch the match to <em>Availability</em> or <em>Show lineup</em> to open this link for parents.'
+      : 'Switch the match to <em>Show lineup</em> (Published) to open this link for parents.';
+    return `
+      <section class="share-section ${open ? '' : 'share-locked'}">
+        <div class="share-sec-head">
+          <div class="share-sec-titles">
+            <h4 class="share-sec-title">${title}</h4>
+            <p class="share-sec-desc muted">${desc}</p>
+          </div>
+          ${statusBadge(open, kind)}
+        </div>
+        <div class="share-url" title="${escapeHtml(url)}">${escapeHtml(url)}</div>
+        <div class="share-actions">
+          <button class="btn-full share-btn share-btn-primary" data-share-copy="${kind}" ${open ? '' : 'disabled'}>📋 Copy link</button>
+          ${canWebShare ? `<button class="btn-full share-btn" data-share-native="${kind}" ${open ? '' : 'disabled'}>📲 Share…</button>` : ''}
+        </div>
+        ${!open ? `<p class="share-hint muted">${lockedHint}</p>` : ''}
+      </section>
+    `;
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay share-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal share-modal" role="dialog" aria-label="Share match" style="max-width:540px">
+      <div class="map-modal-header">
+        <h3 style="margin:0">📤 Share this match</h3>
+        <button type="button" class="map-modal-close" data-close aria-label="Close">×</button>
+      </div>
+      <div class="map-modal-body share-body">
+        ${section('avail')}
+        ${section('view')}
+        <section class="share-section share-combined">
+          <h4 class="share-sec-title">Send to the team chat</h4>
+          <p class="share-sec-desc muted">Combined message with match details, venue, both links and a reminder about the parent code.</p>
+          <div class="share-actions">
+            <button class="btn-full share-btn share-wa" data-share-whatsapp ${(availOpen || lineupOpen) ? '' : 'disabled'}>💬 Send via WhatsApp</button>
+            ${lineup.game_date ? `<button class="btn-full share-btn" data-share-calendar>📅 Add to calendar</button>` : ''}
+          </div>
+        </section>
+        <div id="share-msg" class="muted" style="font-size:0.8rem;min-height:1em;margin-top:0.5rem"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (opts.opener) { try { opts.opener.focus(); } catch (_) {} }
+  };
+  function onKey(ev) { if (ev.key === 'Escape') close(); }
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay || ev.target?.hasAttribute?.('data-close')) close();
+  });
+  document.addEventListener('keydown', onKey);
+
+  const showMsg = (text, cls = 'ok') => {
+    const el = overlay.querySelector('#share-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = cls;
+    setTimeout(() => { if (el.textContent === text) { el.textContent = ''; el.className = 'muted'; } }, 3000);
+  };
+
+  // Copy-to-clipboard handlers
+  overlay.querySelectorAll('[data-share-copy]').forEach(btn => {
+    btn.onclick = async () => {
+      const which = btn.dataset.shareCopy;
+      const url = which === 'avail' ? availUrl : matchUrl;
+      const label = which === 'avail' ? 'Availability link' : 'Match link';
+      try {
+        await navigator.clipboard.writeText(url);
+        showMsg(`✓ ${label} copied`);
+      } catch (_) {
+        window.prompt('Copy this link:', url);
+        showMsg('Link ready to copy', 'muted');
+      }
+    };
+  });
+
+  // Native OS share sheet (Android / iOS / desktop on supported browsers)
+  overlay.querySelectorAll('[data-share-native]').forEach(btn => {
+    btn.onclick = async () => {
+      const which = btn.dataset.shareNative;
+      const url = which === 'avail' ? availUrl : matchUrl;
+      const title = which === 'avail' ? 'Availability link' : 'Match link';
+      try {
+        await navigator.share({ title, url });
+        showMsg('✓ Shared');
+      } catch (e) {
+        if (e?.name !== 'AbortError') showMsg('Share failed', 'error');
+      }
+    };
+  });
+
+  // Combined WhatsApp message (unchanged behaviour)
+  const waBtn = overlay.querySelector('[data-share-whatsapp]');
+  if (waBtn) {
+    waBtn.onclick = async () => {
+      try {
+        const text = await buildWhatsAppMessage(lineup, team);
+        try { await navigator.clipboard.writeText(text); } catch (_) {}
+        const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+        const win = window.open(waUrl, '_blank');
+        if (!win) location.href = waUrl;
+        showMsg('✓ Opening WhatsApp — message also copied as a backup');
+      } catch (e) {
+        showMsg('Failed: ' + (e.message || 'could not build message'), 'error');
+      }
+    };
+  }
+
+  // Add-to-calendar .ics download
+  const calBtn = overlay.querySelector('[data-share-calendar]');
+  if (calBtn) calBtn.onclick = () => downloadLineupIcs(lineup, team, lineup.id);
+}
+
 // Lazy post-render enhancement: for each rendered match card matching the selector,
 // inject a small pill row showing response counts. Runs asynchronously after the
 // main paint so it never blocks the UI, and is a no-op if the DOM has moved on.
@@ -3293,49 +3443,13 @@ function wireLineupEvents() {
   const openMdBtn = document.getElementById('open-match-details');
   if (openMdBtn) openMdBtn.onclick = openMatchDetailsModal;
 
-  // Copy share links for parents (availability + match)
-  const copyShareUrl = async (label, route) => {
-    const id = editor?.current?.id;
-    if (!id) return;
-    const base = location.origin + location.pathname;
-    const shareUrl = `${base}#/${route}/${id}`;
-    const msg = document.getElementById('save-msg');
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      if (msg) { msg.textContent = `✓ ${label} copied`; msg.className = 'ok'; }
-    } catch (e) {
-      window.prompt('Copy this link:', shareUrl);
-      if (msg) { msg.textContent = 'Link ready to copy'; msg.className = 'muted'; }
-    }
-    setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
-  };
-  const availBtn = document.getElementById('copy-availability-link');
-  if (availBtn) availBtn.onclick = () => copyShareUrl('Availability link', 'avail');
-  const matchBtn = document.getElementById('copy-lineup-link');
-  if (matchBtn) matchBtn.onclick = () => copyShareUrl('Match link', 'view');
-  const calBtn = document.getElementById('add-to-calendar');
-  if (calBtn) calBtn.onclick = () => downloadLineupIcs(editor.current, editor.team, editor.current.id);
-  const waBtn = document.getElementById('copy-whatsapp');
-  if (waBtn) waBtn.onclick = async () => {
-    const msg = document.getElementById('save-msg');
-    try {
-      const text = await buildWhatsAppMessage(editor.current, editor.team);
-      // Copy to clipboard as a safety net (in case the WhatsApp handoff fails)
-      try { await navigator.clipboard.writeText(text); } catch (_) {}
-      // Open WhatsApp with chat picker: on mobile launches the app, on desktop opens WhatsApp Web
-      const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
-      const win = window.open(waUrl, '_blank');
-      if (!win) {
-        // Popup blocked — fall back to same-tab navigation
-        location.href = waUrl;
-      }
-      if (msg) { msg.textContent = '✓ Opening WhatsApp — pick the team chat (message also copied as backup)'; msg.className = 'ok'; }
-    } catch (e) {
-      console.warn('whatsapp build failed', e);
-      if (msg) { msg.textContent = 'Failed: ' + (e.message || 'could not build message'); msg.className = 'error'; }
-    }
-    setTimeout(() => { if (msg && msg.className !== '') { msg.textContent = ''; msg.className = 'muted'; } }, 4000);
-  };
+  // Single Share entry point — opens a modal with Availability + Match sections,
+  // combined WhatsApp message, and Add-to-calendar. All previous actions preserved.
+  const openShareBtn = document.getElementById('open-share-modal');
+  if (openShareBtn) openShareBtn.onclick = () => openShareModal({
+    lineupId: editor?.current?.id,
+    opener: openShareBtn
+  });
 
   // Buttons
   const newBtn = document.getElementById('new-lineup-btn');
@@ -5262,9 +5376,7 @@ function renderFixturesTab() {
 
   const selStatus = selected ? (selected.lineup_status || (selected.published ? 'published' : 'draft')) : 'draft';
   const selShareable = selected && (selStatus === 'availability' || selStatus === 'published');
-  const selShareLabel = selStatus === 'published'
-    ? '🔗 Copy lineup link for parents'
-    : '🔗 Copy availability link for parents';
+  const selShareLabel = '📤 Share match';
   // Coach Fixtures tab always shows the pitch; the public parent view gates it separately.
   const showLineup = !!selected;
 
@@ -5643,20 +5755,10 @@ function wireFixtureEvents() {
   };
 
   const shareBtn = tabEl.querySelector('#fix-share-link');
-  if (shareBtn) shareBtn.onclick = async () => {
+  if (shareBtn) shareBtn.onclick = () => {
     const id = _fixturesUi.selectedLineupId;
     if (!id) return;
-    const base = location.origin + location.pathname;
-    const shareUrl = `${base}#/view/${id}`;
-    const msg = tabEl.querySelector('#fix-share-msg');
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      if (msg) { msg.textContent = '✓ Link copied to clipboard'; msg.className = 'ok'; }
-    } catch {
-      window.prompt('Copy this link:', shareUrl);
-      if (msg) { msg.textContent = 'Link ready to copy'; msg.className = 'muted'; }
-    }
-    setTimeout(() => { if (msg) { msg.textContent = ''; msg.className = 'muted'; } }, 3000);
+    openShareModal({ lineupId: id, opener: shareBtn });
   };
 }
 
