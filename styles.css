@@ -1798,9 +1798,9 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   border-bottom-color: #f97316; /* orange-500 underline */
 }
 
-/* Sub-tab filtering applies at ALL widths (Squad/Subs/Formation/Info).
-   Matches is the card list always visible at the top; Availability is a
-   permanent bar above the sub-tab strip — neither is a sub-tab. */
+/* Sub-tab filtering applies at ALL widths. Availability is a permanent bar
+   above the strip — not a sub-tab. */
+.lineup-layout[data-phone-tab="matches"]   [data-phone-group]:not([data-phone-group="matches"])   { display: none !important; }
 .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
 .lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
 .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }

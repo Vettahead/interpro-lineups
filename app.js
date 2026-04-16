@@ -1629,9 +1629,9 @@ async function renderTeamDashboard(user, teamId) {
       _lineupPhoneTab = 'squad';
     } else {
       current = base;
-      // No match pre-loaded → default sub-tab to squad (the card list is always
-      // visible at the top, so the coach picks from it first).
-      _lineupPhoneTab = 'squad';
+      // No match pre-loaded → land on the Matches sub-tab (card list) so the
+      // coach can pick or create a match.
+      _lineupPhoneTab = 'matches';
     }
     _pendingLineupLoad = null;
     editor = {
@@ -3057,11 +3057,11 @@ function wireMatchDetailsFields(closeModal) {
 
 // Active sub-tab inside the match editor (works on both phone and desktop post-redesign).
 // Survives re-renders so the coach doesn't get bounced back to Squad.
-// Active sub-tab inside the editor panel (below the card list). Availability is
-// no longer a sub-tab — it sits permanently above the strip. Matches are the card
-// list at the top, not a sub-tab.
-let _lineupPhoneTab = 'squad';
+// Active sub-tab in the panel next to the pitch. Matches is a sub-tab showing
+// the fixtures-as-cards list. Availability is a permanent bar above the strip.
+let _lineupPhoneTab = 'matches';
 const _LINEUP_PHONE_TABS = [
+  { key: 'matches',   label: 'Matches',      icon: '' },
   { key: 'squad',     label: 'Squad',        icon: '' },
   { key: 'subs',      label: 'Subs',         icon: '' },
   { key: 'formation', label: 'Formation',    icon: '' },
@@ -3292,60 +3292,57 @@ function renderLineupsTab() {
     </div>
   `;
 
-  // Does a saved match currently exist in the editor?
-  const hasLoadedMatch = !!current?.id;
-
   tabEl.innerHTML = `
     <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
-      <!-- Card list — always visible at the top -->
-      ${matchesPanelHtml}
+      <!-- Match header: title + stats + actions. Desktop only (hidden on phone). -->
+      <header class="me-header">
+        <div class="me-header-left">
+          <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
+          <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
+        </div>
+        <div class="me-header-stats">
+          <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
+        </div>
+        <div class="me-header-actions">
+          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
+          ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
+        </div>
+      </header>
 
-      ${hasLoadedMatch ? `
-        <!-- Match header: title + stats + actions. Desktop only (hidden on phone). -->
-        <header class="me-header">
-          <div class="me-header-left">
-            <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
-            <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
-          </div>
-          <div class="me-header-stats">
-            <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
-            <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
-            <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
-            <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
-          </div>
-          <div class="me-header-actions">
-            ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
-            ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
-          </div>
-        </header>
-
-        <!-- Availability — always visible above the sub-tab strip -->
-        ${availBarHtml}
-
-        <!-- Editor body: pitch left + sub-tab panel right (desktop), stacked (phone) -->
-        <div class="me-body">
-          <div class="me-pitch-col">
-            <div class="card pitch-card">
-              <div class="pitch" id="pitch">
-                <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-                <div class="slots-layer" id="slots-layer"></div>
-                <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
-                <div class="ball-el" id="ball-el"></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="me-panel-col">
-            ${subTabsHtml}
-            <div class="me-panel card">
-              <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
-              <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
-              <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
-              <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
+      <!-- Editor body: pitch left + panel right (desktop), stacked (phone).
+           Pitch + sub-tabs are ALWAYS rendered so #subs-row etc. exist in the DOM. -->
+      <div class="me-body">
+        <div class="me-pitch-col">
+          <div class="card pitch-card">
+            <div class="pitch" id="pitch">
+              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+              <div class="slots-layer" id="slots-layer"></div>
+              <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+              <div class="ball-el" id="ball-el"></div>
             </div>
           </div>
         </div>
 
+        <div class="me-panel-col">
+          <!-- Availability — permanently above the sub-tab strip -->
+          ${availBarHtml}
+
+          ${subTabsHtml}
+          <div class="me-panel card">
+            <!-- Matches sub-tab: fixtures as cards, in the panel next to the pitch -->
+            <div data-phone-group="matches" class="me-panel-body me-panel-body-matches">${matchesPanelHtml}</div>
+            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
+            <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
+            <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
+            <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
+          </div>
+        </div>
+      </div>
+
+      ${current?.id ? `
         <!-- Floating Share pill (phone only). Visible once a lineup is saved. -->
         <button type="button" class="share-fab" id="me-share-fab" aria-label="Share match">
           <span class="share-fab-ic" aria-hidden="true">🔗</span>
@@ -4506,15 +4503,9 @@ function wireLineupEvents() {
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       _lastSavedHash = _lineupContentHash(editor.current);
-      // Re-render — the editor section will appear inline below the card list
-      // with the Squad sub-tab active by default.
+      // Re-render with the selected match on the pitch and Squad sub-tab active.
       _lineupPhoneTab = 'squad';
       renderLineupsTab();
-      // Scroll the editor into view (the card list stays above).
-      setTimeout(() => {
-        const editorBody = document.querySelector('.me-body');
-        if (editorBody) editorBody.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 60);
     };
   });
 
