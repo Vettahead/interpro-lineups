@@ -1734,29 +1734,51 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   margin-top: 0.15rem;
 }
 .me-stat-status { text-align: left; }
-.me-status-seg {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-top: 0.2rem;
-}
-.me-seg-btn {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.78rem;
-  font-weight: 600;
+
+/* Clickable status pill in header */
+.me-status-pill {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 700;
   border: none;
-  background: var(--bg);
-  color: var(--muted);
+  border-radius: 20px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  margin-top: 0.15rem;
+  transition: filter 0.15s;
 }
-.me-seg-btn + .me-seg-btn { border-left: 1px solid var(--border); }
-.me-seg-btn:hover { background: #e0e7ff; color: var(--blue); }
-.me-seg-btn.active { background: var(--blue); color: #fff; }
-.me-seg-btn.active:hover { background: var(--blue-2); }
-.me-seg-btn.active[data-me-status="availability"] { background: #f97316; }
-.me-seg-btn.active[data-me-status="availability"]:hover { background: #ea580c; }
+.me-status-pill:hover { filter: brightness(0.9); }
+.me-status-pill-draft       { background: #e5e7eb; color: #374151; }
+.me-status-pill-availability { background: #fff7ed; color: #c2410c; }
+.me-status-pill-published    { background: #dbeafe; color: #1e40af; }
+
+/* Status-change modal */
+.status-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+}
+.status-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.status-option:hover { border-color: var(--blue-2); background: #f0f4ff; }
+.status-option.active { border-color: var(--blue); background: #eff6ff; }
+.status-option:disabled { opacity: 0.5; cursor: wait; }
+.status-option-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
+.status-option-text { flex: 1; }
+.status-option-label { display: block; font-size: 0.95rem; font-weight: 700; color: var(--text); }
+.status-option-desc  { display: block; font-size: 0.82rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.35; }
+.status-option-check { font-size: 1.1rem; color: var(--blue); font-weight: 700; margin-left: auto; align-self: center; }
 
 /* Main body: pitch left, sub-tab panel right on desktop; stacked on phone. */
 .me-body {

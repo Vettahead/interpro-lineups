@@ -3304,10 +3304,15 @@ function renderLineupsTab() {
           <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
           <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
           <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
-          <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
+          <div class="me-stat me-stat-status">
+            <div class="me-stat-label">STATUS</div>
+            ${canEdit && current?.id
+              ? `<button type="button" class="me-status-pill me-status-pill-${_stat}" id="me-open-status">${statusLabel} ▾</button>`
+              : `<div class="me-stat-val">${statusLabel}</div>`}
+          </div>
         </div>
         <div class="me-header-actions">
-          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
+          <button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>
           ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
         </div>
       </header>
@@ -3475,9 +3480,107 @@ function availPillsHtml(counts, rosterSize) {
 // One popup, two clearly-labelled sections: Availability link + Match link.
 // Keeps every existing action — Copy, WhatsApp (combined message), Add to calendar.
 // Locked state if the lineup isn't in the right status to be shared (e.g. draft).
-function openShareModal(opts = {}) {
-  const id = opts.lineupId || editor?.current?.id;
-  if (!id) return;
+/* ── Status-change modal ────────────────────────────────────── */
+function openStatusModal() {
+  if (!editor?.current?.id) return;
+  const cur = editor.current;
+  const currentStatus = cur.lineup_status || (cur.published ? 'published' : 'draft');
+
+  const options = [
+    {
+      key: 'draft',
+      label: 'Draft',
+      icon: '📝',
+      desc: 'Only coaches can see this match. Parents and viewers won\'t see anything — use this while you\'re still planning the lineup.',
+    },
+    {
+      key: 'availability',
+      label: 'Availability',
+      icon: '📋',
+      desc: 'Parents receive a link to confirm whether their child is available. They can\'t see the lineup yet — just the match date and details.',
+    },
+    {
+      key: 'published',
+      label: 'Published',
+      icon: '📢',
+      desc: 'The full lineup is visible to parents — positions, formation and match info. Use this once you\'ve finalised the team.',
+    },
+  ];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay status-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal status-modal" role="dialog" aria-label="Change match status" style="max-width:420px">
+      <div class="map-modal-header">
+        <h3 style="margin:0">Change match status</h3>
+        <button type="button" class="map-modal-close" data-close aria-label="Close">×</button>
+      </div>
+      <div class="map-modal-body status-modal-body">
+        ${options.map(o => `
+          <button type="button" class="status-option ${o.key === currentStatus ? 'active' : ''}" data-pick-status="${o.key}">
+            <span class="status-option-icon">${o.icon}</span>
+            <div class="status-option-text">
+              <strong class="status-option-label">${o.label}</strong>
+              <span class="status-option-desc">${o.desc}</span>
+            </div>
+            ${o.key === currentStatus ? '<span class="status-option-check">✓</span>' : ''}
+          </button>
+        `).join('')}
+        <div id="status-modal-msg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;color:var(--danger,red)"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  overlay.querySelectorAll('[data-pick-status]').forEach(btn => {
+    btn.onclick = async () => {
+      const nextStatus = btn.dataset.pickStatus;
+      if (nextStatus === currentStatus) { close(); return; }
+      if (nextStatus !== 'draft' && !cur.game_date) {
+        const msg = overlay.querySelector('#status-modal-msg');
+        if (msg) msg.textContent = 'Set a game date before changing status.';
+        return;
+      }
+      // Disable all buttons while saving
+      overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = true);
+      const { data, error } = await supabase.from('lineups')
+        .update({ lineup_status: nextStatus })
+        .eq('id', cur.id).select().single();
+      if (error) {
+        const msg = overlay.querySelector('#status-modal-msg');
+        if (msg) msg.textContent = 'Failed: ' + error.message;
+        overlay.querySelectorAll('[data-pick-status]').forEach(b => b.disabled = false);
+        return;
+      }
+      editor.current.lineup_status = data.lineup_status;
+      editor.current.published = data.published;
+      editor.current.published_at = data.published_at;
+      const idx = editor.lineups.findIndex(l => l.id === data.id);
+      if (idx >= 0) editor.lineups[idx] = data;
+      await logAudit(editor.team.id, 'lineup', data.id, 'status:' + nextStatus, { from: currentStatus });
+      close();
+      rerenderBody();
+      renderLineupsTab();
+    };
+  });
+}
+
+async function openShareModal(opts = {}) {
+  let id = opts.lineupId || editor?.current?.id;
+  if (!id) {
+    // Auto-save before sharing so links exist
+    if (!editor?.current) return;
+    await saveLineup();
+    id = editor.current.id;
+    if (!id) return;            // save failed
+  }
   const fromList = (editor?.lineups || []).find(l => l.id === id);
   const lineup = fromList || editor?.current || null;
   if (!lineup) return;
@@ -3486,7 +3589,7 @@ function openShareModal(opts = {}) {
   const base = location.origin + location.pathname;
   const availUrl = `${base}#/avail/${id}`;
   const matchUrl = `${base}#/view/${id}`;
-  const availOpen = status === 'availability' || status === 'published';
+  const availOpen = true;   // availability link always copyable
   const lineupOpen = status === 'published';
   const canWebShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
@@ -4391,6 +4494,10 @@ function wireLineupEvents() {
     _lastSavedHash = _lineupContentHash(editor.current);
     renderLineupsTab();
   };
+
+  // Status pill → open status-change modal
+  const statusPill = document.getElementById('me-open-status');
+  if (statusPill) statusPill.onclick = () => openStatusModal();
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
