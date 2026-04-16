@@ -134,6 +134,8 @@ function resetHeader() {
   if (titleEl) titleEl.innerHTML = `<img src="logo.png" alt="Interpro" class="brand-logo" /><h1>Interpro Coach / Manager Assistant</h1>`;
   const tabsEl = document.getElementById('header-tabs');
   if (tabsEl) tabsEl.innerHTML = '';
+  const plusEl = document.getElementById('global-plus');
+  if (plusEl) plusEl.innerHTML = '';
 }
 
 async function render() {
@@ -431,6 +433,158 @@ function renderUserBar(user) {
   document.getElementById('logout').onclick = async () => {
     await supabase.auth.signOut();
   };
+}
+
+// ---------- Global "+" quick-create menu ----------
+// Renders a compact "+" button in the header with a popover for:
+//   New match · New player · New play · New formation
+// Gated to coaches/admins (canEdit). Hidden on auth/teams-home via resetHeader().
+function renderGlobalPlus(user, teamId, canEdit) {
+  const slot = document.getElementById('global-plus');
+  if (!slot) return;
+  if (!canEdit) { slot.innerHTML = ''; return; }
+
+  slot.innerHTML = `
+    <button id="gp-toggle" class="gp-btn" type="button" aria-haspopup="menu" aria-expanded="false" title="Quick create">
+      <span class="gp-plus">+</span>
+    </button>
+    <div id="gp-menu" class="gp-menu" role="menu" hidden>
+      <button type="button" class="gp-item" data-gp="match">
+        <span class="gp-ico">⚽</span>
+        <span class="gp-label">
+          <strong>New match</strong>
+          <em>Blank lineup on the pitch</em>
+        </span>
+      </button>
+      <button type="button" class="gp-item" data-gp="player">
+        <span class="gp-ico">👤</span>
+        <span class="gp-label">
+          <strong>New player</strong>
+          <em>Add to your squad</em>
+        </span>
+      </button>
+      <button type="button" class="gp-item" data-gp="play">
+        <span class="gp-ico">📋</span>
+        <span class="gp-label">
+          <strong>New play</strong>
+          <em>Open Plays tab</em>
+        </span>
+      </button>
+      <button type="button" class="gp-item" data-gp="formation">
+        <span class="gp-ico">✎</span>
+        <span class="gp-label">
+          <strong>New formation</strong>
+          <em>Edit positions on pitch</em>
+        </span>
+      </button>
+    </div>
+  `;
+
+  const toggle = slot.querySelector('#gp-toggle');
+  const menu = slot.querySelector('#gp-menu');
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const openMenu = () => {
+    menu.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', onDocClick, true);
+    document.addEventListener('keydown', onKey, true);
+  };
+  function onDocClick(e) {
+    if (!slot.contains(e.target)) closeMenu();
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') { closeMenu(); toggle.focus(); }
+  }
+
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    if (menu.hidden) openMenu(); else closeMenu();
+  };
+
+  slot.querySelectorAll('.gp-item').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.gp;
+      closeMenu();
+      try { await flushAutosave(); } catch (_) {}
+      await handleGlobalPlusAction(action, user, teamId);
+    };
+  });
+}
+
+async function handleGlobalPlusAction(action, user, teamId) {
+  if (action === 'match') {
+    _pendingLineupLoad = null;
+    activeTab = 'lineups';
+    openCards.clear();
+    await renderTeamDashboard(user, teamId);
+    // Explicitly reset the in-memory current lineup to a fresh blank state
+    if (editor && editor.mode === 'lineup') {
+      if (hasUnsaved && typeof hasUnsaved === 'function' && hasUnsaved()) {
+        // keep whatever the user had — they already got redirected, treat as intent
+      }
+      editor.current = newLineupState();
+      try { _lastSavedHash = _lineupContentHash(editor.current); } catch (_) {}
+      renderLineupsTab();
+    }
+    return;
+  }
+  if (action === 'player') {
+    activeTab = 'squad';
+    openCards.clear();
+    await renderTeamDashboard(user, teamId);
+    // Focus the add-player name input if it's there
+    setTimeout(() => {
+      const el = document.getElementById('ap-name');
+      if (el) {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+        el.focus();
+      }
+    }, 80);
+    return;
+  }
+  if (action === 'play') {
+    activeTab = 'plays';
+    openCards.clear();
+    await renderTeamDashboard(user, teamId);
+    // Nudge: flash a small hint below the plays list
+    setTimeout(() => {
+      const tabEl = document.getElementById('tab-content');
+      if (!tabEl || tabEl.querySelector('.gp-hint')) return;
+      const hint = document.createElement('div');
+      hint.className = 'gp-hint';
+      hint.innerHTML = `💡 To create a play: open <strong>Matches</strong>, arrange your lineup, then tap <strong>Save as play</strong>.`;
+      tabEl.prepend(hint);
+      setTimeout(() => { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 400); }, 4500);
+    }, 60);
+    return;
+  }
+  if (action === 'formation') {
+    activeTab = 'lineups';
+    openCards.clear();
+    await renderTeamDashboard(user, teamId);
+    // Enable position-edit mode so the "Save as new formation" button is visible
+    if (editor && editor.mode === 'lineup') {
+      _posEditMode = true;
+      renderLineupsTab();
+      setTimeout(() => {
+        const tabEl = document.getElementById('tab-content');
+        if (!tabEl || tabEl.querySelector('.gp-hint')) return;
+        const hint = document.createElement('div');
+        hint.className = 'gp-hint';
+        hint.innerHTML = `💡 Drag players to arrange positions, then tap <strong>Save as new formation…</strong>`;
+        tabEl.prepend(hint);
+        setTimeout(() => { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 400); }, 5000);
+      }, 60);
+    }
+    return;
+  }
 }
 
 // ---------- Teams home ----------
@@ -1166,6 +1320,9 @@ async function renderTeamDashboard(user, teamId) {
       };
     });
   }
+
+  // Global "+" quick-create menu — coaches/admins only
+  renderGlobalPlus(user, teamId, canEdit);
 
   appEl.innerHTML = `<div id="tab-content"></div>`;
 
