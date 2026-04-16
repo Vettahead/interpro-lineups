@@ -2493,6 +2493,61 @@ function matchResultBadge(l) {
   return null;
 }
 
+// Compact result card for the coach editor — sits above the Availability bar
+// on any match that has a result recorded. Shows the coloured FT/HT chip,
+// a secondary HT line if both are set, scorer list, and MOTM list (with reasons
+// in muted italic). Empty string when there's nothing to show so the caller
+// can just interpolate it unconditionally.
+function compactMatchResultCardHtml(current) {
+  if (!current) return '';
+  const badge = matchResultBadge(current);
+  const hasMotm = Array.isArray(current.motm) && current.motm.length > 0;
+  const hasScorers = Array.isArray(current.goalscorers) && current.goalscorers.some(g => (parseInt(g?.count, 10) || 0) > 0);
+  if (!badge && !hasMotm && !hasScorers) return '';
+
+  const color = badge ? badge.color : '#888';
+  const playersById = Object.fromEntries((editor?.players || []).map(p => [p.id, p]));
+
+  const scorerLine = (current.goalscorers || [])
+    .map(g => {
+      const p = playersById[g.player_id];
+      if (!p) return null;
+      const c = parseInt(g.count, 10) || 0;
+      if (c <= 0) return null;
+      return escapeHtml(p.name || '—') + (c > 1 ? ` (${c})` : '');
+    })
+    .filter(Boolean)
+    .join(', ');
+
+  const motmLine = (current.motm || [])
+    .map(m => {
+      const p = playersById[m.player_id];
+      if (!p) return null;
+      const reason = (m.reason || '').trim();
+      return escapeHtml(p.name || '—') + (reason ? ` <span style="font-style:italic;color:#666">— ${escapeHtml(reason)}</span>` : '');
+    })
+    .filter(Boolean)
+    .join(', ');
+
+  // Secondary HT line only when FT is the primary chip (i.e. we have both).
+  const ftSet = current.our_score_ft != null && current.opp_score_ft != null;
+  const htSet = current.our_score_ht != null && current.opp_score_ht != null;
+  const showHtDetail = ftSet && htSet;
+
+  return `
+    <div class="me-result-card" style="background:#fafafa;border:1px solid #e5e5e5;border-left:4px solid ${color};border-radius:6px;padding:0.5rem 0.65rem;margin-bottom:0.4rem">
+      ${badge ? `
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <span style="background:${color};color:#fff;font-weight:700;font-size:0.78rem;padding:0.15rem 0.5rem;border-radius:3px;letter-spacing:0.02em">${escapeHtml(badge.text)}</span>
+          ${showHtDetail ? `<span class="muted" style="font-size:0.72rem">HT ${current.our_score_ht}-${current.opp_score_ht}</span>` : ''}
+        </div>
+      ` : ''}
+      ${scorerLine ? `<div style="font-size:0.78rem;margin-top:${badge ? '0.3rem' : '0'};color:#333">⚽ ${scorerLine}</div>` : ''}
+      ${motmLine ? `<div style="font-size:0.78rem;margin-top:0.15rem;color:#333">🏆 ${motmLine}</div>` : ''}
+    </div>
+  `;
+}
+
 function newLineupState() {
   return {
     id: null,
@@ -3728,6 +3783,8 @@ function renderLineupsTab() {
         </div>
 
         <div class="me-panel-col">
+          <!-- Result summary (only on played matches with a score/scorers/MOTM recorded) -->
+          ${compactMatchResultCardHtml(current)}
           <!-- Availability — permanently above the sub-tab strip -->
           ${availBarHtml}
 
