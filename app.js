@@ -2785,14 +2785,15 @@ function applyAvailabilityDecorations() {
     const oldDot = chip.querySelector('.avail-dot');
     if (oldDot) oldDot.remove();
     if (!s) return;
-    const colour = s === 'available' ? '#2e7d32'
+    // Bright green is chosen deliberately — dark green disappears against the pitch.
+    const colour = s === 'available' ? '#22c55e'
                  : s === 'maybe'     ? '#f9a825'
-                 : s === 'unavailable' ? '#c62828'
+                 : s === 'unavailable' ? '#e53935'
                  : null;
     if (!colour) return;
     const dot = document.createElement('div');
     dot.className = 'avail-dot';
-    dot.style.cssText = `position:absolute;bottom:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:${colour};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);z-index:3;pointer-events:none`;
+    dot.style.cssText = `position:absolute;bottom:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:${colour};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:3;pointer-events:none`;
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     chip.appendChild(dot);
   });
