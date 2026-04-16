@@ -1877,10 +1877,35 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 /* Floating Share pill — phone only, visible once a lineup is saved. */
 .share-fab { display: none; }
 
+/* Phone-only status row. Shown on ≤899px; mirrors the desktop header's status pill
+   so coaches can change Draft/Availability/Show-lineup from mobile without tabbing to Info. */
+.me-phone-status-row { display: none; }
+
 @media (max-width: 899px) {
   /* On phone: hide the desktop match header. The app's top bar already shows
      the team name, and sub-tabs cover what the header would duplicate. */
   .me-header { display: none; }
+
+  /* Show the phone-only status row (hidden on desktop). Sits between the availability
+     bar and the sub-tab strip inside .me-panel-col. */
+  .me-phone-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 0 0 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .me-phone-status-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
 
   /* Stack pitch on top, panel below. */
   .me-body { grid-template-columns: 1fr; }

@@ -2831,7 +2831,7 @@ function matchSummaryHtml(current, team, canEdit) {
       <div class="muted" style="font-size:0.8rem;margin-top:0.25rem">
         ${current.arrival_time ? '🚌 ' + escapeHtml(current.arrival_time) : ''}${current.arrival_time && current.kickoff_time ? ' · ' : ''}${current.kickoff_time ? '⚽ KO ' + escapeHtml(current.kickoff_time) : ''}
       </div>` : ''}
-    ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">📋 Arrange match</button>` : ''}
+    ${canEdit ? `<button class="primary btn-full" id="open-match-details" style="margin-top:0.5rem">✎ Edit match</button>` : ''}
     ${current.id ? `<button class="primary btn-full" id="open-share-modal" style="margin-top:0.35rem;background:var(--blue-2);color:#fff;border:none;font-weight:600">📤 Share match</button>` : ''}
     ${current.id && draftDisabled ? `<div class="muted" style="font-size:0.7rem;margin-top:0.25rem">⚠ Draft — share links won't work for parents until you switch state in <em>Arrange match</em>.</div>` : ''}
     <div id="save-msg" class="muted" style="margin-top:0.35rem;min-height:1em;font-size:0.8rem"></div>
@@ -3323,7 +3323,19 @@ function renderLineupsTab() {
   const availBarHtml = current?.id
     ? (availableOnThisMatch
         ? `<div class="me-avail-bar" id="availability-panel"></div>`
-        : `<div class="me-avail-bar"><p class="muted" style="font-size:0.85rem;margin:0">No availability responses yet — open availability from <em>Arrange match</em> (Info tab).</p></div>`)
+        : `<div class="me-avail-bar"><p class="muted" style="font-size:0.85rem;margin:0">No availability responses yet — open availability from <em>Edit match</em> (Info tab).</p></div>`)
+    : '';
+
+  // Phone-only status row. Desktop shows the status pill in `.me-header` (hidden on phone),
+  // so this row gives coaches access to the same status-change modal on mobile widths.
+  // CSS (.me-phone-status-row) hides this on ≥900px and shows it below that.
+  const phoneStatusRowHtml = (canEdit && current?.id)
+    ? `
+      <div class="me-phone-status-row">
+        <span class="me-phone-status-label">Status</span>
+        <button type="button" class="me-status-pill me-status-pill-${_stat} js-open-status">${statusLabel} ▾</button>
+      </div>
+    `
     : '';
 
   // Info panel: just the match-summary card (Arrange / Share buttons + save-msg).
@@ -3348,7 +3360,7 @@ function renderLineupsTab() {
           <div class="me-stat me-stat-status">
             <div class="me-stat-label">STATUS</div>
             ${canEdit && current?.id
-              ? `<button type="button" class="me-status-pill me-status-pill-${_stat}" id="me-open-status">${statusLabel} ▾</button>`
+              ? `<button type="button" class="me-status-pill me-status-pill-${_stat} js-open-status" id="me-open-status">${statusLabel} ▾</button>`
               : `<div class="me-stat-val">${statusLabel}</div>`}
           </div>
         </div>
@@ -3375,6 +3387,9 @@ function renderLineupsTab() {
         <div class="me-panel-col">
           <!-- Availability — permanently above the sub-tab strip -->
           ${availBarHtml}
+
+          <!-- Phone-only status row (hidden on desktop where the header shows status) -->
+          ${phoneStatusRowHtml}
 
           ${subTabsHtml}
           <div class="me-panel card">
@@ -3533,17 +3548,17 @@ async function openShareToWhatsAppPrompt(lineupId) {
   const team = editor?.team || null;
 
   const overlay = document.createElement('div');
-  overlay.className = 'map-modal-overlay status-modal-overlay';
+  overlay.className = 'picker-overlay';
   overlay.innerHTML = `
-    <div class="map-modal status-modal" role="dialog" aria-label="Share match to WhatsApp" style="max-width:440px">
-      <div class="map-modal-header">
-        <h3 style="margin:0">Share to WhatsApp now?</h3>
-        <button type="button" class="map-modal-close" data-close aria-label="Close">×</button>
+    <div class="picker-modal" role="dialog" aria-label="Share match to WhatsApp" style="max-width:440px">
+      <div class="picker-header">
+        <h3>Share to WhatsApp now?</h3>
+        <button type="button" class="picker-close" data-close aria-label="Close">×</button>
       </div>
-      <div class="map-modal-body status-modal-body">
+      <div class="picker-body">
         <p style="margin:0 0 0.6rem;font-size:0.9rem">Send parents the match details + availability link. This will switch the match to <strong>Availability</strong> so the link works right away.</p>
-        <p class="muted" style="margin:0 0 0.8rem;font-size:0.8rem">WhatsApp will open in a new tab with the message pre-filled — paste it into your team's group chat.</p>
-        <div id="wa-prompt-msg" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.4rem;color:var(--danger,red)"></div>
+        <p class="muted" style="margin:0 0 0.9rem;font-size:0.8rem">WhatsApp will open in a new tab with the message pre-filled — paste it into your team's group chat.</p>
+        <div id="wa-prompt-msg" style="font-size:0.85rem;min-height:0;margin-bottom:0.4rem;color:var(--danger,red)"></div>
         <div style="display:flex;gap:0.5rem;justify-content:flex-end;flex-wrap:wrap">
           <button type="button" class="mw-btn" data-close>Not now</button>
           <button type="button" class="mw-btn mw-primary" id="wa-prompt-yes" style="background:#25D366;border-color:#25D366">💬 Yes, share</button>
@@ -4844,9 +4859,11 @@ function wireLineupEvents() {
     renderLineupsTab();
   };
 
-  // Status pill → open status-change modal
-  const statusPill = document.getElementById('me-open-status');
-  if (statusPill) statusPill.onclick = () => openStatusModal();
+  // Status pill → open status-change modal. Both the desktop header pill and the
+  // phone-only status row carry the `.js-open-status` class, so wire them all.
+  document.querySelectorAll('.js-open-status').forEach(btn => {
+    btn.onclick = () => openStatusModal();
+  });
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
