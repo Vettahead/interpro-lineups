@@ -1517,6 +1517,9 @@ async function renderTeamDashboard(user, teamId) {
     editor = {
       mode: 'lineup',
       team, canEdit, players, lineups, plays, customFormations,
+      currentUser: user,
+      currentUserId: user.id,
+      currentUserRole: role,
       current
     };
     renderLineupsTab();
@@ -2932,15 +2935,15 @@ function wireMatchDetailsFields(closeModal) {
   };
 }
 
-// Which phone-only tab is active in the Matches editor. Survives re-renders
-// (e.g. clicking a saved lineup) so the coach doesn't get bounced back to Squad.
-// On desktop this attribute is ignored by CSS and the full three-column layout is shown.
+// Active sub-tab inside the match editor (works on both phone and desktop post-redesign).
+// Survives re-renders so the coach doesn't get bounced back to Squad.
 let _lineupPhoneTab = 'squad';
 const _LINEUP_PHONE_TABS = [
-  { key: 'squad',     label: 'Squad',     icon: '👥' },
-  { key: 'formation', label: 'Formation', icon: '📐' },
-  { key: 'avail',     label: 'Avail',     icon: '📅' },
-  { key: 'info',      label: 'Info',      icon: 'ℹ' },
+  { key: 'squad',     label: 'Squad',        icon: '' },
+  { key: 'subs',      label: 'Subs',         icon: '' },
+  { key: 'formation', label: 'Formation',    icon: '' },
+  { key: 'avail',     label: 'Availability', icon: '' },
+  { key: 'info',      label: 'Info',         icon: '' },
 ];
 
 function renderLineupsTab() {
@@ -3003,91 +3006,149 @@ function renderLineupsTab() {
     <button class="btn-full" id="save-as-play" style="margin-bottom:0">★ Save as play…</button>
   `) : '';
 
-  // Phone tab strip markup (hidden on desktop via CSS). Lets the coach jump
-  // between Squad / Formation / Avail / Info without scrolling through them all.
+  // Availability state for this match and count for the sub-tab badge.
   const curStatusForAvail = current?.lineup_status || (current?.published ? 'published' : 'draft');
   const availableOnThisMatch = !!current?.id && (curStatusForAvail === 'availability' || curStatusForAvail === 'published');
-  const phoneTabsHtml = `
-    <nav class="lineup-phone-tabs" role="tablist" aria-label="Match editor sections">
-      ${_LINEUP_PHONE_TABS.map(t => `
-        <button class="lineup-phone-tab ${_lineupPhoneTab === t.key ? 'active' : ''}"
-                role="tab"
-                aria-selected="${_lineupPhoneTab === t.key ? 'true' : 'false'}"
-                data-ptab="${t.key}">
-          <span class="lpt-ic" aria-hidden="true">${t.icon}</span> ${escapeHtml(t.label)}
-        </button>
-      `).join('')}
+  const availCount = current?.id ? Object.keys(editor.availability || {}).length : 0;
+
+  // Sub-tab strip — now shown on both phone and desktop. `lineup-phone-tab[data-ptab]` class names
+  // are kept stable so wireLineupEvents selector logic still binds correctly.
+  const subTabsHtml = `
+    <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Match editor sections">
+      ${_LINEUP_PHONE_TABS.map(t => {
+        const label = t.key === 'avail'
+          ? `Availability${availCount ? ` <span class="me-subtab-count">${availCount}</span>` : ''}`
+          : escapeHtml(t.label);
+        return `
+          <button class="lineup-phone-tab ${_lineupPhoneTab === t.key ? 'active' : ''}"
+                  role="tab"
+                  aria-selected="${_lineupPhoneTab === t.key ? 'true' : 'false'}"
+                  data-ptab="${t.key}">${label}</button>
+        `;
+      }).join('')}
     </nav>
   `;
 
-  // Availability card: only meaningful once the match is open to parents. We still
-  // render the card wrapper so the Avail tab has something to show (with a hint
-  // pointing the coach to open availability) when in draft.
-  const availabilityCardHtml = `
-    <div data-phone-group="avail">
-      ${collapsibleCard('lineup-availability', 'Availability', availableOnThisMatch
-        ? `<div id="availability-panel"></div>`
-        : `<p class="muted" style="font-size:0.85rem;margin:0">No responses yet — open availability from <em>Arrange match</em> to let parents submit.</p>`
-      )}
+  // Summary card data
+  const _stat = current?.lineup_status || (current?.published ? 'published' : 'draft');
+  const statusLabel = _stat === 'published' ? 'Published' : _stat === 'availability' ? 'Availability' : 'Draft';
+  const v = effectiveVenue(current || {}, team);
+  const venueLine = [v.name, v.postcode].filter(Boolean).join(', ');
+  const haLbl = current?.home_away === 'away' ? 'Away' : 'Home';
+  const dateStr = current?.game_date ? formatDate(current.game_date) : '';
+  const summaryOpp = current?.opponent ? `vs ${current.opponent}` : 'New match';
+  const summaryMetaParts = [dateStr, haLbl, venueLine].filter(Boolean);
+  const koStat   = current?.kickoff_time ? escapeHtml(current.kickoff_time) : '—';
+  const arrStat  = current?.arrival_time ? escapeHtml(current.arrival_time) : '—';
+  const formStat = current?.formation    ? escapeHtml(current.formation)    : '—';
+  const subtitleParts = [dateStr, current?.kickoff_time ? 'KO ' + escapeHtml(current.kickoff_time) : ''].filter(Boolean);
+
+  // Sub-tab panel bodies
+  const squadPanelHtml = `
+    <p class="muted me-hint">Tap an empty slot on the pitch, then tap a player here to assign. Dot colour = availability.</p>
+    <div class="palette" id="palette">${paletteHtml}</div>
+  `;
+
+  const subsPanelHtml = `
+    <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
+    <div class="subs-row" id="subs-row"></div>
+    ${canEdit ? `<p class="muted me-hint" style="margin-top:0.5rem">Tap an empty sub slot to add a player, or tap a sub's chip to remove.</p>` : ''}
+  `;
+
+  const formationPanelHtml = `
+    <div class="f-btns f-btns-col">${formationBtns}</div>
+    ${canEdit ? `
+      <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+        ${_posEditMode
+          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
+             <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+             <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
+             <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
+             <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
+          : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
+        }
+      </div>
+    ` : ''}
+    ${tacticsCardHtml}
+  `;
+
+  const availPanelHtml = availableOnThisMatch
+    ? `<div id="availability-panel"></div>`
+    : `<p class="muted" style="font-size:0.85rem;margin:0.25rem 0 0">No responses yet — open availability from <em>Arrange match</em> to let parents submit.</p>`;
+
+  // Info panel keeps the match-summary card (with Arrange / Share buttons + save-msg) and the
+  // saved-matches list (coach can switch between saved lineups without leaving the editor).
+  const infoPanelHtml = `
+    <div class="me-info-block">
+      ${matchSummaryHtml(current, team, canEdit)}
     </div>
+    ${collapsibleCard('lineup-saved', 'Other saved lineups', `
+      <div class="lineup-list">${lineupsListHtml}</div>
+      ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
+    `)}
   `;
 
   tabEl.innerHTML = `
-    <div class="lineup-layout" data-phone-tab="${_lineupPhoneTab}">
-      ${phoneTabsHtml}
-
-      <aside class="lineup-left">
-        <div data-phone-group="info">
-          ${collapsibleCard('lineup-saved', 'Matches / Lineups', `
-            <div class="lineup-list">${lineupsListHtml}</div>
-            ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
-          `)}
-          ${collapsibleCard('lineup-details', 'Match details', matchSummaryHtml(current, team, canEdit))}
+    <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
+      <!-- Desktop editor top bar: title left, Back/Share/+New right. Hidden on phone via CSS. -->
+      <header class="me-topbar">
+        <div class="me-title-block">
+          <h2 class="me-title">${escapeHtml(summaryOpp)}</h2>
+          <div class="me-subtitle muted">${subtitleParts.length ? escapeHtml(subtitleParts.join(' · ')) : 'Unsaved match'}</div>
         </div>
-        ${availabilityCardHtml}
-      </aside>
+        <div class="me-actions">
+          <button type="button" class="me-btn me-btn-back" id="me-btn-back">← Back</button>
+          ${current?.id ? `<button type="button" class="me-btn me-btn-share" id="me-btn-share">Share</button>` : ''}
+          ${canEdit ? `<button type="button" class="me-btn me-btn-new" id="me-btn-new">+ New</button>` : ''}
+        </div>
+      </header>
 
-      <div class="lineup-center">
-        <div class="card pitch-card">
-          <div class="pitch" id="pitch">
-            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-            <div class="slots-layer" id="slots-layer"></div>
-            <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
-            <div class="ball-el" id="ball-el"></div>
+      <!-- Summary card: opponent/date/venue left, KICK OFF / ARRIVAL / FORMATION / STATUS right. Desktop-only via CSS. -->
+      <section class="me-summary">
+        <div class="me-summary-left">
+          <div class="me-summary-opp">${escapeHtml(summaryOpp)}</div>
+          <div class="me-summary-meta muted">${summaryMetaParts.length ? escapeHtml(summaryMetaParts.join(' · ')) : '<em>No match details yet</em>'}</div>
+        </div>
+        <div class="me-summary-stats">
+          <div class="me-stat"><div class="me-stat-label">KICK OFF</div><div class="me-stat-val">${koStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">ARRIVAL</div><div class="me-stat-val">${arrStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">FORMATION</div><div class="me-stat-val">${formStat}</div></div>
+          <div class="me-stat"><div class="me-stat-label">STATUS</div><div class="me-stat-val">${statusLabel}</div></div>
+        </div>
+      </section>
+
+      <!-- Body: pitch (top on phone / left on desktop) + sub-tab panel (below on phone / right on desktop). -->
+      <div class="me-body">
+        <div class="me-pitch-col">
+          <div class="card pitch-card">
+            <div class="pitch" id="pitch">
+              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+              <div class="slots-layer" id="slots-layer"></div>
+              <canvas class="tactics-canvas" id="tactics-canvas"></canvas>
+              <div class="ball-el" id="ball-el"></div>
+            </div>
           </div>
-          <div class="subs-bar">
-            <div class="subs-label">SUBSTITUTES (${current.subs.filter(Boolean).length}/${MAX_SUBS})</div>
-            <div class="subs-row" id="subs-row"></div>
+        </div>
+
+        <div class="me-panel-col">
+          ${subTabsHtml}
+          <div class="me-panel card">
+            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
+            <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
+            <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
+            <div data-phone-group="avail" class="me-panel-body">${availPanelHtml}</div>
+            <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
           </div>
         </div>
       </div>
 
-      <aside class="lineup-right">
-        <div data-phone-group="formation">
-          ${tacticsCardHtml}
-          ${collapsibleCard('lineup-formation', 'Formation', `
-            <div class="f-btns f-btns-col">${formationBtns}</div>
-            ${canEdit ? `
-              <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
-                ${_posEditMode
-                  ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
-                     <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
-                     <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
-                     <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
-                     <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
-                  : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
-                }
-              </div>
-            ` : ''}
-          `)}
-        </div>
-        <div data-phone-group="squad">
-          ${collapsibleCard('lineup-players', 'Available players', `
-            <div class="palette" id="palette">${paletteHtml}</div>
-            ${canEdit ? `<p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Tap a position on the pitch to pick a player, or drag on desktop.</p>` : ''}
-          `)}
-        </div>
-      </aside>
+      ${current?.id ? `
+        <!-- Floating Share pill (phone only). Visible once a lineup is saved. -->
+        <button type="button" class="share-fab" id="me-share-fab" aria-label="Share match">
+          <span class="share-fab-ic" aria-hidden="true">🔗</span>
+          <span class="share-fab-label">Share</span>
+        </button>
+      ` : ''}
     </div>
   `;
 
@@ -4107,6 +4168,31 @@ function wireLineupEvents() {
       renderLineupsTab();
     };
   });
+
+  // Editor top-bar buttons (desktop) and Share FAB (phone)
+  const backBtn  = tabEl.querySelector('#me-btn-back');
+  const shareBtn = tabEl.querySelector('#me-btn-share');
+  const newBtnTop= tabEl.querySelector('#me-btn-new');
+  const shareFab = tabEl.querySelector('#me-share-fab');
+  if (backBtn) backBtn.onclick = async () => {
+    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+    try { await flushAutosave(); } catch (_) {}
+    activeTab = 'fixtures';
+    openCards.clear();
+    const u = editor.currentUser || { id: editor.currentUserId };
+    const tid = editor.team?.id;
+    if (tid) renderTeamDashboard(u, tid);
+  };
+  const openShareForCurrent = (opener) => openShareModal({ lineupId: editor?.current?.id, opener });
+  if (shareBtn) shareBtn.onclick = () => openShareForCurrent(shareBtn);
+  if (shareFab) shareFab.onclick = () => openShareForCurrent(shareFab);
+  if (newBtnTop) newBtnTop.onclick = () => {
+    // Mirrors the "+ New lineup" card button — starts a fresh blank lineup in the editor.
+    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+    editor.current = newLineupState();
+    _lastSavedHash = _lineupContentHash(editor.current);
+    renderLineupsTab();
+  };
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');

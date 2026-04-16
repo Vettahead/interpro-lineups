@@ -1668,63 +1668,172 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   .share-actions .share-btn { flex: 1 1 100%; }
 }
 
-/* ---------- Matches editor: phone-only tab strip ---------- */
-/* Desktop: hide the phone tabs completely — full three-column layout stays as-is */
-.lineup-phone-tabs { display: none; }
+/* ---------- Match editor: new sub-tab layout (phone + desktop) ---------- */
+
+/* When .match-editor is present, the outer container is a vertical stack,
+   not the old 3-column grid. */
+.lineup-layout.match-editor {
+  display: block;
+  gap: 0;
+}
+
+/* Desktop top bar: title left, Back / Share / +New right. */
+.me-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.me-title-block { min-width: 0; }
+.me-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.me-subtitle {
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+}
+.me-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.me-btn {
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.me-btn:hover { border-color: var(--blue-2); color: var(--blue-2); }
+.me-btn-back  { background: #fff; }
+.me-btn-share { background: var(--blue); color: #fff; border-color: var(--blue); }
+.me-btn-share:hover { background: #162a68; color: #fff; border-color: #162a68; }
+.me-btn-new   { background: #f97316; color: #fff; border-color: #f97316; }
+.me-btn-new:hover { background: #ea6a10; color: #fff; border-color: #ea6a10; }
+
+/* Summary card: opponent/date/venue left, 4 mini-stats right-aligned. */
+.me-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.9rem;
+}
+.me-summary-left { min-width: 0; flex: 1 1 auto; }
+.me-summary-opp  { font-weight: 700; font-size: 1.05rem; color: var(--text); }
+.me-summary-meta { font-size: 0.85rem; margin-top: 0.2rem; }
+.me-summary-stats {
+  display: flex;
+  gap: 1.75rem;
+  flex-shrink: 0;
+}
+.me-stat { text-align: right; }
+.me-stat-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.me-stat-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 0.15rem;
+}
+
+/* Main body: pitch left, sub-tab panel right on desktop; stacked on phone. */
+.me-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.me-pitch-col { min-width: 0; }
+.me-panel-col { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* The panel that houses all the sub-tab bodies. */
+.me-panel { padding: 0.9rem 1rem; }
+.me-panel-body { display: block; }
+.me-hint { font-size: 0.8rem; margin: 0 0 0.5rem; }
+
+/* Availability count badge on the sub-tab label. */
+.me-subtab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.35rem;
+  margin-left: 0.25rem;
+  background: #f97316;
+  color: #fff;
+  border-radius: 9px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Sub-tab strip — shown on both phone and desktop now. */
+.lineup-phone-tabs {
+  display: flex;
+  gap: 0.2rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 0.1rem;
+  margin: 0 0 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.lineup-phone-tab {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.9rem;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1.1;
+  margin-bottom: -1px; /* overlap the strip's border-bottom so the active bar meets it */
+}
+.lineup-phone-tab:hover { color: var(--text); }
+.lineup-phone-tab.active {
+  color: var(--text);
+  border-bottom-color: #f97316; /* orange-500 underline */
+}
+
+/* Sub-tab filtering applies at ALL widths now (not just phone). */
+.lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
+.lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
+.lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
+.lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
+.lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
+
+/* Floating Share pill — phone only, visible once a lineup is saved. */
+.share-fab { display: none; }
 
 @media (max-width: 899px) {
-  /* Sticky tab strip that sits just below the pitch so it's always within thumb reach */
-  .lineup-phone-tabs {
-    display: flex;
-    gap: 0.35rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0.4rem 0.1rem;
-    margin: 0.25rem 0 0.6rem;
-    position: sticky;
-    top: 0;
-    z-index: 6;
-    background: var(--surface, #fff);
-    border-bottom: 1px solid var(--border);
-    /* The CSS grid is 1-column on phone; tabs go in the natural order (after pitch). */
-    order: 2;
-  }
-  /* Push pitch above tabs, tabs above cards */
-  .lineup-layout > .lineup-center { order: 1; }
-  .lineup-layout > .lineup-phone-tabs { order: 2; }
-  .lineup-layout > .lineup-left     { order: 3; }
-  .lineup-layout > .lineup-right    { order: 4; }
+  /* On phone: hide the desktop top bar + summary card. The main app header
+     already shows the team name, and sub-tabs cover what the summary would duplicate. */
+  .me-topbar  { display: none; }
+  .me-summary { display: none; }
 
-  .lineup-phone-tab {
-    flex: 0 0 auto;
-    padding: 0.5rem 0.95rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: #fff;
-    font-size: 0.85rem;
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-    color: var(--text, #222);
-    line-height: 1.1;
-  }
-  .lineup-phone-tab .lpt-ic { margin-right: 0.25rem; }
-  .lineup-phone-tab.active {
-    background: var(--blue-2, #1e3a8a);
-    color: #fff;
-    border-color: transparent;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  }
+  /* Stack pitch on top, panel below. */
+  .me-body { grid-template-columns: 1fr; }
 
-  /* Only show the phone-group matching the active tab */
-  .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
-  .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
-  .lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
-  .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
-
-  /* Shrink the pitch on phone so the tab strip + some active-tab content
-     are visible within the same viewport — no scrolling required to see the tabs.
-     Subs bar is sized to the same width so the two line up cleanly. */
+  /* Shrink the pitch a bit so the sub-tab strip is in view without scrolling. */
   .lineup-layout .pitch-card {
     padding: 0.25rem;
     margin-bottom: 0.25rem !important;
@@ -1732,12 +1841,30 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
     margin-left: auto;
     margin-right: auto;
   }
-  .lineup-layout .pitch {
-    width: 100%;
-    margin: 0 auto;
+  .lineup-layout .pitch { width: 100%; margin: 0 auto; }
+
+  /* Floating Share pill (fixed bottom-right). */
+  .share-fab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    position: fixed;
+    right: 0.9rem;
+    bottom: 1rem;
+    z-index: 40;
+    padding: 0.7rem 1.1rem;
+    background: #f97316;
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    font: inherit;
+    font-weight: 700;
+    font-size: 0.95rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    cursor: pointer;
   }
-  .lineup-layout .subs-bar { padding: 0.35rem 0.5rem; }
-  .lineup-layout .subs-label { font-size: 0.58rem; }
+  .share-fab:hover { background: #ea6a10; }
+  .share-fab-ic { font-size: 1rem; }
 }
 
 /* ---------- Global "+" quick-create menu ---------- */
