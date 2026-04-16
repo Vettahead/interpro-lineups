@@ -3571,7 +3571,6 @@ function openStatusModal() {
     if (idx >= 0) editor.lineups[idx] = data;
     await logAudit(editor.team.id, 'lineup', data.id, 'status:' + nextStatus, { from: currentStatus });
     close();
-    rerenderBody();
     renderLineupsTab();
 
     // After switching to availability, auto-open the share modal
