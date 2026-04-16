@@ -1495,10 +1495,11 @@ function _lineupContentHash(c) {
     kickoff_time: c.kickoff_time, arrival_time: c.arrival_time, notes: c.notes,
     location_name: c.location_name, location_postcode: c.location_postcode,
     location_lat: c.location_lat, location_lng: c.location_lng,
-    // include result fields so autosave fires when coach enters a score / scorers
+    // include result fields so autosave fires when coach enters a score / scorers / motm
     our_score_ht: c.our_score_ht, opp_score_ht: c.opp_score_ht,
     our_score_ft: c.our_score_ft, opp_score_ft: c.opp_score_ft,
-    goalscorers: c.goalscorers
+    goalscorers: c.goalscorers,
+    motm: c.motm
   });
 }
 function scheduleAutosaveIfPublished() {
@@ -1661,7 +1662,8 @@ async function renderTeamDashboard(user, teamId) {
           opp_score_ht: l.opp_score_ht ?? null,
           our_score_ft: l.our_score_ft ?? null,
           opp_score_ft: l.opp_score_ft ?? null,
-          goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
+          goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : [],
+          motm: Array.isArray(l.data?.motm) ? l.data.motm.map(m => ({ ...m })) : []
         };
         _lastSavedHash = _lineupContentHash(current);
         _lineupPhoneTab = 'squad';
@@ -1809,6 +1811,8 @@ const HELP_SECTIONS = [
       <p>Click any item in <strong>Matches / Lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
       <h4>Recording the result after the game</h4>
       <p>Once kick-off has passed, an <strong>⚽ Result</strong> section appears at the bottom of <strong>✎ Edit match</strong>. Enter the half-time and full-time scores, and use the <strong>+ / −</strong> buttons next to each player to log who scored for our team (opposition is just a total). The picker shows the matchday squad if one was picked, or the whole squad if you skipped that step. The result then appears as a coloured chip on the match card list (green W, red L, grey D) and at the top of the Info card.</p>
+      <h4>Man of the Match</h4>
+      <p>In the same Result section, tap the <strong>☆</strong> next to any player to nominate them as Man of the Match. You can pick more than one (joint MOTM is fine). A <strong>Why?</strong> text box appears under the name once the star is filled — write a sentence about what stood out, or leave it blank. MOTMs show up in the Info card as a 🏆 line under the score.</p>
       <h4>What do the coloured rings around player chips mean?</h4>
       <p>Once availability responses come in, players are visually flagged on the pitch and palette:</p>
       <ul>
@@ -2458,7 +2462,8 @@ function matchHasResult(current) {
   return current && (
     current.our_score_ht != null || current.opp_score_ht != null ||
     current.our_score_ft != null || current.opp_score_ft != null ||
-    (Array.isArray(current.goalscorers) && current.goalscorers.length > 0)
+    (Array.isArray(current.goalscorers) && current.goalscorers.length > 0) ||
+    (Array.isArray(current.motm) && current.motm.length > 0)
   );
 }
 
@@ -2515,7 +2520,8 @@ function newLineupState() {
     opp_score_ht: null,     // half-time goals against
     our_score_ft: null,     // full-time goals for us
     opp_score_ft: null,     // full-time goals against
-    goalscorers: []         // [{ player_id, count }] — only our scorers, opposition is just a total
+    goalscorers: [],        // [{ player_id, count }] — only our scorers, opposition is just a total
+    motm: []                // [{ player_id, reason }] — multiple allowed; reason optional
   };
 }
 
@@ -2878,10 +2884,12 @@ function matchSummaryHtml(current, team, canEdit) {
       status === 'published'    ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#2a7">● Published</div>`
     : status === 'availability' ? `<div style="margin-top:0.25rem;font-size:0.8rem;color:#b88800">◐ Collecting availability</div>`
     :                             `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">○ Draft</div>`;
-  // Result line — only when a score has been entered. Lists scorers underneath if any.
+  // Result line — shown when a score OR a MOTM has been entered. Lists scorers
+  // and MOTM names underneath if any.
   const resBadge = matchResultBadge(current);
+  const hasMotm = Array.isArray(current.motm) && current.motm.length > 0;
   let resultLine = '';
-  if (resBadge) {
+  if (resBadge || hasMotm) {
     const playersById = Object.fromEntries((editor?.players || []).map(p => [p.id, p]));
     const scorerLine = (current.goalscorers || [])
       .map(g => {
@@ -2893,11 +2901,23 @@ function matchSummaryHtml(current, team, canEdit) {
       })
       .filter(Boolean)
       .join(', ');
+    const motmLine = (current.motm || [])
+      .map(m => {
+        const p = playersById[m.player_id];
+        if (!p) return null;
+        const reason = (m.reason || '').trim();
+        return escapeHtml(p.name || '—') + (reason ? ` <span class="muted" style="font-style:italic">— ${escapeHtml(reason)}</span>` : '');
+      })
+      .filter(Boolean)
+      .join(', ');
     resultLine = `
-      <div style="margin-top:0.4rem;padding:0.35rem 0.5rem;background:${resBadge.color};color:#fff;border-radius:4px;font-size:0.85rem;font-weight:700;text-align:center">
-        ${escapeHtml(resBadge.text)}
-      </div>
+      ${resBadge ? `
+        <div style="margin-top:0.4rem;padding:0.35rem 0.5rem;background:${resBadge.color};color:#fff;border-radius:4px;font-size:0.85rem;font-weight:700;text-align:center">
+          ${escapeHtml(resBadge.text)}
+        </div>
+      ` : ''}
       ${scorerLine ? `<div class="muted" style="font-size:0.75rem;margin-top:0.25rem">⚽ ${scorerLine}</div>` : ''}
+      ${motmLine ? `<div class="muted" style="font-size:0.75rem;margin-top:0.15rem">🏆 ${motmLine}</div>` : ''}
     `;
   }
   const draftDisabled = status === 'draft';
@@ -3042,6 +3062,11 @@ function matchResultSectionHtml(current, canEdit) {
   (current.goalscorers || []).forEach(g => {
     if (g && g.player_id) scorerMap[g.player_id] = parseInt(g.count, 10) || 0;
   });
+  // Map of player_id -> reason for MOTM lookup. Existence in the map = is MOTM.
+  const motmMap = {};
+  (current.motm || []).forEach(m => {
+    if (m && m.player_id) motmMap[m.player_id] = m.reason || '';
+  });
 
   const num = (v) => (v === '' || v == null) ? '' : String(v);
   const dis = canEdit ? '' : 'disabled';
@@ -3109,6 +3134,35 @@ function matchResultSectionHtml(current, canEdit) {
           : `<div id="md-scorers-list">${playerRowsHtml}</div>`}
         ${tallyMismatch ? `<div class="muted" style="font-size:0.7rem;color:#c33;margin-top:0.25rem">⚠ Scorer total (${scorerTotal}) doesn't match full-time goals (${ftUs}).</div>` : ''}
       </div>
+
+      ${candidatePlayers.length > 0 ? `
+        <div style="margin-top:0.75rem">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <strong style="font-size:0.85rem">🏆 Man of the Match</strong>
+            <span class="muted" style="font-size:0.7rem">${Object.keys(motmMap).length} selected</span>
+          </div>
+          <div class="muted" style="font-size:0.7rem;margin-bottom:0.25rem">Tap the star to nominate. You can pick more than one. Reason is optional.</div>
+          <div id="md-motm-list">
+            ${candidatePlayers.map(p => {
+              const isMotm = Object.prototype.hasOwnProperty.call(motmMap, p.id);
+              const reason = motmMap[p.id] || '';
+              const numBadge = (p.number != null) ? `<span style="display:inline-block;min-width:1.4em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.7rem;padding:0.05em 0.3em;border-radius:3px;margin-right:0.4em">${p.number}</span>` : '';
+              return `
+                <div class="md-motm-row" data-player-id="${escapeHtml(p.id)}" style="padding:0.25rem 0;border-top:1px solid #eee">
+                  <div style="display:flex;align-items:center;gap:0.4rem">
+                    <button type="button" class="md-motm-toggle" ${dis} aria-pressed="${isMotm}" aria-label="Toggle Man of the Match" title="Toggle Man of the Match"
+                      style="width:1.9em;height:1.9em;border:1px solid ${isMotm ? '#b88800' : '#ccc'};background:${isMotm ? '#fff7d6' : '#fff'};color:${isMotm ? '#b88800' : '#999'};font-size:1.1em;line-height:1;cursor:pointer;border-radius:4px">${isMotm ? '★' : '☆'}</button>
+                    <div style="flex:1;font-size:0.85rem">${numBadge}${escapeHtml(p.name || '—')}</div>
+                  </div>
+                  ${isMotm ? `
+                    <input type="text" class="md-motm-reason" value="${escapeHtml(reason)}" placeholder="Why? (optional)" maxlength="200" ${dis}
+                      style="width:100%;margin-top:0.25rem;padding:0.3em 0.4em;font-size:0.8rem;border:1px solid #ddd;border-radius:3px" />
+                  ` : ''}
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -3269,6 +3323,36 @@ function wireMatchDetailsFields(closeModal) {
     }
     if (minusEl) minusEl.onclick = () => setCount((parseInt(countEl?.value, 10) || 0) - 1);
     if (plusEl)  plusEl.onclick  = () => setCount((parseInt(countEl?.value, 10) || 0) + 1);
+  });
+
+  // ----- MOTM (Man of the Match) toggles + reason inputs -----
+  // Toggling the star adds/removes the player from `editor.current.motm` and
+  // rerenders so the reason input appears/disappears. Typing in the reason
+  // input updates state without rerendering (would steal focus).
+  overlay.querySelectorAll('.md-motm-row').forEach(row => {
+    const pid = row.dataset.playerId;
+    const findIdx = () => (editor.current.motm || []).findIndex(m => m.player_id === pid);
+    const toggleBtn = row.querySelector('.md-motm-toggle');
+    const reasonEl  = row.querySelector('.md-motm-reason');
+
+    if (toggleBtn) toggleBtn.onclick = () => {
+      editor.current.motm = editor.current.motm || [];
+      const idx = findIdx();
+      if (idx >= 0) {
+        editor.current.motm.splice(idx, 1);
+      } else {
+        editor.current.motm.push({ player_id: pid, reason: '' });
+      }
+      rerenderBody();
+    };
+
+    if (reasonEl) {
+      reasonEl.oninput = e => {
+        editor.current.motm = editor.current.motm || [];
+        const idx = findIdx();
+        if (idx >= 0) editor.current.motm[idx].reason = e.target.value;
+      };
+    }
   });
 
   overlay.querySelectorAll('.lineup-status-btn').forEach(btn => {
@@ -3747,6 +3831,45 @@ function applyAvailabilityDecorations() {
     dot.style.cssText = `position:absolute;bottom:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:${colour};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:3;pointer-events:none`;
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     chip.appendChild(dot);
+  });
+}
+
+// Decorate match-context chips with MOTM star (top-left) and goal-count ball (top-right).
+// Scoped to a root element so it doesn't bleed across tabs (e.g. fixture preview vs editor).
+// Idempotent: clears previous .motm-star / .goal-ball before re-adding so calling it from
+// renderPitch / renderSubsBar / renderFixturePitch on every render is safe.
+// No-op when arrays are empty (i.e. unplayed matches show nothing extra).
+function applyMatchDecorations(rootEl, motm, goalscorers) {
+  if (!rootEl) return;
+  const motmIds = new Set((Array.isArray(motm) ? motm : []).map(m => m && m.player_id).filter(Boolean));
+  const goalsBy = {};
+  for (const g of (Array.isArray(goalscorers) ? goalscorers : [])) {
+    const c = parseInt(g && g.count, 10) || 0;
+    if (g && g.player_id && c > 0) goalsBy[g.player_id] = (goalsBy[g.player_id] || 0) + c;
+  }
+  rootEl.querySelectorAll('[data-player-id]').forEach(chip => {
+    chip.querySelectorAll('.motm-star, .goal-ball').forEach(el => el.remove());
+    if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
+    const pid = chip.dataset.playerId;
+    if (motmIds.has(pid)) {
+      const star = document.createElement('div');
+      star.className = 'motm-star';
+      star.title = 'Man of the Match';
+      star.textContent = '★';
+      // Top-left so we don't collide with availability dot (bottom-right) or goal ball (top-right).
+      star.style.cssText = 'position:absolute;top:-6px;left:-6px;width:20px;height:20px;border-radius:50%;background:#ffc107;color:#3a2a00;font-size:13px;line-height:20px;text-align:center;font-weight:900;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none';
+      chip.appendChild(star);
+    }
+    const goals = goalsBy[pid];
+    if (goals && goals > 0) {
+      const ball = document.createElement('div');
+      ball.className = 'goal-ball';
+      ball.title = `${goals} goal${goals === 1 ? '' : 's'}`;
+      ball.textContent = String(goals);
+      // White circle with black border + black-pentagon hint via radial-gradient — reads as a soccer ball with the count inside.
+      ball.style.cssText = 'position:absolute;top:-6px;right:-6px;min-width:22px;height:22px;padding:0 3px;border-radius:50%;background:radial-gradient(circle at 70% 30%, #111 0 4px, transparent 5px), radial-gradient(circle at 30% 70%, #111 0 4px, transparent 5px), #fff;color:#000;font-size:12px;line-height:22px;text-align:center;font-weight:900;border:2px solid #111;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none';
+      chip.appendChild(ball);
+    }
   });
 }
 
@@ -4990,6 +5113,7 @@ function renderPitch() {
   }).join('');
 
   slotsLayer.innerHTML = slotsHtml;
+  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
 }
 
 // Kept as fallback helper (not currently called, but left in case)
@@ -5055,6 +5179,7 @@ function renderSubsBar() {
     `);
   }
   row.innerHTML = cells.join('');
+  applyMatchDecorations(row, current.motm, current.goalscorers);
 }
 
 function wireLineupEvents() {
@@ -5207,7 +5332,8 @@ function wireLineupEvents() {
         opp_score_ht: l.opp_score_ht ?? null,
         our_score_ft: l.our_score_ft ?? null,
         opp_score_ft: l.opp_score_ft ?? null,
-        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
+        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : [],
+        motm: Array.isArray(l.data?.motm) ? l.data.motm.map(m => ({ ...m })) : []
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       // Mark this state as already-saved so autosave doesn't fire on first render
@@ -5257,7 +5383,8 @@ function wireLineupEvents() {
         opp_score_ht: l.opp_score_ht ?? null,
         our_score_ft: l.our_score_ft ?? null,
         opp_score_ft: l.opp_score_ft ?? null,
-        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : []
+        goalscorers: Array.isArray(l.data?.goalscorers) ? l.data.goalscorers.map(g => ({ ...g })) : [],
+        motm: Array.isArray(l.data?.motm) ? l.data.motm.map(m => ({ ...m })) : []
       };
       tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
       _lastSavedHash = _lineupContentHash(editor.current);
@@ -6186,6 +6313,12 @@ async function saveLineupWithMsg(msgEl) {
         .map(g => ({ player_id: g.player_id, count: parseInt(g.count, 10) || 0 }))
         .filter(g => g.player_id && g.count > 0)
     : [];
+  // Normalise motm: trim reason, drop entries without a player_id.
+  const cleanMotm = Array.isArray(current.motm)
+    ? current.motm
+        .map(m => ({ player_id: m.player_id, reason: (m.reason || '').trim() }))
+        .filter(m => m.player_id)
+    : [];
 
   const payload = {
     team_id: team.id,
@@ -6217,8 +6350,9 @@ async function saveLineupWithMsg(msgEl) {
       zoneLines: current.zoneLines,
       ballVisible: current.ballVisible,
       ballPos: current.ballPos,
-      // Goalscorers go in JSONB so we don't need a separate table for the v1.
-      goalscorers: cleanScorers
+      // Goalscorers + MOTM go in JSONB so we don't need extra columns / tables.
+      goalscorers: cleanScorers,
+      motm: cleanMotm
     },
     updated_at: new Date().toISOString()
   };
@@ -7407,6 +7541,7 @@ function renderFixturePitch(lineup) {
           <div class="slot-pos-lbl">${escapeHtml(label)}</div>
         </div>`;
     }).join('');
+    applyMatchDecorations(slotsLayer, d.motm, d.goalscorers);
   }
 
   // Render subs using the same .subs-row / .sub-slot markup — all MAX_SUBS cells (filled + empty)
@@ -7435,6 +7570,7 @@ function renderFixturePitch(lineup) {
     }
     subsRow.innerHTML = cells.join('');
     if (subsLabel) subsLabel.textContent = `SUBSTITUTES (${filledCount}/${MAX_SUBS})`;
+    applyMatchDecorations(subsRow, d.motm, d.goalscorers);
   }
 
   const ball = document.getElementById('fix-ball');

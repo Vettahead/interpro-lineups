@@ -6,8 +6,9 @@ Two small fixes shipped this session — wizard custom-formations and post-match
 
 ### Shipped this session
 1. **Wizard now shows custom formations regardless of which tab launched it.** `openMatchWizard` is now `async` and fetches `formations` for the team from Supabase before rendering Step 2, then caches the list back onto `editor.customFormations`. Previously it relied on whatever was on `editor` at the moment, which was empty/stale when the wizard was opened from the desktop sidebar "+" while sat on Squad/Help/Formations/Admin tabs (those tabs don't reassign `editor` with `customFormations`). Phone happened to work because users typically launched the wizard from the Matches sub-tab "+ New match" card, where `editor.customFormations` was always populated.
-2. **Post-match Result entry on a played match.** New columns on `lineups`: `our_score_ht`, `opp_score_ht`, `our_score_ft`, `opp_score_ft`. Goalscorers live in the existing `data` JSONB as `data.goalscorers = [{player_id, count}]`. The `✎ Edit match` modal grows a new **⚽ Result** section once `matchHasBeenPlayed(current)` is true (i.e. game_date < today, or game_date == today AND now ≥ kickoff_time, fallback midday if no KO time). Inputs are: HT us/them · FT us/them · per-player goal counter (+/− buttons + number input). Goalscorer list is the matchday squad (slots ∪ subs); falls back to whole squad if the squad hasn't been picked yet (e.g. status is still draft/availability). Live tally vs FT us shows a red warning if they don't match. Autosaves via the standard hash mechanism — no extra Save button.
-3. **Result chip on match cards + summary.** New helper `matchResultBadge(l)` returns `{ text, outcome, color }`. `_matchCardHtml` in the Matches sub-tab now renders a coloured chip (green W / red L / grey D / amber HT-only) above the status pill on cards with a result. `matchSummaryHtml` (Info sub-tab) shows the same chip + a comma-separated scorer line underneath ("⚽ Smith, Jones (2)").
+2. **Post-match Result entry on a played match.** New columns on `lineups`: `our_score_ht`, `opp_score_ht`, `our_score_ft`, `opp_score_ft`. Goalscorers and MOTM live in the existing `data` JSONB as `data.goalscorers = [{player_id, count}]` and `data.motm = [{player_id, reason}]`. The `✎ Edit match` modal grows a new **⚽ Result** section once `matchHasBeenPlayed(current)` is true (i.e. game_date < today, or game_date == today AND now ≥ kickoff_time, fallback midday if no KO time). Inputs are: HT us/them · FT us/them · per-player goal counter (+/− buttons + number input) · MOTM star toggle per player with optional inline "Why?" reason field (multiple MOTMs allowed). Both pickers use the matchday squad (slots ∪ subs); fall back to whole squad if the squad hasn't been picked yet (e.g. status is still draft/availability). Live tally vs FT us shows a red warning if they don't match. Autosaves via the standard hash mechanism — no extra Save button.
+3. **Result chip on match cards + summary.** New helper `matchResultBadge(l)` returns `{ text, outcome, color }`. `_matchCardHtml` in the Matches sub-tab now renders a coloured chip (green W / red L / grey D / amber HT-only) above the status pill on cards with a result. `matchSummaryHtml` (Info sub-tab) shows the same chip + a comma-separated scorer line underneath ("⚽ Smith, Jones (2)") + a "🏆 Name — reason" MOTM line.
+4. **Pitch chip overlays for MOTM + goals.** New decorator `applyMatchDecorations(rootEl, motm, goalscorers)` (next to `applyAvailabilityDecorations`) overlays a gold ★ on the top-left of any MOTM player's chip and a small white-ball-with-count on the top-right of any goalscorer's chip. Idempotent (clears previous decorations on every call), scoped to a root element so the live editor and fixture preview don't fight. Wired into `renderPitch`, `renderSubsBar` (using `editor.current.{motm,goalscorers}`), and `renderFixturePitch` (using `lineup.data.{motm,goalscorers}`). Corner usage: top-left = MOTM star, top-right = goal ball, bottom-right = availability dot. No-op when arrays are empty so unplayed matches show nothing extra.
 
 ### SQL to run in Supabase before deploy
 Pasted in chat at the end of the session — no `.sql` file. Reproduced here for reference:
@@ -23,14 +24,15 @@ ALTER TABLE lineups
 No RLS changes needed — these columns inherit the existing `lineups` policies.
 
 ### Files touched
-- `web/app.js` — `openMatchWizard` (async + fetch), `newLineupState` (5 new fields), `_lineupContentHash` (5 new fields), 3 lineup-load points, `saveLineupWithMsg` (5 columns + JSONB scorers), new `matchHasBeenPlayed`/`matchHasResult`/`matchResultBadge`/`matchResultSectionHtml`, wiring inside `wireMatchDetailsFields`, chip injection into `_matchCardHtml` + `matchSummaryHtml`, `HELP_SECTIONS` lineups entry.
-- `web/FAQ.md` — new "How do I record the result after the game?" Q under Lineups tab.
+- `web/app.js` — `openMatchWizard` (async + fetch), `newLineupState` (6 new fields incl. `motm`), `_lineupContentHash` (6 new fields), 3 lineup-load points, `saveLineupWithMsg` (4 columns + JSONB scorers + JSONB motm), new `matchHasBeenPlayed`/`matchHasResult`/`matchResultBadge`/`matchResultSectionHtml`, wiring inside `wireMatchDetailsFields` (scores + scorers + MOTM), chip injection into `_matchCardHtml` + `matchSummaryHtml`, `HELP_SECTIONS` lineups entry.
+- `web/FAQ.md` — new "How do I record the result after the game?" Q under Lineups tab (covers MOTM too).
 
 ### Sanity-check script
 1. Wizard formation list: open Squad tab → desktop sidebar "+" → New match → step 2 should now list any custom formations alongside presets. Same from Help/Admin/Formations tabs.
 2. Result entry: open a past match (or change game_date to yesterday) → Edit match → scroll to ⚽ Result → enter HT 1-0, FT 3-2 → goalscorers list should show the matchday squad → tap + on two players → close modal → match card shows green "FT 3-2 W" chip → Info card shows the chip + scorer names underneath.
 3. Tally warning: enter FT us = 3, but only assign 2 goals to scorers → red warning appears. Add the third goal → warning clears.
 4. Goalscorer fallback: open a draft/availability match where no slots/subs are filled → result section shows "No matchday squad picked yet — showing whole squad" and the picker lists every squad player.
+5. MOTM: in the Result section, tap ☆ next to a player → it fills to ★, an inline "Why? (optional)" text input appears, "1 selected" counter updates → tap another player's star → "2 selected" → close modal → Info card shows a 🏆 line with both names (and reasons in italic for the ones that have one). Reopen → both still selected with reasons preserved.
 
 ---
 
@@ -195,6 +197,7 @@ Optional / nice-to-have observed during photo work:
 - Team-wide public page so parents bookmark one URL for the whole season.
 - League table / results tracker (W-D-L, GF-GA).
 - Player stats over time (appearances, minutes, goals, assists).
+- **Per-player season tally of goals and Man of the Match awards.** Data is already captured per-match (`goalscorers` and `motm` JSONB on each lineup); this is the aggregation/UI on top — leaderboard view, per-player profile totals, and surfacing on the parent-facing pages. Parked deliberately while the per-match capture beds in.
 - Season export (PDF or CSV).
 
 **Slice 7 — Match day live**
