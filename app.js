@@ -624,9 +624,10 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
     : (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
 
   // Drawer tabs match the mockup: Matches / Squad / Plays / Formations / Help-FAQ / Admin (coach-gated) / Sign out.
-  // `fixtures` keeps its internal id — the old "lineups" tab is consolidated into it.
+  // Matches now opens the unified editor (activeTab='lineups'), landing on the "matches" sub-tab
+  // which shows the fixtures-as-cards list. The separate fixtures page is retired.
   const tabs = [
-    { id: 'fixtures',   label: 'Matches',    icon: '🌐' },
+    { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
     { id: 'plays',      label: 'Plays',      icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
@@ -738,8 +739,10 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
     : (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
 
   // Same tab set as the phone drawer (minus Sign out — that has its own button in the user badge).
+  // Matches now opens the unified match editor (activeTab='lineups'), landing on the Matches
+  // sub-tab which shows the fixtures-as-cards list.
   const tabs = [
-    { id: 'fixtures',   label: 'Matches',    icon: '🌐' },
+    { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
     { id: 'plays',      label: 'Plays',      icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
@@ -1622,8 +1625,14 @@ async function renderTeamDashboard(user, teamId) {
       // If play provided custom pos/lbl, stash onto current
       if (_pendingLineupLoad.pos) current.pos = _pendingLineupLoad.pos.map(p => [...p]);
       if (_pendingLineupLoad.lbl) current.lbl = [..._pendingLineupLoad.lbl];
+      // Wizard/+ menu provided a lineup to land on — skip the Matches list and go straight to Squad.
+      _lineupPhoneTab = 'squad';
     } else {
       current = base;
+      // No match pre-loaded → land on the Matches list so the coach can pick one
+      // (or create one). This is the primary landing state for the sidebar's
+      // "Matches" click.
+      _lineupPhoneTab = 'matches';
     }
     _pendingLineupLoad = null;
     editor = {
@@ -3049,8 +3058,11 @@ function wireMatchDetailsFields(closeModal) {
 
 // Active sub-tab inside the match editor (works on both phone and desktop post-redesign).
 // Survives re-renders so the coach doesn't get bounced back to Squad.
-let _lineupPhoneTab = 'squad';
+// Default to 'matches' so fresh sessions land on the fixtures list rather than
+// a blank Squad picker. Once a lineup is loaded, the click handler switches to 'squad'.
+let _lineupPhoneTab = 'matches';
 const _LINEUP_PHONE_TABS = [
+  { key: 'matches',   label: 'Matches',      icon: '' },
   { key: 'squad',     label: 'Squad',        icon: '' },
   { key: 'subs',      label: 'Subs',         icon: '' },
   { key: 'formation', label: 'Formation',    icon: '' },
@@ -3155,6 +3167,76 @@ function renderLineupsTab() {
   const formStat = current?.formation    ? escapeHtml(current.formation)    : '—';
   const subtitleParts = [dateStr, current?.kickoff_time ? 'KO ' + escapeHtml(current.kickoff_time) : ''].filter(Boolean);
 
+  // ---- Matches sub-tab: fixtures list as cards, upcoming first, past second ----
+  // Build once per render. Cards get availability pills decorated after mount.
+  const _todayIso = (() => {
+    const d = new Date();
+    const pad2 = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  })();
+  const _upcoming = [];
+  const _past = [];
+  lineups.forEach(l => {
+    if (l.game_date && l.game_date < _todayIso) _past.push(l);
+    else _upcoming.push(l);
+  });
+  // Upcoming: soonest first (undated go last). Past: most recent first.
+  _upcoming.sort((a, b) => {
+    if (!a.game_date && !b.game_date) return 0;
+    if (!a.game_date) return 1;
+    if (!b.game_date) return -1;
+    return a.game_date.localeCompare(b.game_date);
+  });
+  _past.sort((a, b) => (b.game_date || '').localeCompare(a.game_date || ''));
+
+  const _matchCardHtml = (l) => {
+    const tLbl = l.match_type === 'friendly' ? 'Friendly' : l.match_type === 'cup' ? 'Cup' : 'League';
+    const haLbl = l.home_away === 'away' ? '(A)' : '(H)';
+    const title = (l.opponent ? 'vs ' + escapeHtml(l.opponent) : '—') + ' <span class="me-match-ha">' + haLbl + '</span>';
+    const metaParts = [
+      tLbl,
+      l.game_date ? formatDate(l.game_date) : '',
+      l.data?.formation ? l.data.formation : '',
+    ].filter(Boolean);
+    const st = l.lineup_status || (l.published ? 'published' : 'draft');
+    const stLbl = st === 'published' ? 'Published' : st === 'availability' ? 'Availability' : 'Draft';
+    return `
+      <div class="me-match-card ${current?.id === l.id ? 'active' : ''}" data-me-lineup="${l.id}">
+        <div class="me-match-title">${title}</div>
+        <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
+        <div class="me-match-status me-match-status-${st}">${stLbl}</div>
+        ${canEdit ? `<button class="me-match-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
+      </div>
+    `;
+  };
+
+  const _newMatchCard = canEdit ? `
+    <button type="button" class="me-match-card me-match-new" id="me-new-match-card">
+      <div class="me-match-new-ico" aria-hidden="true">+</div>
+      <div class="me-match-new-label">New match</div>
+    </button>
+  ` : '';
+
+  const matchesPanelHtml = `
+    <div class="me-matches">
+      <div class="me-matches-group">
+        <div class="me-matches-heading">Upcoming</div>
+        <div class="me-matches-grid">
+          ${_newMatchCard}
+          ${_upcoming.length ? _upcoming.map(_matchCardHtml).join('') : (canEdit ? '' : `<p class="muted" style="padding:0.25rem">No upcoming matches.</p>`)}
+        </div>
+      </div>
+      ${_past.length ? `
+        <div class="me-matches-group">
+          <div class="me-matches-heading">Past</div>
+          <div class="me-matches-grid">
+            ${_past.map(_matchCardHtml).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
   // Sub-tab panel bodies
   const squadPanelHtml = `
     <p class="muted me-hint">Tap an empty slot on the pitch, then tap a player here to assign. Dot colour = availability.</p>
@@ -3188,16 +3270,13 @@ function renderLineupsTab() {
     ? `<div id="availability-panel"></div>`
     : `<p class="muted" style="font-size:0.85rem;margin:0.25rem 0 0">No responses yet — open availability from <em>Arrange match</em> to let parents submit.</p>`;
 
-  // Info panel keeps the match-summary card (with Arrange / Share buttons + save-msg) and the
-  // saved-matches list (coach can switch between saved lineups without leaving the editor).
+  // Info panel: just the match-summary card (Arrange / Share buttons + save-msg).
+  // The old "Other saved lineups" section was removed — the Matches sub-tab above
+  // now owns the saved-lineups list, so it's redundant here.
   const infoPanelHtml = `
     <div class="me-info-block">
       ${matchSummaryHtml(current, team, canEdit)}
     </div>
-    ${collapsibleCard('lineup-saved', 'Other saved lineups', `
-      <div class="lineup-list">${lineupsListHtml}</div>
-      ${canEdit ? `<button class="btn-full" id="new-lineup-btn" style="margin-top:0.5rem">+ New lineup</button>` : ''}
-    `)}
   `;
 
   tabEl.innerHTML = `
@@ -3237,6 +3316,9 @@ function renderLineupsTab() {
         <div class="me-panel-col">
           ${subTabsHtml}
           <div class="me-panel card">
+            <!-- Matches sub-tab: fixtures list as cards. When active, CSS hides the
+                 pitch column and lets this panel span the full width. -->
+            <div data-phone-group="matches" class="me-panel-body me-panel-body-matches">${matchesPanelHtml}</div>
             <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
             <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
             <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
@@ -3279,7 +3361,7 @@ function renderLineupsTab() {
     applyAvailabilityDecorations(); // clears any stale rings
   }
 
-  // Decorate the saved-matches list on the left with availability response pills
+  // Decorate the match cards in the Matches sub-tab with availability response pills
   const pillIds = lineups
     .filter(l => {
       const st = l.lineup_status || (l.published ? 'published' : 'draft');
@@ -3287,8 +3369,8 @@ function renderLineupsTab() {
     })
     .map(l => l.id);
   decorateCardsWithAvailabilityCounts(
-    '#tab-content .lineup-item[data-lineup]',
-    'lineup',
+    '#tab-content .me-match-card[data-me-lineup]',
+    'meLineup',
     pillIds,
     players.length
   );
@@ -4281,11 +4363,9 @@ function wireLineupEvents() {
   if (backBtn) backBtn.onclick = async () => {
     if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
     try { await flushAutosave(); } catch (_) {}
-    activeTab = 'fixtures';
-    openCards.clear();
-    const u = editor.currentUser || { id: editor.currentUserId };
-    const tid = editor.team?.id;
-    if (tid) renderTeamDashboard(u, tid);
+    // Switch to the Matches sub-tab (fixtures list) instead of leaving the editor.
+    _lineupPhoneTab = 'matches';
+    renderLineupsTab();
   };
   const openShareForCurrent = (opener) => openShareModal({ lineupId: editor?.current?.id, opener });
   if (shareBtn) shareBtn.onclick = () => openShareForCurrent(shareBtn);
@@ -4370,6 +4450,60 @@ function wireLineupEvents() {
       renderLineupsTab();
     };
   });
+
+  // Click a match card in the Matches sub-tab → load that lineup + jump to Squad.
+  // Shares loader logic with the legacy [data-lineup] handler above but also
+  // switches _lineupPhoneTab so the coach lands on the squad picker.
+  tabEl.querySelectorAll('[data-me-lineup]').forEach(el => {
+    el.onclick = (ev) => {
+      if (ev.target.closest('[data-del-lineup]')) return;
+      const id = el.dataset.meLineup;
+      const l = lineups.find(x => x.id === id);
+      if (!l) return;
+      if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+      editor.current = {
+        id: l.id,
+        name: l.name || '',
+        opponent: l.opponent || '',
+        game_date: l.game_date || '',
+        match_type: l.match_type || 'league',
+        home_away: l.home_away || 'home',
+        kickoff_time: l.kickoff_time || '',
+        arrival_time: l.arrival_time || '',
+        notes: l.notes || '',
+        formation: l.data?.formation || '4-3-3',
+        slots: { ...(l.data?.slots || {}) },
+        subs: [...(l.data?.subs || [])],
+        lbl: Array.isArray(l.data?.lbl) ? [...l.data.lbl] : undefined,
+        pos: Array.isArray(l.data?.pos) ? l.data.pos.map(p => Array.isArray(p) ? [...p] : p) : undefined,
+        arrows: (l.data?.arrows || []).map(a => ({ ...a })),
+        zoneLines: [...(l.data?.zoneLines || [null, null])],
+        ballVisible: !!l.data?.ballVisible,
+        ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) },
+        published: !!l.published,
+        lineup_status: l.lineup_status || (l.published ? 'published' : 'draft'),
+        location_name: l.location_name || '',
+        location_postcode: l.location_postcode || '',
+        location_lat: l.location_lat ?? null,
+        location_lng: l.location_lng ?? null
+      };
+      tacticMode = null; clickStart = null; dragCurrent = null; dragActive = false;
+      _lastSavedHash = _lineupContentHash(editor.current);
+      // Jump to Squad so the coach can immediately edit the selected match.
+      _lineupPhoneTab = 'squad';
+      renderLineupsTab();
+    };
+  });
+
+  // "+ New match" card in the Matches sub-tab → open the guided wizard.
+  const newMatchCard = tabEl.querySelector('#me-new-match-card');
+  if (newMatchCard) newMatchCard.onclick = () => {
+    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+    const uid = editor.currentUserId;
+    const teamId = editor.team?.id;
+    if (!uid || !teamId) return;
+    openMatchWizard({ id: uid }, teamId);
+  };
 
   // Delete saved lineup
   tabEl.querySelectorAll('[data-del-lineup]').forEach(btn => {

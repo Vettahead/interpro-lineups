@@ -1799,11 +1799,19 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 }
 
 /* Sub-tab filtering applies at ALL widths now (not just phone). */
+.lineup-layout[data-phone-tab="matches"]   [data-phone-group]:not([data-phone-group="matches"])   { display: none !important; }
 .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
 .lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
 .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
 .lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
 .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
+
+/* Matches sub-tab is a full-width list, not a side panel — hide the pitch column
+   and the match header (irrelevant when browsing), and let the panel take the whole row. */
+.lineup-layout[data-phone-tab="matches"] .me-pitch-col { display: none; }
+.lineup-layout[data-phone-tab="matches"] .me-header    { display: none; }
+.lineup-layout[data-phone-tab="matches"] .me-body      { grid-template-columns: 1fr; }
+.lineup-layout[data-phone-tab="matches"] .me-panel     { padding: 0.5rem 0.75rem; }
 
 /* Floating Share pill — phone only, visible once a lineup is saved. */
 .share-fab { display: none; }
@@ -2508,3 +2516,138 @@ body.mw-open { overflow: hidden; }
   /* Main content padding so editor content isn't flush with the page edge. */
   body.has-desktop-sidebar main#app { padding: 1.25rem 1.5rem; }
 }
+
+/* ---------- Matches sub-tab (fixtures-as-cards list) ---------- */
+.me-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.me-matches-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.me-matches-heading {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 0 0.1rem;
+}
+
+/* 2-col grid on desktop, single column on phone. */
+.me-matches-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+@media (min-width: 700px) {
+  .me-matches-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.me-match-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+  text-align: left;
+}
+.me-match-card:hover {
+  border-color: var(--blue-2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.me-match-card.active {
+  border-color: #f97316;
+  box-shadow: 0 0 0 1px #f97316;
+}
+.me-match-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text);
+  padding-right: 1.5rem; /* leave room for the delete button */
+}
+.me-match-ha {
+  font-weight: 500;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.me-match-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Status pill inside a match card. */
+.me-match-status {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #eef2f7;
+  color: #3b4b66;
+}
+.me-match-status-published     { background: #dcfce7; color: #14532d; }
+.me-match-status-availability  { background: #fef3c7; color: #78350f; }
+.me-match-status-draft         { background: #eef2f7; color: #3b4b66; }
+
+/* Delete (X) button top-right of a match card. */
+.me-match-del {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.me-match-card:hover .me-match-del { opacity: 1; }
+.me-match-del:hover { background: #fee2e2; color: #b91c1c; }
+
+/* "+ New match" card — distinct styling so it reads as an action, not a real match. */
+.me-match-new {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 1.1rem 1rem;
+  background: #fff;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  min-height: 88px;
+}
+.me-match-new:hover {
+  border-color: #f97316;
+  color: #f97316;
+  background: #fff7ed;
+}
+.me-match-new-ico {
+  font-size: 1.5rem;
+  font-weight: 300;
+  line-height: 1;
+}
+.me-match-new-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* The matches panel hosts its own list — override the generic .me-panel padding
+   when on this sub-tab so the heading strips sit flush. Already handled via
+   the [data-phone-tab="matches"] .me-panel rule above. */
