@@ -3474,7 +3474,8 @@ function wireLineupEvents() {
   tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(btn => {
     btn.onclick = () => {
       const key = btn.dataset.ptab;
-      if (!key || _lineupPhoneTab === key) return;
+      if (!key) return;
+      const changed = _lineupPhoneTab !== key;
       _lineupPhoneTab = key;
       if (layoutEl) layoutEl.setAttribute('data-phone-tab', key);
       tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(b => {
@@ -3482,6 +3483,17 @@ function wireLineupEvents() {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
+      // On phone, bring the tab strip to the top of the viewport so the active
+      // group is immediately visible below — otherwise the pitch can hide the
+      // tab's content under the fold on tall phones.
+      if (changed && typeof window.matchMedia === 'function'
+          && window.matchMedia('(max-width: 899px)').matches) {
+        const tabs = tabEl.querySelector('.lineup-phone-tabs');
+        if (tabs) {
+          const y = tabs.getBoundingClientRect().top + window.scrollY - 4;
+          window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+      }
     };
   });
 

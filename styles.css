@@ -1721,4 +1721,17 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
   .lineup-layout[data-phone-tab="avail"]     [data-phone-group]:not([data-phone-group="avail"])     { display: none !important; }
   .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
+
+  /* Shrink the pitch on phone so the tab strip + some active-tab content
+     are visible within the same viewport — no scrolling required to see the tabs. */
+  .lineup-layout .pitch-card {
+    padding: 0.25rem;
+    margin-bottom: 0.25rem !important;
+  }
+  .lineup-layout .pitch {
+    width: min(86%, 300px);
+    margin: 0 auto;
+  }
+  .lineup-layout .subs-bar { padding: 0.35rem 0.5rem; }
+  .lineup-layout .subs-label { font-size: 0.58rem; }
 }
