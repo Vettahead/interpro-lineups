@@ -144,6 +144,12 @@ function resetHeader() {
   const overlay = document.getElementById('nav-drawer-overlay');
   if (overlay) { overlay.hidden = true; overlay.classList.remove('open'); }
   document.body.classList.remove('drawer-open');
+  // Clear the desktop sidebar on auth/teams-home/parent-view (it's team-scoped).
+  // CSS toggles its visibility to empty, so it won't display until a team dashboard
+  // populates it again.
+  const sidebar = document.getElementById('desktop-sidebar');
+  if (sidebar) { sidebar.innerHTML = ''; }
+  document.body.classList.remove('has-desktop-sidebar');
 }
 
 async function render() {
@@ -448,15 +454,27 @@ function renderUserBar(user) {
 //   New match · New player · New play · New formation
 // Gated to coaches/admins (canEdit). Hidden on auth/teams-home via resetHeader().
 function renderGlobalPlus(user, teamId, canEdit) {
-  const slot = document.getElementById('global-plus');
-  if (!slot) return;
-  if (!canEdit) { slot.innerHTML = ''; return; }
+  // Populate EVERY .global-plus slot on the page. The header has one (#global-plus)
+  // for phone, and the desktop sidebar has one (#global-plus-sidebar). Only the visible
+  // slot ends up on screen because of responsive CSS (header is hidden ≥900px, sidebar
+  // is hidden <900px), but we wire both so whichever is visible works.
+  const slots = Array.from(document.querySelectorAll('.global-plus'));
+  if (!slots.length) return;
 
+  slots.forEach(slot => {
+    if (!canEdit) { slot.innerHTML = ''; return; }
+    wireGlobalPlusSlot(slot, user, teamId);
+  });
+}
+
+// Wires a single .global-plus slot. Uses class selectors (not element IDs) internally
+// so multiple slots can coexist on the page without ID collisions.
+function wireGlobalPlusSlot(slot, user, teamId) {
   slot.innerHTML = `
-    <button id="gp-toggle" class="gp-btn" type="button" aria-haspopup="menu" aria-expanded="false" title="Quick create">
+    <button class="gp-btn gp-toggle" type="button" aria-haspopup="menu" aria-expanded="false" title="Quick create">
       <span class="gp-plus">+</span>
     </button>
-    <div id="gp-menu" class="gp-menu" role="menu" hidden>
+    <div class="gp-menu" role="menu" hidden>
       <button type="button" class="gp-item" data-gp="match">
         <span class="gp-ico">⚽</span>
         <span class="gp-label">
@@ -488,8 +506,8 @@ function renderGlobalPlus(user, teamId, canEdit) {
     </div>
   `;
 
-  const toggle = slot.querySelector('#gp-toggle');
-  const menu = slot.querySelector('#gp-menu');
+  const toggle = slot.querySelector('.gp-toggle');
+  const menu = slot.querySelector('.gp-menu');
 
   const closeMenu = () => {
     menu.hidden = true;
@@ -689,6 +707,95 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
       renderTeamDashboard(user, teamId);
     };
   });
+}
+
+// ---------- Desktop persistent left sidebar ----------
+// Shown on ≥900px viewports. Replaces the old horizontal header tabs.
+// On phone the sidebar is hidden via CSS; the hamburger drawer handles navigation instead.
+function renderDesktopSidebar(user, teamId, team, role, canEdit) {
+  const sidebar = document.getElementById('desktop-sidebar');
+  if (!sidebar) return;
+
+  // Build a 2-letter logo mark from the team name. Fallback to "IB".
+  const words = (team?.name || '').trim().split(/\s+/).filter(Boolean);
+  const initials = (words.length >= 2
+    ? words[0][0] + words[1][0]
+    : (team?.name || 'IB').slice(0, 2)).toUpperCase();
+
+  // Subtitle — keep it short; uses team.age_group / season if we have them, otherwise
+  // falls back to "Team". Fields may not exist yet, so guard each.
+  const subParts = [];
+  if (team?.age_group) subParts.push(team.age_group);
+  if (team?.season)    subParts.push(`${team.season} season`);
+  const subtitle = subParts.length ? subParts.join(' · ') : 'Team';
+
+  // User badge: display name + role label (admin → "Head coach" to match the drawer)
+  const rawName = user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : '');
+  const displayName = rawName || 'Account';
+  const avatarChar = (displayName[0] || '?').toUpperCase();
+  const roleLabel = role === 'admin'
+    ? 'Head coach'
+    : (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
+
+  // Same tab set as the phone drawer (minus Sign out — that has its own button in the user badge).
+  const tabs = [
+    { id: 'fixtures',   label: 'Matches',    icon: '🌐' },
+    { id: 'squad',      label: 'Squad',      icon: '👥' },
+    { id: 'plays',      label: 'Plays',      icon: '📋' },
+    { id: 'formations', label: 'Formations', icon: '▦' },
+    { id: 'help',       label: 'Help / FAQ', icon: '❓' },
+    ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
+  ];
+
+  // Mark the body so CSS can reveal the sidebar + shift main content + hide the
+  // old horizontal header. resetHeader() removes this class on auth/teams-home.
+  document.body.classList.add('has-desktop-sidebar');
+
+  sidebar.innerHTML = `
+    <div class="ds-head">
+      <span class="ds-logo" aria-hidden="true">${escapeHtml(initials)}</span>
+      <div class="ds-team">
+        <div class="ds-team-name">${escapeHtml(team.name)}</div>
+        <div class="ds-team-sub">${escapeHtml(subtitle)}</div>
+      </div>
+      <div id="global-plus-sidebar" class="ds-plus-slot global-plus"></div>
+    </div>
+    <nav class="ds-tabs" aria-label="Primary">
+      ${tabs.map(t => `
+        <button type="button" class="ds-tab ${activeTab === t.id ? 'active' : ''}" data-ds-tab="${t.id}">
+          <span class="ds-tab-ico" aria-hidden="true">${t.icon}</span>
+          <span class="ds-tab-label">${t.label}</span>
+        </button>
+      `).join('')}
+    </nav>
+    <div class="ds-user">
+      <span class="ds-user-avatar" aria-hidden="true">${escapeHtml(avatarChar)}</span>
+      <div class="ds-user-text">
+        <div class="ds-user-name">${escapeHtml(displayName)}</div>
+        ${roleLabel ? `<div class="ds-user-role">${escapeHtml(roleLabel)}</div>` : ''}
+      </div>
+      <button type="button" class="ds-user-signout" id="ds-signout" title="Sign out">Sign out</button>
+    </div>
+  `;
+
+  // Tab click → flush autosave, switch tab, re-render dashboard (same pattern as drawer).
+  sidebar.querySelectorAll('[data-ds-tab]').forEach(btn => {
+    btn.onclick = async () => {
+      const next = btn.dataset.dsTab;
+      if (next === activeTab) return;
+      try { await flushAutosave(); } catch (_) {}
+      activeTab = next;
+      openCards.clear();
+      renderTeamDashboard(user, teamId);
+    };
+  });
+
+  // Sign-out button in the user badge.
+  const signoutBtn = sidebar.querySelector('#ds-signout');
+  if (signoutBtn) signoutBtn.onclick = async () => {
+    try { await flushAutosave(); } catch (_) {}
+    await supabase.auth.signOut();
+  };
 }
 
 // ---------- Teams home ----------
@@ -1483,7 +1590,12 @@ async function renderTeamDashboard(user, teamId) {
     });
   }
 
-  // Global "+" quick-create menu — coaches/admins only
+  // Desktop persistent left sidebar (CSS hides it on phone). Render BEFORE
+  // renderGlobalPlus so the sidebar's #global-plus-sidebar slot exists in time.
+  renderDesktopSidebar(user, teamId, team, role, canEdit);
+
+  // Global "+" quick-create menu — coaches/admins only. Populates every .global-plus slot
+  // on the page (header slot for phone, sidebar slot for desktop).
   renderGlobalPlus(user, teamId, canEdit);
 
   // Phone hamburger drawer — mirrors the horizontal tabs
