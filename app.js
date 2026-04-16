@@ -872,6 +872,15 @@ async function renderTeamsHome(user) {
 // ---------- Parent / public view ----------
 let _parentViewPoll = null;
 let _parentViewLastHash = null;
+// Registered once at module load so each renderParentView() call doesn't leak another listener.
+// Holds the current lineup being shown so the handler can redraw on resize.
+let _parentViewResizeLineup = null;
+let _parentViewResizeShowPitch = false;
+window.addEventListener('resize', () => {
+  if (currentRoute().name === 'view' && _parentViewResizeShowPitch && _parentViewResizeLineup) {
+    try { renderFixturePitch(_parentViewResizeLineup); } catch (e) { /* ignore */ }
+  }
+});
 // Coach-side poll for live availability updates while the lineup editor is open on a
 // match in availability/published status. Cleared whenever a different lineup loads,
 // status drops to draft, or the user leaves the lineup editor entirely.
@@ -1107,10 +1116,10 @@ async function renderParentView(lineupId, opts = {}) {
     }, { name: teamName }, lineup.id);
   });
 
-  // Re-draw on resize so tactics canvas stays crisp
-  window.addEventListener('resize', () => {
-    if (currentRoute().name === 'view' && showPitch) renderFixturePitch(lineup);
-  }, { once: false });
+  // Re-draw on resize so tactics canvas stays crisp.
+  // The listener is registered once at module init; here we just update what it should redraw.
+  _parentViewResizeLineup = lineup;
+  _parentViewResizeShowPitch = !!showPitch;
 
   // Start polling (only on first / non-poll render)
   if (!opts.fromPoll && !_parentViewPoll) {
@@ -1487,6 +1496,7 @@ let editor = null; // { team, canEdit, players, lineups, current: { id?, name, o
 // Auto-save state for published lineups
 let _autosaveTimer = null;
 let _autosaveInFlight = false;
+let _autosavePendingAfter = false; // set when edits arrive during an in-flight save
 let _lastSavedHash = null;
 function _lineupContentHash(c) {
   if (!c) return null;
@@ -1508,12 +1518,14 @@ function _lineupContentHash(c) {
   });
 }
 function scheduleAutosaveIfPublished() {
-  if (_autosaveInFlight) return;
   // Autosave any saved lineup (draft / availability / published) once it has an id.
   // New unsaved lineups still need the explicit "Save lineup" button to insert the row.
   if (!editor?.current?.id) return;
   const h = _lineupContentHash(editor.current);
   if (h === _lastSavedHash) return;
+  // If a save is currently in flight, mark that another round is needed and bail.
+  // After the in-flight save completes we'll re-check and schedule again.
+  if (_autosaveInFlight) { _autosavePendingAfter = true; return; }
   if (_autosaveTimer) clearTimeout(_autosaveTimer);
   _autosaveTimer = setTimeout(async () => {
     _autosaveTimer = null;
@@ -1523,6 +1535,11 @@ function scheduleAutosaveIfPublished() {
       _lastSavedHash = _lineupContentHash(editor.current);
     } catch (e) { console.error('autosave failed', e); }
     _autosaveInFlight = false;
+    // If edits arrived while we were saving, run another pass so nothing is dropped.
+    if (_autosavePendingAfter) {
+      _autosavePendingAfter = false;
+      scheduleAutosaveIfPublished();
+    }
   }, 800);
 }
 
@@ -3830,6 +3847,9 @@ function renderLineupsTab() {
   const curStatus = current?.lineup_status || (current?.published ? 'published' : 'draft');
   if (current?.id && (curStatus === 'availability' || curStatus === 'published')) {
     renderCoachAvailabilityPanel();
+    // Paint from the in-memory cache immediately so dots don't flicker while we re-fetch.
+    applyAvailabilityDecorations();
+    // Then refresh from DB and re-apply (will only be visible diff if anything changed).
     ensureAvailabilityForLineup(current.id).then(() => applyAvailabilityDecorations());
     startCoachAvailabilityPoll(current.id);
   } else {
@@ -3922,7 +3942,7 @@ function startCoachAvailabilityPoll(lineupId) {
       // Refresh the tally button text so coaches see new ✅/🤔/❌ counts without reopening the modal
       renderCoachAvailabilityPanel();
     } catch (e) { /* swallow — next tick will retry */ }
-  }, 10000);
+  }, 5000);
 }
 function stopCoachAvailabilityPoll() {
   if (_coachAvailabilityPoll) { clearInterval(_coachAvailabilityPoll); _coachAvailabilityPoll = null; }
