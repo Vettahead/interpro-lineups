@@ -1472,6 +1472,7 @@ async function openAvailabilityModal(lineupId) {
 // ---------- Team dashboard ----------
 let activeTab = 'squad';
 let _pendingLineupLoad = null; // play payload to apply next time the Lineups tab renders
+let _pendingLineupIdToOpen = null; // wizard-saved lineup id; Lineups tab should load it fully
 let currentFilter = 'All';
 const expandedPlayers = new Set(); // player ids with expanded detail panel
 
@@ -1620,7 +1621,46 @@ async function renderTeamDashboard(user, teamId) {
   } else if (activeTab === 'lineups') {
     const base = newLineupState();
     let current;
-    if (_pendingLineupLoad) {
+    if (_pendingLineupIdToOpen) {
+      // Wizard just inserted a lineup — find it in the fresh fetch and load it fully
+      // so the coach lands inside the saved match (not on the Matches card list).
+      const idToOpen = _pendingLineupIdToOpen;
+      _pendingLineupIdToOpen = null;
+      const l = lineups.find(x => x.id === idToOpen);
+      if (l) {
+        current = {
+          id: l.id,
+          name: l.name || '',
+          opponent: l.opponent || '',
+          game_date: l.game_date || '',
+          match_type: l.match_type || 'league',
+          home_away: l.home_away || 'home',
+          kickoff_time: l.kickoff_time || '',
+          arrival_time: l.arrival_time || '',
+          notes: l.notes || '',
+          formation: l.data?.formation || '4-3-3',
+          slots: { ...(l.data?.slots || {}) },
+          subs: [...(l.data?.subs || [])],
+          lbl: Array.isArray(l.data?.lbl) ? [...l.data.lbl] : undefined,
+          pos: Array.isArray(l.data?.pos) ? l.data.pos.map(p => Array.isArray(p) ? [...p] : p) : undefined,
+          arrows: (l.data?.arrows || []).map(a => ({ ...a })),
+          zoneLines: [...(l.data?.zoneLines || [null, null])],
+          ballVisible: !!l.data?.ballVisible,
+          ballPos: { ...(l.data?.ballPos || { x: 50, y: 50 }) },
+          published: !!l.published,
+          lineup_status: l.lineup_status || (l.published ? 'published' : 'draft'),
+          location_name: l.location_name || '',
+          location_postcode: l.location_postcode || '',
+          location_lat: l.location_lat ?? null,
+          location_lng: l.location_lng ?? null
+        };
+        _lastSavedHash = _lineupContentHash(current);
+        _lineupPhoneTab = 'squad';
+      } else {
+        current = base;
+        _lineupPhoneTab = 'matches';
+      }
+    } else if (_pendingLineupLoad) {
       current = { ...base, ..._pendingLineupLoad, id: null };
       // If play provided custom pos/lbl, stash onto current
       if (_pendingLineupLoad.pos) current.pos = _pendingLineupLoad.pos.map(p => [...p]);
@@ -3481,6 +3521,92 @@ function availPillsHtml(counts, rosterSize) {
 // One popup, two clearly-labelled sections: Availability link + Match link.
 // Keeps every existing action — Copy, WhatsApp (combined message), Add to calendar.
 // Locked state if the lineup isn't in the right status to be shared (e.g. draft).
+// Post-create prompt shown after the Match Wizard inserts a lineup.
+// "Share to WhatsApp now?" — on Yes, flips status to 'availability' so the
+// availability link is live for parents, builds the combined WhatsApp message
+// (same composer the Share modal uses) and opens wa.me in a new tab.
+async function openShareToWhatsAppPrompt(lineupId) {
+  if (!lineupId) return;
+  const lineup = (editor?.lineups || []).find(l => l.id === lineupId)
+    || (editor?.current?.id === lineupId ? editor.current : null);
+  if (!lineup) return;
+  const team = editor?.team || null;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay status-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal status-modal" role="dialog" aria-label="Share match to WhatsApp" style="max-width:440px">
+      <div class="map-modal-header">
+        <h3 style="margin:0">Share to WhatsApp now?</h3>
+        <button type="button" class="map-modal-close" data-close aria-label="Close">×</button>
+      </div>
+      <div class="map-modal-body status-modal-body">
+        <p style="margin:0 0 0.6rem;font-size:0.9rem">Send parents the match details + availability link. This will switch the match to <strong>Availability</strong> so the link works right away.</p>
+        <p class="muted" style="margin:0 0 0.8rem;font-size:0.8rem">WhatsApp will open in a new tab with the message pre-filled — paste it into your team's group chat.</p>
+        <div id="wa-prompt-msg" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.4rem;color:var(--danger,red)"></div>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;flex-wrap:wrap">
+          <button type="button" class="mw-btn" data-close>Not now</button>
+          <button type="button" class="mw-btn mw-primary" id="wa-prompt-yes" style="background:#25D366;border-color:#25D366">💬 Yes, share</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target?.hasAttribute?.('data-close')) close();
+  });
+
+  overlay.querySelector('#wa-prompt-yes').onclick = async () => {
+    const msgEl = overlay.querySelector('#wa-prompt-msg');
+    const yesBtn = overlay.querySelector('#wa-prompt-yes');
+    yesBtn.disabled = true; yesBtn.textContent = 'Updating…';
+
+    // Flip status to availability if it's still draft so the /avail/ link works for parents.
+    const curStatus = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
+    if (curStatus !== 'availability' && curStatus !== 'published') {
+      const { data: updated, error: updErr } = await supabase.from('lineups')
+        .update({ lineup_status: 'availability' })
+        .eq('id', lineupId).select().single();
+      if (updErr) {
+        if (msgEl) msgEl.textContent = 'Failed to set status: ' + updErr.message;
+        yesBtn.disabled = false; yesBtn.textContent = '💬 Yes, share';
+        return;
+      }
+      // Mirror into local editor state so the status pill/availability bar reflect the change.
+      if (editor?.current?.id === lineupId) {
+        editor.current.lineup_status = updated.lineup_status;
+        editor.current.published = updated.published;
+        editor.current.published_at = updated.published_at;
+      }
+      const idx = (editor?.lineups || []).findIndex(l => l.id === lineupId);
+      if (idx >= 0) editor.lineups[idx] = updated;
+      try { await logAudit(editor?.team?.id, 'lineup', lineupId, 'status:availability', { from: curStatus, via: 'wizard-share' }); } catch (_) {}
+    }
+
+    // Build + open the WhatsApp message (same composer + open pattern the Share modal uses).
+    try {
+      const latest = (editor?.lineups || []).find(l => l.id === lineupId) || lineup;
+      const text = await buildWhatsAppMessage(latest, team);
+      try { await navigator.clipboard.writeText(text); } catch (_) {}
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      const win = window.open(waUrl, '_blank');
+      if (!win) location.href = waUrl;
+    } catch (e) {
+      if (msgEl) msgEl.textContent = 'Could not build WhatsApp message: ' + (e.message || e);
+      yesBtn.disabled = false; yesBtn.textContent = '💬 Yes, share';
+      return;
+    }
+
+    close();
+    // Repaint so the status pill + availability bar reflect the new state.
+    if (activeTab === 'lineups') renderLineupsTab();
+  };
+}
+
 /* ── Status-change modal ────────────────────────────────────── */
 function openStatusModal() {
   if (!editor?.current?.id) return;
@@ -3802,6 +3928,7 @@ function openMatchWizard(user, teamId) {
   const customFormations = (editor && editor.customFormations) ? editor.customFormations : [];
   const formations = allFormations(customFormations); // name -> {pos, lbl}
   const formationNames = Object.keys(formations);
+  const team = editor?.team || null;
 
   // Default date = today in local YYYY-MM-DD
   const today = new Date();
@@ -3816,10 +3943,18 @@ function openMatchWizard(user, teamId) {
     home_away: 'home',
     match_type: 'league',
     formation: formationNames.includes('4-3-3') ? '4-3-3' : formationNames[0],
+    location_name: '',
+    location_postcode: '',
+    location_lat: null,
+    location_lng: null,
     notes: ''
   };
   let step = 1;
-  const TOTAL_STEPS = 3;
+  // Home: 1 Who & when · 2 Formation · 3 Location (read-only home ground) · 4 Summary  (4 total)
+  // Away: 1 Who & when · 2 Formation · 3 Venue details · 4 Fine-tune map · 5 Summary     (5 total)
+  const totalSteps = () => state.home_away === 'home' ? 4 : 5;
+  // The summary step is always the last one; its number depends on home/away.
+  const summaryStep = () => totalSteps();
 
   const overlay = document.createElement('div');
   overlay.className = 'mw-overlay';
@@ -3927,22 +4062,106 @@ function openMatchWizard(user, teamId) {
     `;
   }
 
-  function renderStep3() {
+  // Step 3 — Location. Home: read-only confirmation of the team's home ground.
+  // Away: editable venue name + postcode with lookup.
+  function renderStep3Location() {
+    if (state.home_away === 'home') {
+      const hasHome = !!(team?.home_ground_name || team?.home_ground_postcode);
+      const locationLine = hasHome
+        ? `<div class="mw-sum-row"><span>Venue</span><strong>${escapeHtml(team.home_ground_name || '')}</strong></div>
+           <div class="mw-sum-row"><span>Postcode</span><strong>${escapeHtml(team.home_ground_postcode || '—')}</strong></div>
+           ${team.home_ground_lat != null && team.home_ground_lng != null
+              ? `<div class="mw-sum-row"><span>Pin</span><strong>${Number(team.home_ground_lat).toFixed(5)}, ${Number(team.home_ground_lng).toFixed(5)}</strong></div>`
+              : `<div class="mw-sum-row"><span>Pin</span><em class="muted">not set</em></div>`}`
+        : `<div class="mw-sum-row"><em class="muted">No home ground set yet.</em></div>`;
+      return `
+        <div class="mw-body">
+          <h3 class="mw-step-title">Home ground</h3>
+          <p class="mw-step-sub">Using the team's home ground. To change it, go to Squad → Home ground.</p>
+          <div class="mw-summary">
+            ${locationLine}
+          </div>
+          ${!hasHome ? `<p class="muted" style="margin-top:0.6rem;font-size:0.8rem">You can still create the match — parents will just see "Home" without a venue. Set the home ground later from the Squad tab.</p>` : ''}
+        </div>
+      `;
+    }
+    // Away
+    const hasPin = state.location_lat != null && state.location_lng != null;
+    return `
+      <div class="mw-body">
+        <h3 class="mw-step-title">Away venue</h3>
+        <p class="mw-step-sub">Where is this match being played? You'll fine-tune the pin on the next step.</p>
+        <label class="mw-field">
+          <span>Venue name</span>
+          <input type="text" id="mw-loc-name" value="${escapeHtml(state.location_name)}" placeholder="e.g. Roverton Rec Ground" autocomplete="off" />
+        </label>
+        <label class="mw-field">
+          <span>Postcode</span>
+          <div style="display:flex;gap:0.4rem">
+            <input type="text" id="mw-loc-postcode" value="${escapeHtml(state.location_postcode)}" placeholder="e.g. SW1A 1AA" style="flex:1;text-transform:uppercase" autocomplete="off" />
+            <button type="button" class="mw-btn" id="mw-loc-lookup" style="flex-shrink:0">🔍 Look up</button>
+          </div>
+        </label>
+        <div id="mw-loc-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.25rem">
+          ${hasPin ? `✓ ${Number(state.location_lat).toFixed(5)}, ${Number(state.location_lng).toFixed(5)}` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Step 4 (Away only) — Fine-tune map. Opens the existing openMapPicker modal.
+  function renderStep4FineTune() {
+    const hasPin = state.location_lat != null && state.location_lng != null;
+    const pinLine = hasPin
+      ? `<div class="mw-sum-row"><span>Pin</span><strong>${Number(state.location_lat).toFixed(5)}, ${Number(state.location_lng).toFixed(5)}</strong></div>`
+      : `<div class="mw-sum-row"><em class="muted">No pin set yet — UK postcodes can cover a large area, drop a pin so parents can find you.</em></div>`;
+    return `
+      <div class="mw-body">
+        <h3 class="mw-step-title">Fine-tune on map</h3>
+        <p class="mw-step-sub">Drag the pin to the exact spot of the pitch entrance / car park.</p>
+        <div class="mw-summary">
+          ${pinLine}
+          ${state.location_name ? `<div class="mw-sum-row"><span>Venue</span><strong>${escapeHtml(state.location_name)}</strong></div>` : ''}
+          ${state.location_postcode ? `<div class="mw-sum-row"><span>Postcode</span><strong>${escapeHtml(state.location_postcode)}</strong></div>` : ''}
+        </div>
+        <button type="button" class="mw-btn" id="mw-open-map" style="margin-top:0.75rem;width:100%">
+          🗺️ ${hasPin ? 'Adjust on map' : 'Place pin on map'}
+        </button>
+        <p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Optional — you can skip this and set it later from the match's Info tab.</p>
+      </div>
+    `;
+  }
+
+  function renderStepSummary() {
     const dateLabel = state.game_date
       ? new Date(state.game_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
       : '—';
     const kickoffLabel = state.kickoff_time || '—';
     const arrivalLabel = state.arrival_time || '—';
+    const haLabel = state.home_away === 'home' ? 'Home' : 'Away';
+    // Resolve venue line for the summary
+    let venueLine;
+    if (state.home_away === 'home') {
+      if (team?.home_ground_name || team?.home_ground_postcode) {
+        venueLine = [team.home_ground_name, team.home_ground_postcode].filter(Boolean).join(' · ');
+      } else {
+        venueLine = '<em class="muted">Home (no ground set)</em>';
+      }
+    } else {
+      const parts = [state.location_name, state.location_postcode].filter(Boolean);
+      venueLine = parts.length ? parts.join(' · ') : '<em class="muted">(not set)</em>';
+    }
     return `
       <div class="mw-body">
         <h3 class="mw-step-title">Ready to create</h3>
-        <p class="mw-step-sub">We'll open a blank pitch with these settings — you can fill in the lineup next.</p>
+        <p class="mw-step-sub">We'll save the match and open it on a blank pitch — you can pick the squad next.</p>
         <div class="mw-summary">
           <div class="mw-sum-row"><span>Opponent</span><strong>${escapeHtml(state.opponent) || '<em class="muted">(not set)</em>'}</strong></div>
           <div class="mw-sum-row"><span>Date</span><strong>${escapeHtml(dateLabel)}</strong></div>
           <div class="mw-sum-row"><span>Arrival</span><strong>${escapeHtml(arrivalLabel)}</strong></div>
           <div class="mw-sum-row"><span>Kick-off</span><strong>${escapeHtml(kickoffLabel)}</strong></div>
-          <div class="mw-sum-row"><span>Venue</span><strong>${state.home_away === 'home' ? 'Home' : 'Away'}</strong></div>
+          <div class="mw-sum-row"><span>Home / Away</span><strong>${haLabel}</strong></div>
+          <div class="mw-sum-row"><span>Venue</span><strong>${venueLine}</strong></div>
           <div class="mw-sum-row"><span>Type</span><strong>${escapeHtml(state.match_type)}</strong></div>
           <div class="mw-sum-row"><span>Formation</span><strong>${escapeHtml(state.formation)}</strong></div>
         </div>
@@ -3951,15 +4170,20 @@ function openMatchWizard(user, teamId) {
   }
 
   function renderFooter() {
+    const total = totalSteps();
+    const dots = Array.from({ length: total }, (_, i) => i + 1)
+      .map(n => `<span class="mw-dot${n === step ? ' active' : n < step ? ' done' : ''}"></span>`)
+      .join('');
+    const isLast = step === summaryStep();
     return `
       <div class="mw-footer">
         <div class="mw-steps-indicator">
-          ${[1, 2, 3].map(n => `<span class="mw-dot${n === step ? ' active' : n < step ? ' done' : ''}"></span>`).join('')}
-          <span class="mw-step-label">Step ${step} of ${TOTAL_STEPS}</span>
+          ${dots}
+          <span class="mw-step-label">Step ${step} of ${total}</span>
         </div>
         <div class="mw-actions">
           ${step > 1 ? `<button type="button" class="mw-btn" id="mw-back">Back</button>` : `<button type="button" class="mw-btn" id="mw-cancel">Cancel</button>`}
-          ${step < TOTAL_STEPS
+          ${!isLast
             ? `<button type="button" class="mw-btn mw-primary" id="mw-next">Next →</button>`
             : `<button type="button" class="mw-btn mw-primary" id="mw-finish">Create match</button>`}
         </div>
@@ -3967,15 +4191,22 @@ function openMatchWizard(user, teamId) {
     `;
   }
 
+  function renderBodyForStep() {
+    if (step === 1) return renderStep1();
+    if (step === 2) return renderStep2();
+    if (step === 3) return renderStep3Location();
+    if (step === 4 && state.home_away === 'away') return renderStep4FineTune();
+    return renderStepSummary(); // step 4 home, step 5 away
+  }
+
   function render() {
-    const body = step === 1 ? renderStep1() : step === 2 ? renderStep2() : renderStep3();
     overlay.innerHTML = `
       <div class="mw-card" role="document">
         <div class="mw-head">
           <h2>New match</h2>
           <button type="button" class="mw-close" aria-label="Close">✕</button>
         </div>
-        ${body}
+        ${renderBodyForStep()}
         ${renderFooter()}
       </div>
     `;
@@ -3996,7 +4227,11 @@ function openMatchWizard(user, teamId) {
       dt.addEventListener('change', () => { state.game_date = dt.value; });
       ar.addEventListener('change', () => { state.arrival_time = ar.value; });
       ko.addEventListener('change', () => { state.kickoff_time = ko.value; });
-      ha.addEventListener('change', () => { state.home_away = ha.value; });
+      ha.addEventListener('change', () => {
+        state.home_away = ha.value;
+        // Re-render so the step-count/dots update and the user sees the new path.
+        render();
+      });
       tp.addEventListener('change', () => { state.match_type = tp.value; });
       setTimeout(() => op.focus(), 40);
     } else if (step === 2) {
@@ -4007,6 +4242,52 @@ function openMatchWizard(user, teamId) {
           btn.classList.add('selected');
         };
       });
+    } else if (step === 3 && state.home_away === 'away') {
+      // Away venue fields + postcode lookup
+      const nameIn = overlay.querySelector('#mw-loc-name');
+      const pcIn = overlay.querySelector('#mw-loc-postcode');
+      const msg = overlay.querySelector('#mw-loc-msg');
+      if (nameIn) nameIn.addEventListener('input', () => { state.location_name = nameIn.value; });
+      if (pcIn) pcIn.addEventListener('input', () => { state.location_postcode = pcIn.value.toUpperCase(); });
+      const lookupBtn = overlay.querySelector('#mw-loc-lookup');
+      if (lookupBtn) {
+        lookupBtn.onclick = async () => {
+          const pc = (pcIn?.value || '').trim();
+          if (!pc) { if (msg) { msg.textContent = 'Enter a postcode first.'; msg.className = 'muted'; } return; }
+          if (msg) { msg.textContent = 'Looking up…'; msg.className = 'muted'; }
+          try {
+            const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc)}`);
+            const j = await res.json();
+            if (j?.status !== 200 || !j?.result) {
+              if (msg) { msg.textContent = 'Postcode not found.'; msg.className = 'error'; }
+              return;
+            }
+            state.location_postcode = (j.result.postcode || pc).toUpperCase();
+            state.location_lat = Number(j.result.latitude);
+            state.location_lng = Number(j.result.longitude);
+            if (pcIn) pcIn.value = state.location_postcode;
+            if (msg) { msg.textContent = `✓ ${state.location_lat.toFixed(5)}, ${state.location_lng.toFixed(5)} — fine-tune on the next step.`; msg.className = 'ok'; }
+          } catch (e) {
+            if (msg) { msg.textContent = 'Lookup failed — check your connection.'; msg.className = 'error'; }
+          }
+        };
+      }
+    } else if (step === 4 && state.home_away === 'away') {
+      // Fine-tune map button
+      const openMapBtn = overlay.querySelector('#mw-open-map');
+      if (openMapBtn) {
+        openMapBtn.onclick = async () => {
+          const initial = (state.location_lat != null && state.location_lng != null)
+            ? { lat: state.location_lat, lng: state.location_lng }
+            : null;
+          const result = await openMapPicker(initial);
+          if (result) {
+            state.location_lat = result.lat;
+            state.location_lng = result.lng;
+            render(); // refresh the pin readout
+          }
+        };
+      }
     }
 
     const backBtn = overlay.querySelector('#mw-back');
@@ -4020,37 +4301,95 @@ function openMatchWizard(user, teamId) {
   }
 
   async function finish() {
-    // Build a partial lineup state to be picked up by renderLineupsTab
-    const payload = {
-      opponent: (state.opponent || '').trim(),
-      game_date: state.game_date,
-      kickoff_time: state.kickoff_time || '',
-      arrival_time: state.arrival_time || '',
-      home_away: state.home_away,
-      match_type: state.match_type,
-      formation: state.formation
-    };
-    // Home match: auto-populate venue from the team's home ground, matching
-    // the existing home/away selector behaviour in the lineup editor.
-    if (state.home_away === 'home' && editor && editor.team) {
-      payload.location_name     = editor.team.home_ground_name     || '';
-      payload.location_postcode = editor.team.home_ground_postcode || '';
-      payload.location_lat      = editor.team.home_ground_lat      ?? null;
-      payload.location_lng      = editor.team.home_ground_lng      ?? null;
+    // Actually insert the lineup so we have a real id for Availability + WhatsApp links.
+    const opp = (state.opponent || '').trim();
+    if (!opp) {
+      // Jump back to Step 1 so the coach can fix it.
+      step = 1;
+      render();
+      setTimeout(() => {
+        const op = overlay.querySelector('#mw-opponent');
+        if (op) { op.focus(); op.classList.add('error'); }
+      }, 40);
+      return;
     }
-    // If a custom formation is chosen, include its pos/lbl so the lineup renders with them
+
+    const typeLbl = state.match_type === 'friendly' ? 'Friendly' : state.match_type === 'cup' ? 'Cup' : 'League';
+    const haLbl = state.home_away === 'away' ? '(A)' : '(H)';
+    const name = `${typeLbl} vs ${opp} ${haLbl}`;
+
+    // Resolve venue fields: Home → team home ground (ignore anything in state).
+    //                      Away → wizard state.
+    let locName, locPost, locLat, locLng;
+    if (state.home_away === 'home' && team) {
+      locName = team.home_ground_name || '';
+      locPost = team.home_ground_postcode || '';
+      locLat = team.home_ground_lat ?? null;
+      locLng = team.home_ground_lng ?? null;
+    } else {
+      locName = (state.location_name || '').trim();
+      locPost = (state.location_postcode || '').trim().toUpperCase();
+      locLat = state.location_lat;
+      locLng = state.location_lng;
+    }
+
+    // If a custom formation is chosen, persist its pos/lbl so the lineup renders with them.
     const cf = customFormations.find(f => f.name === state.formation);
-    if (cf && cf.data && Array.isArray(cf.data.pos) && Array.isArray(cf.data.lbl)) {
-      payload.pos = cf.data.pos.map(p => [...p]);
-      payload.lbl = [...cf.data.lbl];
+    const dataPos = (cf && cf.data && Array.isArray(cf.data.pos)) ? cf.data.pos.map(p => [...p]) : null;
+    const dataLbl = (cf && cf.data && Array.isArray(cf.data.lbl)) ? [...cf.data.lbl] : null;
+
+    const finishBtn = overlay.querySelector('#mw-finish');
+    if (finishBtn) { finishBtn.disabled = true; finishBtn.textContent = 'Creating…'; }
+
+    const payload = {
+      team_id: teamId,
+      name,
+      opponent: opp,
+      game_date: state.game_date || null,
+      match_type: state.match_type || 'league',
+      home_away: state.home_away || 'home',
+      kickoff_time: state.kickoff_time || null,
+      arrival_time: state.arrival_time || null,
+      notes: null,
+      lineup_status: 'draft',
+      location_name: (locName || '').trim() || null,
+      location_postcode: (locPost || '').trim().toUpperCase() || null,
+      location_lat: locLat ?? null,
+      location_lng: locLng ?? null,
+      created_by: user.id,
+      data: {
+        formation: state.formation,
+        slots: {},
+        subs: [],
+        lbl: dataLbl,
+        pos: dataPos,
+        arrows: [],
+        zoneLines: [null, null],
+        ballVisible: false,
+        ballPos: { x: 50, y: 50 }
+      },
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: inserted, error } = await supabase.from('lineups').insert(payload).select().single();
+    if (error) {
+      if (finishBtn) { finishBtn.disabled = false; finishBtn.textContent = 'Create match'; }
+      alert('Failed to create match: ' + error.message);
+      return;
     }
-    _pendingLineupLoad = payload;
+    try { await logAudit(teamId, 'lineup', inserted.id, 'create', { name, via: 'wizard' }); } catch (_) {}
 
     close();
     try { await flushAutosave(); } catch (_) {}
+
+    // Flag the saved lineup so renderTeamDashboard's Lineups branch loads it fully.
+    _pendingLineupIdToOpen = inserted.id;
     activeTab = 'lineups';
     openCards.clear();
     await renderTeamDashboard(user, teamId);
+
+    // Post-create: ask whether to share to WhatsApp now.
+    openShareToWhatsAppPrompt(inserted.id);
   }
 
   render();
