@@ -1820,7 +1820,11 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .status-option-desc  { display: block; font-size: 0.82rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.35; }
 .status-option-check { font-size: 1.1rem; color: var(--blue); font-weight: 700; margin-left: auto; align-self: center; }
 
-/* Main body: pitch left, sub-tab panel right on desktop; stacked on phone. */
+/* Main body: pitch left, sub-tab panel right on desktop; stacked on phone.
+   Formations + Tactics pages still use the simpler .me-pitch-col / .me-panel-col
+   pattern (declared below). The match editor (.match-editor-body) splits the
+   right column into a top-strip + sub-strip so mobile can reorder them around
+   the pitch. */
 .me-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);
@@ -1829,6 +1833,38 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 }
 .me-pitch-col { min-width: 0; }
 .me-panel-col { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* Match editor body — 3 direct children (top-strip / pitch / sub-strip) instead
+   of the traditional 2. On desktop, pitch spans rows so top-strip + sub-strip
+   stack in the right column (same visual result as before). On mobile, flex
+   column so source order wins: top-strip ABOVE pitch, sub-strip below. */
+.match-editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.match-editor-body > .me-pitch-col {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.match-editor-body > .me-top-strip {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.match-editor-body > .me-sub-strip {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 
 /* The panel that houses all the sub-tab bodies. */
 .me-panel { padding: 0.9rem 1rem; }
@@ -1958,6 +1994,42 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 
   /* Stack pitch on top, panel below. */
   .me-body { grid-template-columns: 1fr; }
+
+  /* Match editor on mobile — flex column in source order so top-strip
+     (availability + status + Enter result) sits ABOVE the pitch, and the
+     sub-tab strip sits below. Tighter padding on top-strip children so they
+     don't hog vertical space above the pitch. */
+  .match-editor-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .match-editor-body > .me-pitch-col,
+  .match-editor-body > .me-top-strip,
+  .match-editor-body > .me-sub-strip {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .match-editor-body > .me-top-strip { gap: 0.3rem; margin-bottom: 0.15rem; }
+  .match-editor-body > .me-top-strip .me-avail-bar {
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0;
+  }
+  .match-editor-body > .me-top-strip .me-phone-status-row {
+    padding: 0.35rem 0.65rem;
+    margin: 0;
+  }
+  .match-editor-body > .me-top-strip .me-result-card {
+    padding: 0.35rem 0.55rem;
+    margin-bottom: 0;
+  }
+  .match-editor-body > .me-top-strip .me-enter-result-btn {
+    padding: 0.55rem 0.75rem;
+    font-size: 0.88rem;
+    margin: 0;
+  }
+  /* Tighten the sub-tab strip too — the pitch already took the vertical budget. */
+  .match-editor-body > .me-sub-strip { gap: 0.4rem; }
 
   /* Shrink the pitch a bit so the sub-tab strip is in view without scrolling. */
   .lineup-layout .pitch-card {

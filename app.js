@@ -4921,9 +4921,23 @@ function renderLineupsTab() {
         </div>
       </header>
 
-      <!-- Editor body: pitch left + panel right (desktop), stacked (phone).
-           Pitch + sub-tabs are ALWAYS rendered so #subs-row etc. exist in the DOM. -->
-      <div class="me-body">
+      <!-- Editor body: pitch left + panel right on desktop; on mobile the
+           top-strip (result card / availability / status / Enter result) sits
+           ABOVE the pitch, then pitch, then sub-tabs. CSS grid on desktop
+           makes the pitch span two rows so the right column can split in two.
+           On mobile it's a flex column in source order. -->
+      <div class="me-body match-editor-body">
+        <div class="me-top-strip">
+          <!-- Result summary (only on played matches with a score/scorers/MOTM recorded) -->
+          ${compactMatchResultCardHtml(current)}
+          <!-- Availability — permanently visible when a match is open -->
+          ${availBarHtml}
+          <!-- Phone-only status row (hidden on desktop where the header shows status) -->
+          ${phoneStatusRowHtml}
+          <!-- Enter/edit result — only once KO has passed -->
+          ${enterResultBtnHtml}
+        </div>
+
         <div class="me-pitch-col">
           <div class="card pitch-card">
             <div class="pitch" id="pitch">
@@ -4935,18 +4949,7 @@ function renderLineupsTab() {
           </div>
         </div>
 
-        <div class="me-panel-col">
-          <!-- Result summary (only on played matches with a score/scorers/MOTM recorded) -->
-          ${compactMatchResultCardHtml(current)}
-          <!-- Availability — permanently above the sub-tab strip -->
-          ${availBarHtml}
-
-          <!-- Phone-only status row (hidden on desktop where the header shows status) -->
-          ${phoneStatusRowHtml}
-
-          <!-- Enter/edit result — only once KO has passed -->
-          ${enterResultBtnHtml}
-
+        <div class="me-sub-strip">
           ${subTabsHtml}
           <div class="me-panel card">
             <!-- Matches sub-tab: fixtures as cards, in the panel next to the pitch -->
