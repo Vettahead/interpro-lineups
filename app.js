@@ -2773,7 +2773,19 @@ function allFormations(customFormations) {
   for (const cf of (customFormations || [])) {
     const d = cf.data || {};
     if (Array.isArray(d.pos) && Array.isArray(d.lbl) && d.pos.length === d.lbl.length) {
-      out[cf.name] = { pos: d.pos.map(p => [...p]), lbl: [...d.lbl], _customId: cf.id };
+      // _hasPlayers is a quick flag for UI — true if this formation was saved
+      // with pre-placed players. Count is the number of filled slots.
+      const playersMap = d.players && typeof d.players === 'object' ? d.players : null;
+      const playerCount = playersMap
+        ? Object.values(playersMap).filter(Boolean).length
+        : 0;
+      out[cf.name] = {
+        pos: d.pos.map(p => [...p]),
+        lbl: [...d.lbl],
+        _customId: cf.id,
+        _hasPlayers: playerCount > 0,
+        _playerCount: playerCount
+      };
     }
   }
   return out;
@@ -4023,8 +4035,16 @@ function renderFormationsTab() {
 
   const FORMS = allFormations(customFormations);
   const formationBtns = Object.keys(FORMS).map(f => {
-    const cid = FORMS[f]._customId;
-    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}" data-formation="${f}">${escapeHtml(f)}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
+    const info = FORMS[f];
+    const cid = info._customId;
+    // Players-stored indicator: 👥N badge when this custom formation has
+    // pre-placed players saved with it. Only shown on the Formations page
+    // (this function) — the match editor doesn't actually load stored
+    // players, so an indicator there would be misleading.
+    const playersBadge = info._hasPlayers
+      ? `<span class="f-players-badge" title="${info._playerCount} player${info._playerCount === 1 ? '' : 's'} pre-placed">👥${info._playerCount}</span>`
+      : '';
+    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}${info._hasPlayers ? ' f-btn-has-players' : ''}" data-formation="${f}">${escapeHtml(f)}${playersBadge}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
   }).join('');
 
   // Palette: players not already in a slot on the pitch.
@@ -4182,8 +4202,14 @@ function renderLineupsTab() {
 
   const FORMS = allFormations(customFormations);
   const formationBtns = Object.keys(FORMS).map(f => {
-    const cid = FORMS[f]._customId;
-    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}" data-formation="${f}">${escapeHtml(f)}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
+    const info = FORMS[f];
+    const cid = info._customId;
+    // 👥N badge signals the formation has pre-placed players you can load into
+    // the match with one click. Uses the same shape as the Formations page.
+    const playersBadge = info._hasPlayers
+      ? `<span class="f-players-badge" title="${info._playerCount} player${info._playerCount === 1 ? '' : 's'} pre-placed — click formation to load them">👥${info._playerCount}</span>`
+      : '';
+    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}${info._hasPlayers ? ' f-btn-has-players' : ''}" data-formation="${f}">${escapeHtml(f)}${playersBadge}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
   }).join('');
 
   // Players used in current lineup
@@ -6054,18 +6080,33 @@ function wireLineupEvents() {
       delete editor.current.pos;
       delete editor.current.lbl;
       _posEditMode = false;
-      // On the Formations page, load the formation's stored player placements
-      // (if the coach opted to save them). Presets never have stored players.
-      // On the match editor we keep the existing squad and just trim overflow.
+      // Handle stored players on custom formations.
+      const custom = (editor.customFormations || []).find(c => c.name === picked);
+      const storedPlayers = custom?.data?.players || null;
+      const storedCount = storedPlayers ? Object.values(storedPlayers).filter(Boolean).length : 0;
+
       if (editor?.mode === 'formation') {
-        const custom = (editor.customFormations || []).find(c => c.name === picked);
-        editor.current.slots = custom?.data?.players ? { ...custom.data.players } : {};
+        // Formations page: always swap to the stored arrangement (or empty) —
+        // this is where the coach explicitly manages those templates.
+        editor.current.slots = storedPlayers ? { ...storedPlayers } : {};
       } else {
-        // Drop any slotted players beyond the new formation's slot count
-        const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
-        Object.keys(editor.current.slots).forEach(k => {
-          if (parseInt(k) >= newCount) delete editor.current.slots[k];
-        });
+        // Match editor: if the formation has stored players, offer to apply
+        // them. Only prompt when there's something at risk of being overwritten
+        // (current pitch has players). Empty pitch → load stored silently.
+        const currentFilled = Object.values(editor.current.slots || {}).filter(Boolean).length;
+        const applyStored = storedCount > 0 && (
+          currentFilled === 0 ||
+          confirm(`"${picked}" has ${storedCount} pre-placed player${storedCount === 1 ? '' : 's'} saved with it. Load them onto the pitch?\n\nOK — replace your current players with the stored ones.\nCancel — keep your current players, just change the formation shape.`)
+        );
+        if (applyStored) {
+          editor.current.slots = { ...storedPlayers };
+        } else {
+          // Drop any slotted players beyond the new formation's slot count
+          const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
+          Object.keys(editor.current.slots).forEach(k => {
+            if (parseInt(k) >= newCount) delete editor.current.slots[k];
+          });
+        }
       }
       _rerenderEditor();
     };
