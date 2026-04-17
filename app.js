@@ -7592,7 +7592,7 @@ function renderPitch() {
   }).join('');
 
   slotsLayer.innerHTML = slotsHtml;
-  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, current.team_id, current.id);
+  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, editor.team?.id, current.id);
 }
 
 // Kept as fallback helper (not currently called, but left in case)
@@ -7661,7 +7661,7 @@ function renderSubsBar() {
     `);
   }
   row.innerHTML = cells.join('');
-  applyMatchDecorations(row, current.motm, current.goalscorers, current.team_id, current.id);
+  applyMatchDecorations(row, current.motm, current.goalscorers, editor.team?.id, current.id);
 }
 
 function wireLineupEvents() {
@@ -8836,8 +8836,8 @@ function refreshAfterChipMove() {
   applyAvailabilityDecorations();
   const slotsLayer = document.getElementById('slots-layer');
   const subsRow = document.getElementById('subs-row');
-  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, current.team_id, current.id);
-  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers, current.team_id, current.id);
+  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, editor.team?.id, current.id);
+  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers, editor.team?.id, current.id);
 
   // Persist
   try { scheduleAutosaveIfPublished(); } catch (_) {}
