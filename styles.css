@@ -784,6 +784,38 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   text-shadow: none;
 }
 
+/* Bottom-left badge row on a match chip — shows ONLY badges awarded during THIS match.
+   Added by applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId). Positioned
+   bottom-left to avoid colliding with MOTM star (top-left), goal ball (top-right), and
+   availability dot (bottom-right). */
+.chip-badges {
+  position: absolute;
+  bottom: -5px;
+  left: -5px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1.5px solid #d6a82b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+  pointer-events: none;
+  max-width: 80%;
+  white-space: nowrap;
+}
+.chip-badge-emoji {
+  font-size: 12px;
+  line-height: 1;
+}
+.chip-badge-more {
+  font-size: 9px;
+  font-weight: 700;
+  color: #8c6b00;
+  margin-left: 1px;
+}
+
 .pv-chip.has-photo {
   background-size: cover; background-position: center;
   background-color: #ddd;
@@ -2310,6 +2342,48 @@ body.public-card-view #app { padding-top: 0; }
   border-style: dashed;
 }
 
+/* Stacked badge: layered shadow to suggest a pile of identical badges, plus a
+   small "×N" count pill in the top-right corner. Only applied when a player
+   has earned the same badge 2+ times (e.g. Fair Play x3). */
+.pc-badge-chip.has-stack {
+  position: relative;
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.2),
+    2px 2px 0 -1px #fff8e1,
+    2px 2px 0 0 #d6a82b,
+    4px 4px 0 -1px #fff8e1,
+    4px 4px 0 0 #d6a82b;
+}
+.pc-badge-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  z-index: 1;
+  pointer-events: none;
+}
+/* Grid-cell variant: position the count pill on the emoji circle, not the card corner. */
+.pc-badge-grid-cell { position: relative; }
+.pc-badge-grid-cell.has-stack .pc-badge-grid-emoji {
+  text-shadow:
+    2px 2px 0 rgba(214, 168, 43, 0.35),
+    4px 4px 0 rgba(214, 168, 43, 0.2);
+}
+.pc-badge-grid-cell .pc-badge-count {
+  top: 2px;
+  right: 4px;
+}
+
 /* Bottom-sheet detail for a single earned badge (tap a chip). */
 .pc-badge-sheet { max-width: 420px; width: 92vw; }
 .pc-badge-sheet-head {
@@ -2344,6 +2418,48 @@ body.public-card-view #app { padding-top: 0; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #666;
+}
+
+/* Inline "×N" pill next to the badge name in the detail sheet header,
+   shown when the player has earned this badge multiple times. */
+.pc-badge-sheet-count {
+  display: inline-block;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: 10px;
+  vertical-align: middle;
+  margin-left: 0.25rem;
+}
+/* Stack list inside the detail sheet: one row per individual award. */
+.pc-badge-stack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #eee;
+}
+.pc-badge-stack-row {
+  background: #fafbfc;
+  border: 1px solid #eef0f4;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+}
+.pc-badge-stack-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.pc-badge-stack-idx {
+  background: #e7eefb;
+  color: #1e3a8a;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 10px;
 }
 
 /* "See all" grid modal on the public card. */

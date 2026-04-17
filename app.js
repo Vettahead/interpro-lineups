@@ -1612,35 +1612,49 @@ function renderPlayerCardBody() {
 
   // Earned badges for this sibling, filtered to the selected season. Falls
   // back to an empty list if the player_badges migration hasn't been run yet.
-  // We de-duplicate by badge_key so a badge awarded twice in the same season
-  // only shows once on the card (coach re-awards to refresh date — we show
-  // the most recent awarded_at since the cache is sorted DESC already).
+  // We GROUP by badge_key so multiple awards of the same badge (e.g. Fair Play
+  // x2) render as a single stacked chip with a count pill in the corner. The
+  // cache is sorted DESC by awarded_at so group.latest is always the newest.
   const allPlayerBadges = badgesForPlayer(team.id, p.id, seasonYear);
-  const seenKeys = new Set();
-  const uniquePlayerBadges = [];
+  const groupsByKey = new Map();
   for (const b of allPlayerBadges) {
-    if (seenKeys.has(b.badge_key)) continue;
-    seenKeys.add(b.badge_key);
-    uniquePlayerBadges.push(b);
+    if (!groupsByKey.has(b.badge_key)) {
+      groupsByKey.set(b.badge_key, { key: b.badge_key, items: [b], latest: b });
+    } else {
+      const g = groupsByKey.get(b.badge_key);
+      g.items.push(b);
+      // cache is already sorted DESC but be defensive in case of mixed fetches
+      if (!g.latest || (b.awarded_at > g.latest.awarded_at)) g.latest = b;
+    }
   }
-  const badgesToShow = uniquePlayerBadges.slice(0, CARD_BADGES_MAX);
-  const overflowCount = Math.max(0, uniquePlayerBadges.length - CARD_BADGES_MAX);
-  const badgesRowHtml = uniquePlayerBadges.length === 0
+  const badgeGroups = Array.from(groupsByKey.values());
+  const groupsToShow = badgeGroups.slice(0, CARD_BADGES_MAX);
+  const overflowCount = Math.max(0, badgeGroups.length - CARD_BADGES_MAX);
+  const badgesRowHtml = badgeGroups.length === 0
     ? ''
     : `
       <div class="pc-badges-row" aria-label="Earned badges">
-        ${badgesToShow.map(b => {
-          const e = badgeEntry(b.badge_key);
-          const label = e ? e.name : b.badge_key;
-          // title shows name + optional coach note on hover (desktop) AND on long-press
-          // (mobile) — complements the click-to-open detail sheet. Kept compact so
-          // the native browser tooltip doesn't truncate weirdly.
-          const tip = b.note ? `${label} — ${b.note}` : label;
-          return `<button type="button" class="pc-badge-chip" data-badge-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(tip)}"><span class="pc-badge-emoji">${badgeEmoji(b.badge_key)}</span></button>`;
+        ${groupsToShow.map(g => {
+          const e = badgeEntry(g.key);
+          const name = e ? e.name : g.key;
+          const count = g.items.length;
+          const latest = g.latest;
+          // Tooltip shows name + optional latest coach note, plus a "×N" hint
+          // when the badge has been earned more than once.
+          const suffix = count > 1 ? ` (×${count})` : '';
+          const tip = latest?.note ? `${name}${suffix} — ${latest.note}` : `${name}${suffix}`;
+          const stackClass = count > 1 ? ' has-stack' : '';
+          const countPill = count > 1
+            ? `<span class="pc-badge-count" aria-label="${count} times">×${count}</span>`
+            : '';
+          // We pass the LATEST badge's id on data-badge-id so the click still
+          // opens a detail sheet; that sheet now renders the full stack list
+          // when the group has multiple items.
+          return `<button type="button" class="pc-badge-chip${stackClass}" data-badge-id="${escapeHtml(latest.id)}" data-badge-key="${escapeHtml(g.key)}" aria-label="${escapeHtml(name)}${count > 1 ? ' (' + count + ' times)' : ''}" title="${escapeHtml(tip)}"><span class="pc-badge-emoji">${badgeEmoji(g.key)}</span>${countPill}</button>`;
         }).join('')}
         ${overflowCount > 0
-          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all ${uniquePlayerBadges.length} badges">+${overflowCount}</button>`
-          : (uniquePlayerBadges.length > 4
+          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all ${badgeGroups.length} badges">+${overflowCount}</button>`
+          : (badgeGroups.length > 4
               ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all badges">All</button>`
               : '')}
       </div>`;
@@ -1735,25 +1749,51 @@ function renderPlayerCardBody() {
 
   // Badge chip tap → bottom-sheet detail. "See all" → full grid. Both are
   // read-only views — no admin controls on the public card (parents/kids only).
-  document.querySelectorAll('.pc-badge-chip[data-badge-id]').forEach(btn => {
+  // Stacked chips pass the whole group so the sheet can list every award.
+  document.querySelectorAll('.pc-badge-chip[data-badge-key]').forEach(btn => {
     btn.onclick = () => {
-      const id = btn.dataset.badgeId;
-      const b = getCachedTeamBadges(team.id).find(x => x.id === id);
-      if (b) openBadgeDetailSheet(b);
+      const key = btn.dataset.badgeKey;
+      const group = groupsByKey.get(key);
+      if (group) openBadgeDetailSheet(group.latest, group);
     };
   });
   const seeAllBtn = document.querySelector('[data-badges-see-all]');
-  if (seeAllBtn) seeAllBtn.onclick = () => openBadgesGridModal(uniquePlayerBadges, p);
+  if (seeAllBtn) seeAllBtn.onclick = () => openBadgesGridModal(badgeGroups, p);
 }
 
 // ---------- Badge view modals (public card — read-only) ----------
 // Bottom-sheet detail for a single earned badge. Shows emoji + name + description
 // + optional coach note (public per Chris's 2026-04-17 call) + awarded date.
-function openBadgeDetailSheet(badge) {
+// When `group` has more than one item, renders a stacked list — one row per
+// award with its own date + note.
+function openBadgeDetailSheet(badge, group) {
   const entry = badgeEntry(badge.badge_key);
   const name = entry?.name || badge.badge_key;
   const desc = entry?.description || '';
   const emoji = entry?.emoji || '🏅';
+  const items = (group && Array.isArray(group.items) && group.items.length > 0) ? group.items : [badge];
+  const count = items.length;
+
+  // Stacked list (count > 1): one row per award with date + note. Ordered
+  // newest-first, matching the cache's DESC sort.
+  const stackRowsHtml = count > 1
+    ? `<div class="pc-badge-stack-list">
+         ${items.map((b, i) => `
+           <div class="pc-badge-stack-row">
+             <div class="pc-badge-stack-row-head">
+               <span class="pc-badge-stack-idx">#${count - i}</span>
+               <span class="muted" style="font-size:0.78rem">${escapeHtml(formatBadgeDate(b.awarded_at))}</span>
+             </div>
+             ${b.note ? `<div class="pc-badge-note" style="margin-top:0.35rem"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(b.note)}</p></div>` : ''}
+           </div>
+         `).join('')}
+       </div>`
+    : '';
+
+  const headerDate = count > 1
+    ? `Earned ${count} times`
+    : escapeHtml(formatBadgeDate(badge.awarded_at));
+
   const overlay = document.createElement('div');
   overlay.className = 'picker-overlay pc-badge-sheet-overlay';
   overlay.innerHTML = `
@@ -1761,14 +1801,15 @@ function openBadgeDetailSheet(badge) {
       <div class="pc-badge-sheet-head">
         <div class="pc-badge-sheet-emoji" aria-hidden="true">${emoji}</div>
         <div class="pc-badge-sheet-title">
-          <h3 style="margin:0 0 0.15rem">${escapeHtml(name)}</h3>
-          <div class="muted" style="font-size:0.78rem">${escapeHtml(formatBadgeDate(badge.awarded_at))}</div>
+          <h3 style="margin:0 0 0.15rem">${escapeHtml(name)}${count > 1 ? ` <span class="pc-badge-sheet-count">×${count}</span>` : ''}</h3>
+          <div class="muted" style="font-size:0.78rem">${headerDate}</div>
         </div>
         <button class="btn-secondary" data-close type="button" aria-label="Close">✕</button>
       </div>
       <div class="pc-badge-sheet-body">
         ${desc ? `<p style="margin:0.4rem 0 0.5rem">${escapeHtml(desc)}</p>` : ''}
-        ${badge.note ? `<div class="pc-badge-note"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(badge.note)}</p></div>` : ''}
+        ${count === 1 && badge.note ? `<div class="pc-badge-note"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(badge.note)}</p></div>` : ''}
+        ${stackRowsHtml}
       </div>
     </div>
   `;
@@ -1779,8 +1820,18 @@ function openBadgeDetailSheet(badge) {
 }
 
 // Full-grid modal of every badge this player has earned in the current season
-// scope. Tapping a chip opens the detail sheet.
-function openBadgesGridModal(badges, player) {
+// scope. Tapping a chip opens the detail sheet. `groups` is an array of
+// `{ key, items, latest }` — the same shape used by the card chips — so that
+// duplicate awards collapse into a single cell with a "×N" count pill.
+// (Backward-compat: if called with flat `{ id, badge_key, ... }` rows it wraps
+//  each into a pseudo-group of one.)
+function openBadgesGridModal(groupsOrBadges, player) {
+  const groups = (groupsOrBadges || []).map(x => {
+    if (x && Array.isArray(x.items)) return x; // already a group
+    return { key: x.badge_key, items: [x], latest: x };
+  });
+  const groupsByKey = new Map(groups.map(g => [g.key, g]));
+
   const overlay = document.createElement('div');
   overlay.className = 'picker-overlay pc-badge-grid-overlay';
   overlay.innerHTML = `
@@ -1790,14 +1841,20 @@ function openBadgesGridModal(badges, player) {
         <button class="btn-secondary" data-close type="button">✕</button>
       </div>
       <div class="picker-body" style="padding:0.6rem 0.8rem 1rem">
-        ${badges.length === 0
+        ${groups.length === 0
           ? '<p class="muted">No badges yet.</p>'
           : `<div class="pc-badge-grid">
-               ${badges.map(b => {
-                 const e = badgeEntry(b.badge_key);
-                 const nm = e ? e.name : b.badge_key;
-                 return `<button type="button" class="pc-badge-grid-cell" data-bg-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(nm)}">
-                           <span class="pc-badge-grid-emoji">${badgeEmoji(b.badge_key)}</span>
+               ${groups.map(g => {
+                 const e = badgeEntry(g.key);
+                 const nm = e ? e.name : g.key;
+                 const count = g.items.length;
+                 const stackClass = count > 1 ? ' has-stack' : '';
+                 const countPill = count > 1
+                   ? `<span class="pc-badge-count" aria-label="${count} times">×${count}</span>`
+                   : '';
+                 return `<button type="button" class="pc-badge-grid-cell${stackClass}" data-badge-key="${escapeHtml(g.key)}" aria-label="${escapeHtml(nm)}${count > 1 ? ' (' + count + ' times)' : ''}">
+                           <span class="pc-badge-grid-emoji">${badgeEmoji(g.key)}</span>
+                           ${countPill}
                            <span class="pc-badge-grid-name">${escapeHtml(nm)}</span>
                          </button>`;
                }).join('')}
@@ -1809,11 +1866,11 @@ function openBadgesGridModal(badges, player) {
   const close = () => overlay.remove();
   overlay.querySelector('[data-close]').onclick = close;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelectorAll('[data-bg-id]').forEach(btn => {
+  overlay.querySelectorAll('[data-badge-key]').forEach(btn => {
     btn.onclick = () => {
-      const id = btn.dataset.bgId;
-      const b = badges.find(x => x.id === id);
-      if (b) openBadgeDetailSheet(b);
+      const key = btn.dataset.badgeKey;
+      const group = groupsByKey.get(key);
+      if (group) openBadgeDetailSheet(group.latest, group);
     };
   });
 }
@@ -2043,10 +2100,13 @@ async function renderParentView(lineupId, opts = {}) {
 
   // Fetch team + players + custom formations (RLS allows read when team has a published lineup).
   // Explicit column list — never expose access_code / family_code to anon clients.
+  // Also fetch team badges so applyMatchDecorations can overlay match-specific
+  // awards on each chip — RLS allows anon SELECT via team_has_published_lineup.
   const [teamRes, playersRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
     supabase.from('players').select('id,team_id,name,number,position,photo_url').eq('team_id', lineup.team_id),
-    supabase.from('formations').select('*').eq('team_id', lineup.team_id)
+    supabase.from('formations').select('*').eq('team_id', lineup.team_id),
+    fetchTeamBadges(lineup.team_id).catch(() => [])
   ]);
   const team = teamRes.data || { name: '' };
   const players = playersRes.data || [];
@@ -3074,6 +3134,7 @@ const HELP_SECTIONS = [
         <li><strong>Bottom-right dot</strong> — availability (green Available, red Unavailable, amber Maybe, no dot = no response)</li>
         <li><strong>Top-left gold ★</strong> — Man of the Match for this game</li>
         <li><strong>Top-right white circle with a number</strong> — goals scored in this game</li>
+        <li><strong>Bottom-left emoji row</strong> — badges awarded in this game (only; their permanent collection lives on the player card)</li>
       </ul>
       <p>The same icons show on the parent view pitch once the lineup is published.</p>
     `
@@ -6215,12 +6276,15 @@ function stopCoachAvailabilityPoll() {
   _coachAvailabilityPollLineupId = null;
 }
 
-// Decorate match-context chips with MOTM star (top-left) and goal-count ball (top-right).
+// Decorate match-context chips with MOTM star (top-left), goal-count ball (top-right),
+// and a small bottom-left row of any badges earned in THIS match (when teamId + lineupId
+// are provided — filter is strict `lineup_id === lineupId` so cumulative awards don't
+// appear on every fixture chip).
 // Scoped to a root element so it doesn't bleed across tabs (e.g. fixture preview vs editor).
-// Idempotent: clears previous .motm-star / .goal-ball before re-adding so calling it from
-// renderPitch / renderSubsBar / renderFixturePitch on every render is safe.
+// Idempotent: clears previous .motm-star / .goal-ball / .chip-badges before re-adding so
+// calling from renderPitch / renderSubsBar / renderFixturePitch on every render is safe.
 // No-op when arrays are empty (i.e. unplayed matches show nothing extra).
-function applyMatchDecorations(rootEl, motm, goalscorers) {
+function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
   if (!rootEl) return;
   const motmIds = new Set((Array.isArray(motm) ? motm : []).map(m => m && m.player_id).filter(Boolean));
   const goalsBy = {};
@@ -6228,8 +6292,22 @@ function applyMatchDecorations(rootEl, motm, goalscorers) {
     const c = parseInt(g && g.count, 10) || 0;
     if (g && g.player_id && c > 0) goalsBy[g.player_id] = (goalsBy[g.player_id] || 0) + c;
   }
+
+  // Build { playerId: [badge, ...] } from the cache, scoped to THIS lineup only.
+  // We keep every award (no de-dup) so Fair Play x2 would render as two emojis —
+  // the on-chip space is tight but that's the clearest signal to a parent glancing
+  // at the match view. If tighter than ~3 badges, later tweaks can group-count here.
+  const badgesByPlayer = {};
+  if (teamId && lineupId) {
+    const all = getCachedTeamBadges(teamId);
+    for (const b of all) {
+      if (!b || b.lineup_id !== lineupId) continue;
+      (badgesByPlayer[b.player_id] = badgesByPlayer[b.player_id] || []).push(b);
+    }
+  }
+
   rootEl.querySelectorAll('[data-player-id]').forEach(chip => {
-    chip.querySelectorAll('.motm-star, .goal-ball').forEach(el => el.remove());
+    chip.querySelectorAll('.motm-star, .goal-ball, .chip-badges').forEach(el => el.remove());
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     const pid = chip.dataset.playerId;
     if (motmIds.has(pid)) {
@@ -6251,6 +6329,25 @@ function applyMatchDecorations(rootEl, motm, goalscorers) {
       // Clean black-and-white disc with the number front-and-centre. Earlier radial-gradient "soccer ball" pattern made the digit unreadable; legibility wins.
       ball.style.cssText = 'position:absolute;top:-7px;right:-7px;min-width:24px;height:24px;padding:0 4px;border-radius:50%;background:#fff;color:#000;font-size:14px;line-height:1;font-weight:900;border:2.5px solid #111;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif';
       chip.appendChild(ball);
+    }
+    // Match-specific badge row (bottom-left corner of chip). Cap at 3 emoji to
+    // keep the chip readable; surface a "+N" dot if more were earned this match.
+    const chipBadges = badgesByPlayer[pid] || [];
+    if (chipBadges.length > 0) {
+      const MAX_BADGES = 3;
+      const shown = chipBadges.slice(0, MAX_BADGES);
+      const overflow = chipBadges.length - shown.length;
+      const row = document.createElement('div');
+      row.className = 'chip-badges';
+      const title = chipBadges.map(b => {
+        const e = badgeEntry(b.badge_key);
+        const nm = e ? e.name : b.badge_key;
+        return b.note ? `${nm} — ${b.note}` : nm;
+      }).join('\n');
+      row.title = title;
+      row.innerHTML = shown.map(b => `<span class="chip-badge-emoji">${badgeEmoji(b.badge_key)}</span>`).join('')
+        + (overflow > 0 ? `<span class="chip-badge-more">+${overflow}</span>` : '');
+      chip.appendChild(row);
     }
   });
 }
@@ -7495,7 +7592,7 @@ function renderPitch() {
   }).join('');
 
   slotsLayer.innerHTML = slotsHtml;
-  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
+  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, current.team_id, current.id);
 }
 
 // Kept as fallback helper (not currently called, but left in case)
@@ -7564,7 +7661,7 @@ function renderSubsBar() {
     `);
   }
   row.innerHTML = cells.join('');
-  applyMatchDecorations(row, current.motm, current.goalscorers);
+  applyMatchDecorations(row, current.motm, current.goalscorers, current.team_id, current.id);
 }
 
 function wireLineupEvents() {
@@ -8739,8 +8836,8 @@ function refreshAfterChipMove() {
   applyAvailabilityDecorations();
   const slotsLayer = document.getElementById('slots-layer');
   const subsRow = document.getElementById('subs-row');
-  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
-  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers);
+  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, current.team_id, current.id);
+  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers, current.team_id, current.id);
 
   // Persist
   try { scheduleAutosaveIfPublished(); } catch (_) {}
@@ -10253,7 +10350,7 @@ function renderFixturePitch(lineup) {
           <div class="slot-pos-lbl">${escapeHtml(label)}</div>
         </div>`;
     }).join('');
-    applyMatchDecorations(slotsLayer, d.motm, d.goalscorers);
+    applyMatchDecorations(slotsLayer, d.motm, d.goalscorers, lineup.team_id, lineup.id);
   }
 
   // Render subs using the same .subs-row / .sub-slot markup — all MAX_SUBS cells (filled + empty)
@@ -10282,7 +10379,7 @@ function renderFixturePitch(lineup) {
     }
     subsRow.innerHTML = cells.join('');
     if (subsLabel) subsLabel.textContent = `SUBSTITUTES (${filledCount}/${MAX_SUBS})`;
-    applyMatchDecorations(subsRow, d.motm, d.goalscorers);
+    applyMatchDecorations(subsRow, d.motm, d.goalscorers, lineup.team_id, lineup.id);
   }
 
   const ball = document.getElementById('fix-ball');

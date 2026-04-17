@@ -232,6 +232,7 @@ Once a lineup has availability responses and/or a recorded result, player chips 
 - **Bottom-right dot** — availability status (green = Available, red = Unavailable, amber = Maybe, no dot = no response)
 - **Top-left gold ★** — Man of the Match for this game
 - **Top-right black-on-white number** — goals scored in this game
+- **Bottom-left emoji row** — badges awarded in THIS match (only). Hover to see the badge name and the coach's "why?" note. The player's permanent collection lives on their public card; the chip row is a fixture-specific highlight reel. Stops at 3 emoji with a **+N** if more were earned in the same game.
 
 The same decorations show on the parent view pitch once the lineup is published.
 
@@ -469,7 +470,9 @@ Coaches and admins. Open **Squad details → Squad** → tap a player's card →
 Right now all badges are awarded manually by the coach. In a future update some will become **auto-derived** from match data — Hat-Trick Hero, Top Scorer, Ever-Present, 10 games, 25 goals, etc. Those entries already exist in the catalog but are hidden from the Award menu until the auto-rollout lands.
 
 ### Where do badges appear?
-On the **public player card**: a row of up to 9 icons sits beneath the stats grid. If the player has more than 9, an **All** button opens the full grid. Tapping a badge opens a detail sheet with name, description, date awarded, and the coach's note.
+On the **public player card**: a row of up to 9 icons sits beneath the stats grid. If the player has more than 9, an **All** button opens the full grid. Tapping a badge opens a detail sheet with name, description, date awarded, and the coach's note. If a player has earned the same badge multiple times (e.g. Fair Play × 3), the chips **stack** on the card with a little "×N" pill in the corner — the detail sheet then lists each individual award with its own date and note.
+
+Badges awarded during a specific match **also** show as a small emoji row on the bottom-left of that player's chip on the fixture pitch (both the coach's match editor view and the parent/player match page). Only badges linked to that match appear there — their permanent collection is on the card.
 
 ### Can I remove a badge?
 Yes — each earned-badge chip in the Squad player modal has a small ✕. Tap it to remove. There's no "edit": to refresh a date, remove and re-award.

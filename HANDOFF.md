@@ -1,6 +1,52 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-17)
 
-## 🔖 Where we left off on 2026-04-17 (session 9 — read this first)
+## 🔖 Where we left off on 2026-04-17 (session 10 — read this first)
+
+**Slice 9a polish — two more targeted tweaks on top of session 9.** No schema changes; all JS/CSS. Badges are still manual-only.
+
+### Shipped this session (session 10)
+
+1. **Match-specific badges show on the pitch chip.** `applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId)` gained two new args. When both are provided, the cached team badges are filtered to `lineup_id === lineupId` (strict equality — cumulative awards from other games are deliberately excluded) and grouped by player. Each player chip then gets a new `.chip-badges` row in the bottom-left corner with up to 3 emoji + optional `+N` overflow pill. Hover/long-press tooltip lists the badge names and coach notes. The row sits in the one free chip corner (MOTM ★ top-left, goal count top-right, availability dot bottom-right, badges bottom-left). All 6 call sites (`renderPitch`, `renderSubsBar`, two paths in `refreshAfterChipMove`, two in `renderFixturePitch`) pass `current.team_id` + `current.id` (editor) or `lineup.team_id` + `lineup.id` (parent view). The parent-view data-fetch now includes a 4th parallel `fetchTeamBadges(lineup.team_id)` call so the anon cache is populated before the pitch renders — RLS already allows anon SELECT via `team_has_published_lineup`, so no DB change was needed.
+2. **Duplicate badges stack on the public card.** Previously the card de-duplicated awards by `badge_key` and dropped all but the most recent. Now they group: `renderPlayerCardBody` builds a `Map<badge_key, { key, items, latest }>` from the cache and renders one chip per group. Chips with `count > 1` get a new `.has-stack` layered box-shadow (suggesting a fanned pile) and a small blue `×N` pill in the top-right corner. The detail sheet is extended — when `openBadgeDetailSheet(badge, group)` receives a group of >1 items, the body renders a `.pc-badge-stack-list` with one row per individual award (newest-first index like `#3 / #2 / #1`, date, optional per-award note). `openBadgesGridModal` also accepts groups now (backward-compat wraps flat `badges` into pseudo-groups of one) and shows the count pill on grid cells too.
+
+### Files touched (session 10)
+- `web/app.js` —
+  - `applyMatchDecorations` signature extended; badge filter + grouping logic added; `.chip-badges` overlay DOM built per chip.
+  - All 6 call sites updated to pass `team_id` + lineup `id`.
+  - `renderParentView` data Promise.all gains `fetchTeamBadges(lineup.team_id).catch(() => [])` so the cache is populated for anon visitors before the fixture pitch renders.
+  - `renderPlayerCardBody` replaces "de-dup by `badge_key`" with "group by `badge_key`" using a `Map`; chip HTML emits `data-badge-key`, `has-stack` class, and a `.pc-badge-count` pill when `count > 1`. Click handler reads `data-badge-key` and looks the group up out of the closure-captured `Map`.
+  - `openBadgeDetailSheet(badge, group)` renders a stacked list of awards when `group.items.length > 1`; header shows `×N` count pill and `Earned N times` subtitle. Single-award calls are unchanged.
+  - `openBadgesGridModal(groupsOrBadges, player)` accepts either shape; renders `×N` pill on cells with `count > 1` and passes the whole group back through to the detail sheet.
+  - In-app `HELP_SECTIONS` "What do the icons on player chips mean?" now lists the bottom-left badge row.
+- `web/styles.css` —
+  - New `.pc-badge-chip.has-stack` (layered box-shadow for fanned-stack look), `.pc-badge-count` (blue corner pill), `.pc-badge-grid-cell.has-stack` (grid variant), `.pc-badge-sheet-count` (inline pill in the detail-sheet header), `.pc-badge-stack-list` / `.pc-badge-stack-row` / `.pc-badge-stack-row-head` / `.pc-badge-stack-idx` (detail-sheet stack list).
+  - New `.chip-badges` + `.chip-badge-emoji` + `.chip-badge-more` for the pitch-chip badge overlay.
+- `web/FAQ.md` — "What do the little icons on the player chips mean?" gains a fourth bullet for the bottom-left row; "Where do badges appear?" mentions stacked chips and the match-chip overlay.
+- `web/HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 10)
+**None.** Session 8 migration still the only schema for Slice 9 badges. Pitch-chip badges reuse the existing `lineup_id` column already populated by session 9's wizard; stacking is pure rendering on rows already in the table.
+
+### Sanity-check script (session 10)
+1. **Match-chip badges — coach view.** Open a played match with at least one badge awarded during it (via the wizard or Squad modal with `lineupId` set). In the match editor, the player's chip on the pitch should show a small emoji pill in the bottom-left corner. Open a *different* played match — cumulative card badges should NOT appear there; only badges linked to that lineup.
+2. **Match-chip badges — parent view.** Open the parent link for the same match (use an access code if needed). The same bottom-left emoji row should appear on the child's chip. Hover (or long-press on mobile) — tooltip reads badge name + coach note.
+3. **Overflow +N.** Award 4 badges to one player for the same match via the wizard. The chip should show 3 emoji + `+1`. Tooltip still lists all 4.
+4. **Other corners still work.** Set availability + MOTM + goal on a chip and award a badge. All four corners decorate cleanly — MOTM ★, goal ball, availability dot, badge row. Re-render (drag another chip) doesn't duplicate any.
+5. **Stacking — card.** Award the same badge (e.g. Fair Play) twice in the Squad modal. On the public card, there should be ONE Fair Play chip, not two, with a small blue `×2` pill in the top-right of the chip and a subtle 3D "stacked" shadow. Award a third time — pill flips to `×3`.
+6. **Stacked detail sheet.** Tap the Fair Play chip. Sheet header shows `Fair Play ×3` + subtitle `Earned 3 times`. Body lists three rows, newest first, each with `#3 / #2 / #1`, date, and optional per-award note.
+7. **Grid-modal stacking.** Earn enough badges for the card to show the **All** button (≥5 groups). Tap **All** — the grid should show one cell per badge *key*, with `×N` pill on stacked ones. Tapping a stacked cell opens the same detail sheet with the list view.
+8. **Backward-compat.** On a player who has no stacked badges, the card, detail sheet, and grid modal should look identical to session 9's UI — no pills, no stacked shadows.
+
+### Start-here on the new machine (session 10)
+Pull `web/app.js`, `web/styles.css`, `web/FAQ.md`, `web/HANDOFF.md` — no DB migration. Quickest demo: open a played match in the editor (need one with a wizard-linked badge already), see the bottom-left emoji on the chip; open the same player's card, see stacked chips if they have duplicate awards.
+
+### Next up
+- **Slice 9b — auto-derived badges.** Unchanged from session 8/9. Now that stacking is in, auto-derivations that can fire multiple times in a season (brace, clean sheet, super_sub) won't collapse awkwardly on the card.
+- **Visual / design pass.** Still deferred — app is functionally complete but utilitarian. Slice 9a polish (half-overlap, stacked chips, match-chip badges) is only the card/pitch; global theme, typography, and spacing pass is outstanding.
+
+---
+
+## 🔖 Where we left off on 2026-04-17 (session 9)
 
 **Slice 9a polish — three tweaks on top of the badges shipped in session 8.** No schema changes; all JS/CSS. Still manual-only badges; 9b (auto-derivations) unchanged.
 
