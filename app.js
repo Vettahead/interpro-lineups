@@ -4034,19 +4034,23 @@ function renderFormationsTab() {
     ? availablePlayers.map(p => chipHtml(p, 'palette')).join('')
     : `<p class="muted" style="padding:0.5rem">All players on the pitch.</p>`;
 
-  // Formation panel body — formation list + edit/save controls (full edit here).
+  // Formation panel body — formation list + edit/save controls.
+  // Save / Save-as-new are visible at ALL times (not just in edit mode) so the
+  // coach can persist player placements on a formation without needing to enter
+  // position-editing first. The ✎ Edit formation / ✓ Done pair only exists to
+  // enter/leave the drag-handle position-editing mode; saves work in either.
   const formationPanelHtml = `
     <div class="f-btns f-btns-col">${formationBtns}</div>
     ${canEdit ? `
       <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
         ${_posEditMode
-          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
-             <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
-             <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
-             <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
-             <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
-          : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit formation</button>`
+          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done editing</button>
+             <button class="btn-full" id="pos-edit-cancel">✕ Cancel edits</button>
+             <p class="muted" style="font-size:0.72rem;margin:0.2rem 0 0.35rem">Drag handles to reposition. Double-click a label to rename.</p>`
+          : `<button class="btn-full" id="pos-edit-toggle">✎ Edit formation</button>`
         }
+        <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+        <button class="btn-full" id="pos-edit-save-new" style="margin-bottom:0">➕ Save as new formation…</button>
       </div>
     ` : ''}
   `;
@@ -6363,9 +6367,14 @@ function wirePosEditingHandlers() {
       if (!trimmed) return;
     }
 
+    // Fall back to the formation's own defaults when the coach hasn't entered
+    // Edit-formation mode (pos/lbl only exist while _posEditMode was on). This
+    // lets Save work purely for player-placement changes too.
+    const srcPos = Array.isArray(editor.current.pos) ? editor.current.pos : currentFormation.pos;
+    const srcLbl = Array.isArray(editor.current.lbl) ? editor.current.lbl : currentFormation.lbl;
     const payloadData = {
-      pos: editor.current.pos.map(p => [...p]),
-      lbl: [...editor.current.lbl]
+      pos: srcPos.map(p => [...p]),
+      lbl: [...srcLbl]
     };
     const includePlayers = _maybeIncludePlayersInSave();
     if (includePlayers) payloadData.players = includePlayers;
@@ -6408,9 +6417,14 @@ function wirePosEditingHandlers() {
     const clash = (editor.customFormations || []).find(cf => cf.name === trimmed);
     if (clash && !confirm(`A formation named "${trimmed}" already exists. Overwrite it?`)) return;
 
+    // Same pos/lbl fallback as Save formation — so Save-as-new works when the
+    // coach hasn't entered position-edit mode (e.g. just placed players).
+    const baseFormation = getFormation(baseName);
+    const srcPos = Array.isArray(editor.current.pos) ? editor.current.pos : baseFormation.pos;
+    const srcLbl = Array.isArray(editor.current.lbl) ? editor.current.lbl : baseFormation.lbl;
     const payloadData = {
-      pos: editor.current.pos.map(p => [...p]),
-      lbl: [...editor.current.lbl]
+      pos: srcPos.map(p => [...p]),
+      lbl: [...srcLbl]
     };
     const includePlayers = _maybeIncludePlayersInSave();
     if (includePlayers) payloadData.players = includePlayers;
