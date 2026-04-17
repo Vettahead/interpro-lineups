@@ -1424,10 +1424,10 @@ function renderPlayerCardBody() {
         <div class="pc-name">${escapeHtml(p.name || '—')}</div>
         <div class="pc-stats-grid">
           <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">Man of the Match</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOTM</span></div>
           <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Sub appearances</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Appearances</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Subs</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Apps</span></div>
           <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
         </div>
       </div>
