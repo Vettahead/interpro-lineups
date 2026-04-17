@@ -7877,13 +7877,17 @@ function initBall() {
 
 // ---------- Tactics tab (formerly Plays) ----------
 // Rebuilt 2026-04-17 as a pitch + sub-tabs layout matching the match editor.
-// Two sub-tabs:
+// Four sub-tabs:
 //   • Tactics — card grid of saved tactics (name, formation, In/Out chip).
-//   • Edit tactic — inline editor with name, possession radio, description,
-//     formation picker (read-only — no edit/save here; Formations page does that),
-//     player palette, and arrows/ball/zones tactics controls.
-// Clicking a tactic card loads it into editor.current and flips to the Edit
-// sub-tab. Save writes back in place; Save as new inserts a fresh row.
+//   • Squad — palette for dragging players onto the pitch.
+//   • Moves — arrows / ball / zones drawing tools (room to grow).
+//   • Tactic details — name, possession radio, description, formation picker
+//     (read-only — no edit/save here; Formations page does that), Edit positions
+//     toggle, Save / Save as new / Delete buttons.
+// Clicking a tactic card loads it into editor.current and flips to the details
+// sub-tab. Save writes back in place; Save as new inserts a fresh row. The
+// internal key for the details sub-tab is still 'edit' (data-phone-tab="edit")
+// — only the visible label reads "Tactic details".
 let _playsUi = { selectedId: null, filter: 'all', subTab: 'tactics' };
 
 function renderPlaysTab() {
@@ -7974,7 +7978,16 @@ function renderPlaysTab() {
   // here. Ids (tactic-btn / btn-ball / chk-zone-* / clear-arrows / clear-tactics)
   // match what wireTacticsUI looks for — no wiring changes needed.
   const movesPanelHtml = canEdit ? `
-    <p class="muted me-hint">Drawing tools for this tactic — arrows show player movement, the ball marks starting position, zones show press/defensive lines.</p>
+    <p class="muted me-hint">Pitch layout + drawing tools — move position dots, add arrows for player movement, mark where the ball starts, set press/def zone lines.</p>
+    <div style="display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.6rem;padding-bottom:0.6rem;border-bottom:1px solid var(--border)">
+      ${_posEditMode
+        ? `<button class="primary btn-full" id="pos-edit-done">✓ Done editing positions</button>
+           <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel position edits</button>
+           <p class="muted" style="font-size:0.72rem;margin:0.2rem 0 0">Drag handles to reposition. Double-click a label to rename. Positions save with this tactic only — the underlying formation isn't changed.</p>`
+        : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>
+           <p class="muted" style="font-size:0.72rem;margin:0.1rem 0 0">Reposition the dots for this tactic (doesn't change the formation itself).</p>`
+      }
+    </div>
     <div class="tactic-btns">
       <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
       <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
@@ -8040,16 +8053,8 @@ function renderPlaysTab() {
       </div>
       <div>
         <label class="tac-label">Formation</label>
-        <p class="muted" style="font-size:0.72rem;margin:0 0 0.35rem">Pick a formation to base this tactic on. Editing the underlying formation happens on the <strong>Formations</strong> tab — but you can nudge positions here just for this tactic.</p>
+        <p class="muted" style="font-size:0.72rem;margin:0 0 0.35rem">Pick a formation to base this tactic on. Editing the underlying formation happens on the <strong>Formations</strong> tab — nudging positions for this one tactic lives in the <strong>Moves</strong> tab.</p>
         <div class="f-btns f-btns-col">${tacticFormationBtns}</div>
-        <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
-          ${_posEditMode
-            ? `<button class="primary btn-full" id="pos-edit-done">✓ Done editing</button>
-               <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel edits</button>
-               <p class="muted" style="font-size:0.72rem;margin:0.2rem 0 0">Drag handles to reposition. Double-click a label to rename. Positions save with this tactic only — the underlying formation isn't changed.</p>`
-            : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
-          }
-        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.25rem">
         <button class="primary btn-full" id="tac-save">💾 ${hasLoaded ? 'Save' : 'Save tactic'}</button>
@@ -8066,7 +8071,7 @@ function renderPlaysTab() {
       <button class="lineup-phone-tab ${subTab === 'tactics' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'tactics' ? 'true' : 'false'}" data-ptab="tactics">Tactics</button>
       <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"   role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"   data-ptab="squad">Squad</button>
       <button class="lineup-phone-tab ${subTab === 'moves' ? 'active' : ''}"   role="tab" aria-selected="${subTab === 'moves' ? 'true' : 'false'}"   data-ptab="moves">Moves</button>
-      <button class="lineup-phone-tab ${subTab === 'edit' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'edit' ? 'true' : 'false'}"    data-ptab="edit">Edit tactic</button>
+      <button class="lineup-phone-tab ${subTab === 'edit' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'edit' ? 'true' : 'false'}"    data-ptab="edit">Tactic details</button>
     </nav>
   `;
 
