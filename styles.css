@@ -784,36 +784,98 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   text-shadow: none;
 }
 
+/* "Awards given this match" card — sits directly below the scoreline card in the
+   coach editor's top strip. One row per player, each with the badges they won
+   that match as inline pill chips, plus a muted italic line for each coach's
+   "why?" note so the narrative is visible without hover. */
+.match-awards-card .maw-row {
+  padding: 0.2rem 0;
+}
+.match-awards-card .maw-row + .maw-row {
+  border-top: 1px dashed #eee;
+  margin-top: 0.2rem;
+  padding-top: 0.3rem;
+}
+.match-awards-card .maw-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.4rem;
+}
+.match-awards-card .maw-player {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: #333;
+}
+.match-awards-card .maw-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.match-awards-card .maw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #fff8e1;
+  border: 1px solid #d6a82b;
+  color: #4a3800;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.08rem 0.4rem 0.08rem 0.3rem;
+  border-radius: 11px;
+  line-height: 1.25;
+}
+.match-awards-card .maw-chip-emoji { font-size: 0.9rem; line-height: 1; }
+.match-awards-card .maw-note {
+  font-size: 0.72rem;
+  font-style: italic;
+  margin-top: 0.2rem;
+  margin-left: 0.15rem;
+}
+
 /* Bottom-left badge row on a match chip — shows ONLY badges awarded during THIS match.
    Added by applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId). Positioned
    bottom-left to avoid colliding with MOTM star (top-left), goal ball (top-right), and
-   availability dot (bottom-right). */
+   availability dot (bottom-right). Each badge is its own small gold disc to match the
+   MOTM star and goal-ball styling — the row is a transparent flex container. */
 .chip-badges {
   position: absolute;
   bottom: -5px;
   left: -5px;
   display: flex;
   align-items: center;
-  gap: 1px;
-  padding: 1px 3px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1.5px solid #d6a82b;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  gap: 2px;
   z-index: 4;
   pointer-events: none;
-  max-width: 80%;
-  white-space: nowrap;
 }
 .chip-badge-emoji {
-  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff8e1;
+  border: 2px solid #d6a82b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
   line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
 }
 .chip-badge-more {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px dashed #d6a82b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 9px;
   font-weight: 700;
   color: #8c6b00;
-  margin-left: 1px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
 }
 
 .pv-chip.has-photo {
