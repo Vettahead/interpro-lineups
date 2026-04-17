@@ -2649,6 +2649,25 @@ body.mw-open { overflow: hidden; }
   border-color: #f97316;
   box-shadow: 0 0 0 1px #f97316;
 }
+/* Played matches (2026-04-17):
+   - .done = score entered → green outline so finished games fade to "resolved".
+   - .needs-score = KO has passed but no result yet → red outline + warning chip
+     so the coach's eye is drawn to the card that needs attention.
+   .active (currently-loaded match) keeps priority when loaded, via the specific
+   .active.done / .active.needs-score rules below. */
+.me-match-card.done {
+  border-color: #2a7;
+}
+.me-match-card.needs-score {
+  border-color: #c33;
+  box-shadow: 0 0 0 1px #c33;
+}
+.me-match-card.active.done {
+  box-shadow: 0 0 0 2px #2a7;
+}
+.me-match-card.active.needs-score {
+  box-shadow: 0 0 0 2px #c33;
+}
 
 /* Date block on the left. */
 .mc-date {

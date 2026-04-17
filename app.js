@@ -4090,15 +4090,15 @@ function renderLineupsTab() {
 
   // ---- Matches sub-tab: fixtures list as cards, upcoming first, past second ----
   // Build once per render. Cards get availability pills decorated after mount.
-  const _todayIso = (() => {
-    const d = new Date();
-    const pad2 = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  })();
+  // Split rule (updated 2026-04-17): a match moves to Past the moment kickoff
+  // has passed — not at midnight. So a 7pm kickoff earlier today is "past" by
+  // 8pm, and the coach sees it in the Past section where they're prompted to
+  // enter the score. matchHasBeenPlayed() has the same KO-vs-now logic as the
+  // Enter-result button so the two features agree.
   const _upcoming = [];
   const _past = [];
   lineups.forEach(l => {
-    if (l.game_date && l.game_date < _todayIso) _past.push(l);
+    if (matchHasBeenPlayed(l)) _past.push(l);
     else _upcoming.push(l);
   });
   // Upcoming: soonest first (undated go last). Past: most recent first.
@@ -4134,23 +4134,33 @@ function renderLineupsTab() {
       </div>`;
     }
 
-    // Result chip — shown only when a score has been entered. Sits above the
-    // status pill on past matches so the season-at-a-glance is the score, not
-    // the publish state.
+    // Result state drives card colour + right-hand chip (added 2026-04-17):
+    //   • played + score recorded → green outline, coloured FT/HT chip (existing)
+    //   • played + no score yet   → red outline + "⚠ Needs score" chip
+    //   • not yet played          → neutral outline, no chip
     const resBadge = matchResultBadge(l);
-    const resChipHtml = resBadge
-      ? `<div class="me-match-result" style="font-weight:700;font-size:0.78rem;color:#fff;background:${resBadge.color};padding:0.15rem 0.4rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em">${escapeHtml(resBadge.text)}</div>`
-      : '';
+    const played   = matchHasBeenPlayed(l);
+    const hasResult = matchHasResult(l);
+    const needsScore = played && !hasResult;
+    const doneScored = played && hasResult;
+    const stateClass = doneScored ? 'done' : needsScore ? 'needs-score' : '';
+
+    let rightChipHtml = '';
+    if (resBadge) {
+      rightChipHtml = `<div class="me-match-result" style="font-weight:700;font-size:0.78rem;color:#fff;background:${resBadge.color};padding:0.15rem 0.4rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em">${escapeHtml(resBadge.text)}</div>`;
+    } else if (needsScore) {
+      rightChipHtml = `<div class="me-match-needs-score" style="font-weight:700;font-size:0.72rem;color:#fff;background:#c33;padding:0.15rem 0.45rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em;white-space:nowrap">⚠ Needs score</div>`;
+    }
 
     return `
-      <div class="me-match-card ${current?.id === l.id ? 'active' : ''}" data-me-lineup="${l.id}">
+      <div class="me-match-card ${current?.id === l.id ? 'active' : ''} ${stateClass}" data-me-lineup="${l.id}">
         ${dateBlock}
         <div class="mc-body">
           <div class="me-match-title">${title}</div>
           <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.2rem">
-          ${resChipHtml}
+          ${rightChipHtml}
           <div class="me-match-status me-match-status-${st}">${stLbl}</div>
         </div>
         ${canEdit ? `<button class="me-match-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
