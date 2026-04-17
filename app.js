@@ -492,8 +492,8 @@ function wireGlobalPlusSlot(slot, user, teamId) {
       <button type="button" class="gp-item" data-gp="play">
         <span class="gp-ico">📋</span>
         <span class="gp-label">
-          <strong>New play</strong>
-          <em>Open Plays tab</em>
+          <strong>New tactic</strong>
+          <em>Open Tactics tab</em>
         </span>
       </button>
       <button type="button" class="gp-item" data-gp="formation">
@@ -629,7 +629,7 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Plays',      icon: '📋' },
+    { id: 'plays',      label: 'Tactics',    icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
@@ -744,7 +744,7 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Plays',      icon: '📋' },
+    { id: 'plays',      label: 'Tactics',    icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
@@ -1604,7 +1604,7 @@ async function renderTeamDashboard(user, teamId) {
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches</button>
-      <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
+      <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Tactics</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
       <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
     `;
@@ -1852,9 +1852,9 @@ const HELP_SECTIONS = [
     id: 'dashboard', title: 'Dashboard layout & the + button', adminOnly: false,
     body: `
       <h4>Desktop, tablet, phone</h4>
-      <p>On <strong>desktop (≥900px)</strong> tabs live in a left sidebar: Matches, Squad, Plays, Formations, Help and (coach/admin only) Admin. Your user badge + Log out sit at the bottom. On <strong>phone</strong> the same tabs are in a ☰ drawer. On <strong>tablet</strong> they sit in a horizontal strip along the top.</p>
+      <p>On <strong>desktop (≥900px)</strong> tabs live in a left sidebar: Matches, Squad, Tactics, Formations, Help and (coach/admin only) Admin. Your user badge + Log out sit at the bottom. On <strong>phone</strong> the same tabs are in a ☰ drawer. On <strong>tablet</strong> they sit in a horizontal strip along the top.</p>
       <h4>The orange <strong>+</strong> quick-create menu <em>(coach/admin only)</em></h4>
-      <p>The orange + button (sidebar on desktop, header on phone) is the primary entry point for anything new. It opens a small menu with <strong>+ New match</strong> (opens the wizard), <strong>+ New player</strong>, <strong>+ New play</strong> and <strong>+ New formation</strong>. You don't need to be on the matching tab first.</p>
+      <p>The orange + button (sidebar on desktop, header on phone) is the primary entry point for anything new. It opens a small menu with <strong>+ New match</strong> (opens the wizard), <strong>+ New player</strong>, <strong>+ New tactic</strong> and <strong>+ New formation</strong>. You don't need to be on the matching tab first.</p>
     `
   },
   {
@@ -1957,10 +1957,10 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'plays', title: 'Plays', adminOnly: true,
+    id: 'plays', title: 'Tactics', adminOnly: true,
     body: `
-      <h4>What's a play?</h4>
-      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns.</p>
+      <h4>What's a tactic?</h4>
+      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns. Each one is marked In possession or Out of possession.</p>
       <h4>Saving a play</h4>
       <p>Set up the formation/tactics on a lineup, then click <strong>Save as play</strong>. Name it.</p>
       <h4>Using a saved play</h4>
@@ -4204,19 +4204,14 @@ function renderLineupsTab() {
     ${canEdit ? `<p class="muted me-hint" style="margin-top:0.5rem">Tap an empty sub slot to add a player, or tap a sub's chip to remove.</p>` : ''}
   `;
 
+  // Match editor Formation sub-tab is read-only (2026-04-17 restructure) — just
+  // a formation picker. Edit / save / save-as-new now live on the top-level
+  // Formations page. The in-match tactics card (Tactics / Ball / Zones) is
+  // still here since those live with the match, not the formation template.
   const formationPanelHtml = `
     <div class="f-btns f-btns-col">${formationBtns}</div>
     ${canEdit ? `
-      <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
-        ${_posEditMode
-          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
-             <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
-             <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
-             <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
-             <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
-          : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
-        }
-      </div>
+      <p class="muted" style="font-size:0.72rem;margin:0.6rem 0 0">Pick a formation. To edit or save a new one, use the <strong>Formations</strong> tab.</p>
     ` : ''}
     ${tacticsCardHtml}
   `;
@@ -6506,7 +6501,8 @@ function openPlayerPicker(kind, idx) {
   if (rm) rm.onclick = () => {
     if (kind === 'slot') delete current.slots[idx];
     else current.subs[idx] = undefined;
-    renderLineupsTab();
+    // Targeted refresh so the right-hand panel (Matches/Info/etc.) doesn't flicker.
+    refreshAfterChipMove();
     close();
   };
 }
@@ -6878,6 +6874,56 @@ function removeFromSource(payload) {
   }
 }
 
+// Lightweight re-render after a chip move (drop or player-picker remove).
+// Previously every drop called renderLineupsTab() which rebuilt the entire tab
+// HTML — including the Matches list, Info panel, availability bar, etc. On any
+// non-Squad sub-tab that caused a visible "realign then go back" flicker every
+// time a player was moved. Now we only update the bits that actually changed:
+//   • pitch slots  (renderPitch)
+//   • subs row     (renderSubsBar)
+//   • subs count label
+//   • available-players palette
+//   • availability dots + MOTM/goal overlays on the new chip positions
+//   • autosave (standard hash-based flow)
+// Touches zero DOM outside the match editor's left pitch column + right palette
+// inside Squad sub-tab, so whatever tab the coach is currently looking at stays
+// exactly where it was. (Added 2026-04-17.)
+function refreshAfterChipMove() {
+  const { current, players } = editor;
+  if (!current) return;
+
+  // Pitch slots
+  renderPitch();
+
+  // Subs row chips + label count
+  renderSubsBar();
+  const subsLabelEl = document.querySelector('.subs-label');
+  if (subsLabelEl) {
+    const filled = (current.subs || []).filter(Boolean).length;
+    subsLabelEl.textContent = `SUBSTITUTES (${filled}/${MAX_SUBS})`;
+  }
+
+  // Available-players palette — rebuild its innerHTML in place
+  const paletteEl = document.getElementById('palette');
+  if (paletteEl) {
+    const usedIds = new Set([...Object.values(current.slots || {}), ...(current.subs || [])].filter(Boolean));
+    const available = (players || []).filter(p => !usedIds.has(p.id));
+    paletteEl.innerHTML = available.length
+      ? available.map(p => chipHtml(p, 'palette')).join('')
+      : `<p class="muted" style="padding:0.5rem">All players on the pitch or subs.</p>`;
+  }
+
+  // Re-apply availability dots + MOTM/goal overlays to any newly-rendered chips
+  applyAvailabilityDecorations();
+  const slotsLayer = document.getElementById('slots-layer');
+  const subsRow = document.getElementById('subs-row');
+  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
+  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers);
+
+  // Persist
+  try { scheduleAutosaveIfPublished(); } catch (_) {}
+}
+
 function handleDropToSlot(slotIdx, payload) {
   const { current } = editor;
   const targetPid = current.slots[slotIdx];
@@ -6892,14 +6938,14 @@ function handleDropToSlot(slotIdx, payload) {
       delete current.slots[fromIdx];
     }
     current.slots[slotIdx] = payload.playerId;
-    renderLineupsTab();
+    refreshAfterChipMove();
     return;
   }
 
   // From sub or palette: if slot occupied, bump occupant back to palette
   removeFromSource(payload);
   current.slots[slotIdx] = payload.playerId;
-  renderLineupsTab();
+  refreshAfterChipMove();
 }
 
 function handleDropToSub(subIdx, payload) {
@@ -6913,7 +6959,7 @@ function handleDropToSub(subIdx, payload) {
     if (fromIdx === subIdx) return;
     current.subs[fromIdx] = targetPid;
     current.subs[subIdx] = payload.playerId;
-    renderLineupsTab();
+    refreshAfterChipMove();
     return;
   }
 
@@ -6924,12 +6970,12 @@ function handleDropToSub(subIdx, payload) {
   }
   removeFromSource(payload);
   current.subs[subIdx] = payload.playerId;
-  renderLineupsTab();
+  refreshAfterChipMove();
 }
 
 function handleDropToPalette(payload) {
   removeFromSource(payload);
-  renderLineupsTab();
+  refreshAfterChipMove();
 }
 
 function hasUnsaved() {
@@ -7633,7 +7679,7 @@ function renderPlaysTab() {
           <div class="plays-details">
             <div class="card">${detailHtml}</div>
             <p class="muted" style="font-size:0.78rem;margin-top:0.5rem">
-              Plays are created on the <strong>Lineup</strong> tab — set up the pitch, then click <strong>★ Save as play…</strong>.
+              Tactics are created on the <strong>Match</strong> tab — set up the pitch, then click <strong>★ Save as tactic…</strong>.
             </p>
           </div>
         </div>
