@@ -3450,12 +3450,12 @@ function openResultWizard() {
   const htmlStepHt = () => `
     <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the half-time score. Leave blank if you didn't track HT.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
-      <label style="display:flex;flex-direction:column;gap:0.25rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
         <span style="font-size:0.8rem;font-weight:600">Us</span>
         <input type="number" id="rw-ht-us" value="${state.ht_us == null ? '' : state.ht_us}" min="0" step="1" placeholder="—" inputmode="numeric"
                style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
       </label>
-      <label style="display:flex;flex-direction:column;gap:0.25rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
         <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
         <input type="number" id="rw-ht-opp" value="${state.ht_opp == null ? '' : state.ht_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
                style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
@@ -3466,12 +3466,12 @@ function openResultWizard() {
   const htmlStepFt = () => `
     <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the full-time score.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
-      <label style="display:flex;flex-direction:column;gap:0.25rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
         <span style="font-size:0.8rem;font-weight:600">Us</span>
         <input type="number" id="rw-ft-us" value="${state.ft_us == null ? '' : state.ft_us}" min="0" step="1" placeholder="—" inputmode="numeric"
                style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
       </label>
-      <label style="display:flex;flex-direction:column;gap:0.25rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
         <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
         <input type="number" id="rw-ft-opp" value="${state.ft_opp == null ? '' : state.ft_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
                style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
