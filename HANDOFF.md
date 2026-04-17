@@ -1,6 +1,52 @@
+# Interpro Coach / Manager Assistant — Handoff (2026-04-16, session 4)
+
+## 🔖 Where we left off on 2026-04-16 (session 4 — read this first)
+
+Two tranches this session: a deep-dive on the availability/pitch "not updating" report, and a full FAQ audit + rewrite.
+
+### Shipped this session (session 4)
+
+1. **Availability + pitch sync deep-dive — four fixes.**
+   - **Dot flicker fix** in `renderLineupsTab` (end of function, ~line 3833): decorations now paint synchronously from the in-memory `editor.availability` cache *before* the DB re-fetch kicks off, so chips don't lose their dots mid-request. Followed by the async DB fetch which reapplies after the round-trip.
+   - **Autosave race fix** in `scheduleAutosaveIfPublished` (line 1510): new module var `_autosavePendingAfter` (declared alongside `_autosaveTimer` / `_autosaveInFlight` / `_lastSavedHash` around line 1488). If a save is in flight when a new edit arrives, the flag is set instead of the save being silently dropped; after the in-flight save completes we check the flag and schedule another pass. Symptom was: pitch changes not reaching parent view when they landed on top of an in-flight save (esp. rapid drag sequences).
+   - **Resize-listener leak fix** in parent view: `renderParentView` was registering a new `window.addEventListener('resize', ...)` on *every* 6-second poll tick, so listeners stacked indefinitely. Now the listener is registered **once** at module load (~line 876, just after the `_parentViewPoll` / `_parentViewLastHash` declarations) and reads from two shared module vars `_parentViewResizeLineup` / `_parentViewResizeShowPitch` which each `renderParentView` call updates.
+   - **Coach availability poll: 10s → 5s** in `startCoachAvailabilityPoll` (final `setInterval` arg, around line 3945). Parent view poll stays at 6s.
+
+2. **Full FAQ audit + rewrite.**
+   - Audited `app.js` against `FAQ.md` and the in-app `HELP_SECTIONS` — found 11 major undocumented features (most importantly the Match creation wizard) and 3 stale statements (parent poll "15s", "segmented control" for status, Fixtures tab framed as live when it's tablet-only legacy).
+   - **FAQ.md** rewritten (~30% diff): new top-level sections for "The team dashboard — layout" (covers sidebar / drawer / + button) and "Match creation wizard" (Home 4 steps / Away 5 steps / post-create WhatsApp prompt). Lineups section reworked to introduce the match-editor sub-tabs (Matches / Squad / Subs / Formation / Info), the status pill + Status change modal, autosave, Add to calendar chooser, and pitch chip overlays (top-left ★ / top-right goal ball / bottom-right availability dot). Parent-view poll corrected 15s → 6s; coach poll mentioned at ~5s. Fixtures tab section rewritten to note it's tablet-only legacy. Roadmap picked up the season-tally item.
+   - **In-app `HELP_SECTIONS`** (lines 1752-2000 in app.js) synced: new `dashboard` and `wizard` sections, lineups section rewritten with sub-tabs + status modal + Add to calendar + new chip icons, publish section fixed for modal + "Published" terminology + ~5s/~6s intervals, fixtures collapsed to the legacy note, parent-view refresh set to 6s, workflow steps rewritten around the wizard + status pill flow, roadmap updated.
+   - Deliberately left out: internal plumbing (RPCs, autosave timings, hashing). Kept language coach-facing.
+
+### SQL to run in Supabase before deploy
+None this session — pure client-side changes.
+
+### Files touched (session 4)
+- `web/app.js` — dot-flicker fix + autosave race + resize-listener fix + poll interval + HELP_SECTIONS rewrites
+- `web/FAQ.md` — full audit rewrite
+- `web/HANDOFF.md` — this entry
+
+### Sanity-check script (session 4)
+1. **Availability + pitch sync:**
+   - Open a published lineup as coach on desktop. Drag a player from Squad onto a pitch slot. Within ~1s the lineup should be saved. Open the parent share link in a private window — within 6s the parent view should show the new player in position.
+   - Open a shared lineup in Availability on a phone as a "parent" (use a valid access code). Mark ✅. Switch back to the coach desktop — within ~5s the availability responses panel ticks up and the chip gets a green dot, no flicker.
+   - Drag 5 players onto the pitch in rapid succession — all 5 should end up persisted (previously an autosave mid-drag could drop subsequent edits).
+2. **FAQ / Help:**
+   - Open the Help tab as a coach. Expected new sections visible: **Dashboard layout & the + button** and **Match creation wizard**. Lineups section should mention sub-tabs (Matches/Squad/Subs/Formation/Info), the **Status change** modal, the **📅 Add to calendar** chooser, and the new chip icons (bottom-right dot, top-left ★, top-right goal ball).
+   - FAQ section on the parent view says "Every 6 seconds automatically".
+   - "Segmented control" terminology is gone from both FAQ.md and HELP_SECTIONS.
+3. **Still working as before:** wizard custom formations, post-match result entry, WhatsApp share prompt, Add to calendar chooser, position label dropdown picker, player photo cropper, sibling linking.
+
+### Start-here on the new machine (session 4)
+No migrations. Push `web/app.js`, `web/FAQ.md`, and `web/HANDOFF.md` to GitHub; Vercel auto-deploys.
+
+**Next up (unchanged from session 3 tail):** Admin panel is the biggest remaining Slice 5 piece. The holistic visual / design pass is also queued. Per-player season tally (Slice 6) has per-match data ready whenever you want to aggregate.
+
+---
+
 # Interpro Coach / Manager Assistant — Handoff (2026-04-16, session 3)
 
-## 🔖 Where we left off on 2026-04-16 (session 3 — read this first)
+## 🔖 Where we left off on 2026-04-16 (session 3)
 
 Two small fixes shipped this session — wizard custom-formations and post-match result entry.
 

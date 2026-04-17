@@ -1804,12 +1804,50 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'lineups', title: 'Lineups', adminOnly: true,
+    id: 'dashboard', title: 'Dashboard layout & the + button', adminOnly: false,
     body: `
-      <h4>Creating a lineup</h4>
-      <p>Open <strong>Lineups</strong> → <strong>+ New lineup</strong>. Fill in match details and arrange players on the pitch.</p>
+      <h4>Desktop, tablet, phone</h4>
+      <p>On <strong>desktop (≥900px)</strong> tabs live in a left sidebar: Matches, Squad, Plays, Formations, Help and (coach/admin only) Admin. Your user badge + Log out sit at the bottom. On <strong>phone</strong> the same tabs are in a ☰ drawer. On <strong>tablet</strong> they sit in a horizontal strip along the top.</p>
+      <h4>The orange <strong>+</strong> quick-create menu <em>(coach/admin only)</em></h4>
+      <p>The orange + button (sidebar on desktop, header on phone) is the primary entry point for anything new. It opens a small menu with <strong>+ New match</strong> (opens the wizard), <strong>+ New player</strong>, <strong>+ New play</strong> and <strong>+ New formation</strong>. You don't need to be on the matching tab first.</p>
+    `
+  },
+  {
+    id: 'wizard', title: 'Match creation wizard', adminOnly: true,
+    body: `
+      <h4>Starting a new match</h4>
+      <p>Tap the orange <strong>+</strong> button and pick <strong>+ New match</strong>. A step-by-step popup walks you through the essentials. The step count depends on whether it's a Home or Away match.</p>
+      <h4>Home (4 steps)</h4>
+      <ol>
+        <li><strong>Who &amp; when</strong> — opponent, match type, Home/Away toggle, date, kick-off, arrival.</li>
+        <li><strong>Formation</strong> — pick a preset or a saved custom formation.</li>
+        <li><strong>Location</strong> — read-only confirmation of your Squad-tab home ground.</li>
+        <li><strong>Summary</strong> — review and click Create.</li>
+      </ol>
+      <h4>Away (5 steps)</h4>
+      <p>Same as Home except step 3 becomes <strong>Venue</strong> (name + postcode with 🔍 lookup) and step 4 becomes <strong>Fine-tune on map</strong> (drag the pin to the exact spot). Summary is step 5.</p>
+      <h4>After Create</h4>
+      <p>The lineup is saved as a Draft and the match editor opens on it. A follow-up prompt asks <strong>"Share to WhatsApp now?"</strong> — Yes flips the status to Availability and opens WhatsApp with a pre-filled message; Not now just keeps editing.</p>
+    `
+  },
+  {
+    id: 'lineups', title: 'Match editor (Lineups)', adminOnly: true,
+    body: `
+      <h4>Opening a match</h4>
+      <p>On the <strong>Matches</strong> tab, tap any match card to open it in the editor.</p>
+      <h4>The sub-tabs</h4>
+      <p>Below the match header, a strip of sub-tabs switches what you see:</p>
+      <ul>
+        <li><strong>Matches</strong> — the card list of fixtures (plus the + New match card).</li>
+        <li><strong>Squad</strong> — the <strong>Available players</strong> palette to drag onto the pitch.</li>
+        <li><strong>Subs</strong> — the substitutes row (max 5).</li>
+        <li><strong>Formation</strong> — preset/custom formations and edit-positions tools.</li>
+        <li><strong>Info</strong> — match summary, map/directions, share button, Add to calendar, result chip.</li>
+      </ul>
+      <h4>The status pill and the Status change modal</h4>
+      <p>The pill in the match header shows the current state — <strong>Draft</strong>, <strong>Availability</strong> or <strong>Published</strong>. On phones it sits in a dedicated row above the sub-tabs. Tap it to open the <strong>Status change</strong> modal, which has one card per state with a description. Picking Availability auto-opens the share prompt.</p>
       <h4>Setting match details</h4>
-      <p>Click the blue <strong>✎ Edit match</strong> button. The popup has Opponent, Match type (Friendly/League/Cup), Home/Away, Game date, Kick off, Team arrival, Notes, and Venue. For Home games the venue auto-fills from your Squad-tab home ground; for Away games you can set venue + fine-tune the map.</p>
+      <p>Click the blue <strong>✎ Edit match</strong> button (Info sub-tab or match header). The popup has Opponent, Match type (Friendly/League/Cup), Home/Away, Game date, Kick off, Team arrival, Notes, and Venue. For Home games the venue auto-fills from your Squad-tab home ground; for Away games you can set venue + fine-tune the map.</p>
       <h4>Adding players to the pitch</h4>
       <p>Drag a player from <strong>Available players</strong> onto a position slot. Drag one onto another to swap. Drag back to the list to remove.</p>
       <h4>Changing formation</h4>
@@ -1824,52 +1862,53 @@ const HELP_SECTIONS = [
       </ul>
       <p>Label or position changes are also persisted to the current lineup itself, so a reload keeps your tweaks without needing to save the formation.</p>
       <h4>Subs</h4>
-      <p>Drag players to the <strong>Substitutes</strong> strip below the pitch (max 5).</p>
+      <p>Drag players to the <strong>Substitutes</strong> strip on the Subs sub-tab (max 5).</p>
       <h4>Tactics</h4>
       <p>Press/Defensive lines (toggle and drag), arrows (click-drag, click to bend), and a movable ball. Use Clear to reset.</p>
       <h4>Saving</h4>
-      <p>The <strong>Save lineup</strong> button is in the match-details popup. Saved lineups appear in <strong>Matches / Lineups</strong> on the left (or, on mobile, just under the pitch).</p>
+      <p>Wizard-created lineups <strong>autosave continuously</strong> — every pitch change, tactics tweak and result edit persists within about a second. The <strong>Save lineup</strong> button in the match-details popup still handles the initial save for legacy (non-wizard) lineups.</p>
       <h4>Loading or deleting saved lineups</h4>
-      <p>Click any item in <strong>Matches / Lineups</strong> to load. Hover and click <strong>×</strong> to delete.</p>
+      <p>Tap any match card on the <strong>Matches</strong> sub-tab to load. Hover/tap a card and click <strong>×</strong> to delete.</p>
+      <h4>Add to calendar</h4>
+      <p>On the <strong>Info</strong> sub-tab click <strong>📅 Add to calendar</strong>. A chooser offers <strong>Google Calendar</strong> (pre-filled event page in a new tab), <strong>Apple Calendar</strong> (native Add-to-Calendar prompt on iOS/macOS) or <strong>Outlook / Download .ics</strong> (for any other calendar app).</p>
       <h4>Recording the result after the game</h4>
-      <p>Once kick-off has passed, an <strong>⚽ Result</strong> section appears at the bottom of <strong>✎ Edit match</strong>. Enter the half-time and full-time scores, and use the <strong>+ / −</strong> buttons next to each player to log who scored for our team (opposition is just a total). The picker shows the matchday squad if one was picked, or the whole squad if you skipped that step. The result then appears as a coloured chip on the match card list (green W, red L, grey D) and at the top of the Info card.</p>
+      <p>Once kick-off has passed, an <strong>⚽ Result</strong> section appears at the bottom of <strong>✎ Edit match</strong>. Enter the half-time and full-time scores, and use the <strong>+ / −</strong> buttons next to each player to log who scored for our team (opposition is just a total). The picker shows the matchday squad if one was picked, or the whole squad if you skipped that step. The result then appears as a coloured chip on the match card list (green W, red L, grey D), at the top of the Info card, and as a compact summary card above the availability responses.</p>
       <h4>Man of the Match</h4>
       <p>In the same Result section, tap the <strong>☆</strong> next to any player to nominate them as Man of the Match. You can pick more than one (joint MOTM is fine). A <strong>Why?</strong> text box appears under the name once the star is filled — write a sentence about what stood out, or leave it blank. MOTMs show up in the Info card as a 🏆 line under the score.</p>
-      <h4>What do the coloured rings around player chips mean?</h4>
-      <p>Once availability responses come in, players are visually flagged on the pitch and palette:</p>
+      <h4>What do the icons on player chips mean?</h4>
+      <p>Four corners carry different signals:</p>
       <ul>
-        <li><strong>Gold ring</strong> — marked Available</li>
-        <li><strong>Red ring</strong> — marked Unavailable</li>
-        <li><strong>Yellow <code>?</code> badge</strong> — marked Maybe</li>
-        <li>No ring — no response yet</li>
+        <li><strong>Bottom-right dot</strong> — availability (green Available, red Unavailable, amber Maybe, no dot = no response)</li>
+        <li><strong>Top-left gold ★</strong> — Man of the Match for this game</li>
+        <li><strong>Top-right white circle with a number</strong> — goals scored in this game</li>
       </ul>
-      <p>The same rings show on the Fixtures pitch.</p>
+      <p>The same icons show on the parent view pitch once the lineup is published. Older lineups may still show ring-style availability indicators (gold/red/yellow) which use the same colour logic.</p>
     `
   },
   {
     id: 'publish', title: 'Publishing & sharing with parents', adminOnly: true,
     body: `
       <h4>The three visibility states</h4>
-      <p>Every lineup is in one of three states, set via a segmented control at the bottom of <strong>✎ Edit match</strong>:</p>
+      <p>Every lineup is in one of three states, changed by tapping the status pill to open the <strong>Status change</strong> modal:</p>
       <ul>
         <li><strong>Draft</strong> — only coaches can see it. The share link doesn't work.</li>
         <li><strong>Availability</strong> — parents can open the share link to see match details and mark each of their children as Available, Maybe or Unavailable. The lineup itself is hidden.</li>
-        <li><strong>Show lineup</strong> — parents see the full pitch plus match details. Availability responses still flow in.</li>
+        <li><strong>Published</strong> — parents see the full pitch plus match details. Availability responses still flow in.</li>
       </ul>
       <h4>Collecting availability from parents</h4>
-      <p>Once the lineup has a game date, switch to <strong>Availability</strong> and click <strong>🔗 Copy availability link for parents</strong>. Paste into team WhatsApp along with each child's access code (parents only need it once per device — it's remembered after that).</p>
+      <p>Once the lineup has a game date, tap the status pill → <strong>Availability</strong>. The Share modal opens automatically — tap <strong>Share to WhatsApp</strong> or <strong>🔗 Copy availability link for parents</strong>. Paste into team WhatsApp along with each child's access code (parents only need it once per device — it's remembered after that).</p>
       <h4>Where do parents get their access code?</h4>
       <p>From you. Open the <strong>Squad</strong> tab, expand the player's card, and look in the <strong>Access codes</strong> box. Copy the personal code (e.g. <code>JE1234</code>) or family code (5 digits if siblings are linked) and send it via WhatsApp.</p>
-      <h4>Showing the lineup</h4>
-      <p>Once you've picked the squad, switch the segmented control from <strong>Availability</strong> to <strong>Show lineup</strong>. The same link now shows the pitch — no need to re-share.</p>
+      <h4>Publishing the lineup</h4>
+      <p>Once you've picked the squad, tap the status pill and pick <strong>Published</strong>. The same link now shows the pitch — no need to re-share.</p>
       <h4>Taking a lineup offline</h4>
       <p>Switch the state back to <strong>Draft</strong>. The share link stops working immediately. Availability responses are preserved.</p>
       <h4>Where do I see the responses?</h4>
-      <p>In the Match details card on Lineups (and on Fixtures) you'll see an <strong>Availability responses</strong> panel with a tally and a per-player breakdown. The pitch chips also get gold/red rings or a <code>?</code> badge.</p>
+      <p>In the Match editor's Info card you'll see an <strong>Availability responses</strong> panel with a tally and a per-player breakdown. It refreshes every ~5 seconds while the editor is open. Pitch chips get coloured dots in the corner too.</p>
       <h4>Do I need to re-share if I change something?</h4>
-      <p>No. The link always points to the latest version. Changes show up in the parent view within 15 seconds (or instantly via their <strong>↻ Refresh</strong> button).</p>
+      <p>No. The link always points to the latest version. Parent views poll every ~6 seconds (or tap <strong>↻ Refresh</strong>).</p>
       <h4>What parents see</h4>
-      <p>Team vs opponent, date/kick-off/arrival, venue + map + what3words, coach notes, an availability form for the children they've unlocked, and (in Show lineup mode) the full pitch with players and subs. They don't see drafts, other lineups or admin data.</p>
+      <p>Team vs opponent, date/kick-off/arrival, venue + map + what3words, coach notes, an availability form for the children they've unlocked, and (in Published mode) the full pitch with players, subs, MOTM and goal overlays. They don't see drafts, other lineups or admin data.</p>
     `
   },
   {
@@ -1884,18 +1923,12 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'fixtures', title: 'Fixtures tab', adminOnly: false,
+    id: 'fixtures', title: 'Fixtures tab (tablet only)', adminOnly: false,
     body: `
-      <h4>What is it?</h4>
-      <p>An overview of the season. Collapsible <strong>Calendar</strong> and <strong>Matches</strong> cards sit at the top, then the selected game's headline (date, opponent, venue, map links), the parent share button, the availability responses panel, and the pitch with the lineup.</p>
-      <h4>Can I see the lineup even if it isn't published? <em>(coach/admin)</em></h4>
-      <p>Yes — you always see the pitch on Fixtures so you can review at a glance. A small grey banner above the pitch tells you the visibility state ("Availability mode" or "Draft"). The public parent link only shows the pitch once you flip the lineup to <strong>Show lineup</strong>.</p>
-      <h4>Why don't draft lineups show in the calendar? <em>(coach/admin)</em></h4>
-      <p>By default Fixtures only shows fixtures parents can see (Availability or Show lineup). Tick <strong>Show draft lineups</strong> at the bottom of the Matches list to include drafts too.</p>
-      <h4>Jumping to a game</h4>
-      <p>Click any highlighted day on the calendar, or any item in <strong>Matches</strong>. The headline, share button, availability panel and pitch all switch to that fixture.</p>
-      <h4>Sharing or checking availability from Fixtures <em>(coach/admin)</em></h4>
-      <p>Whenever the selected game is in Availability or Show lineup mode, you'll see the <strong>🔗 Copy availability link for parents</strong> button and an <strong>Availability responses</strong> panel right under the headline.</p>
+      <h4>What happened to Fixtures?</h4>
+      <p>It's been largely folded into the <strong>Matches</strong> sub-tab of the match editor on desktop and phone. The card list, the share button, the availability responses panel and the pitch preview all live there now. The dedicated Fixtures tab only surfaces on tablet-width screens (641–899px) as a legacy view.</p>
+      <h4>On tablet — what does Fixtures still do?</h4>
+      <p>Collapsible <strong>Calendar</strong> and <strong>Matches</strong> cards at the top; below, the selected game's headline (date, opponent, venue, map links), the parent share button, the availability responses panel, and the pitch. As a coach you always see the pitch here; a grey banner shows the current visibility state. Tick <strong>Show draft lineups</strong> at the bottom of Matches to include drafts.</p>
     `
   },
   {
@@ -1932,7 +1965,7 @@ const HELP_SECTIONS = [
       <h4>What does "Forget this device" do?</h4>
       <p>Wipes everything the parent view remembers on that device — unlocked players, codes, and saved name. Useful for shared phones. You'll need the access code(s) again next time.</p>
       <h4>How often does it refresh?</h4>
-      <p>Automatically every 15 seconds. There's also a <strong>↻ Refresh</strong> button at the bottom.</p>
+      <p>Automatically every 6 seconds. There's also a <strong>↻ Refresh</strong> button at the bottom.</p>
       <h4>What's the ///what3words link?</h4>
       <p>A three-word address pinpoints a 3m × 3m square. Tap it on a phone for precise directions.</p>
       <h4>Are the access codes secret?</h4>
@@ -1962,12 +1995,12 @@ const HELP_SECTIONS = [
     id: 'workflow', title: 'A typical coach week', adminOnly: true,
     body: `
       <ol>
-        <li><strong>Monday</strong> — Lineups → + New lineup. Fill in opponent, date, kick-off, arrival, venue. Save as Draft.</li>
-        <li><strong>Tuesday</strong> — In <strong>✎ Edit match</strong>, switch to <strong>Availability</strong> and <strong>🔗 Copy availability link for parents</strong>. Paste into WhatsApp along with each child's access code (grab them from the Squad tab).</li>
-        <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (gold/red/<code>?</code> rings appear on chips). Tweak the lineup. Add tactics arrows.</li>
-        <li><strong>Friday</strong> — Switch the state to <strong>Show lineup</strong>. Same parent link now shows the pitch — no need to re-share.</li>
-        <li><strong>Match day</strong> — If anyone drops out, edit the lineup; the parent link auto-updates within 15s.</li>
-        <li><strong>Post-match</strong> — Stays in <strong>Fixtures → Matches → Past</strong> for the season record.</li>
+        <li><strong>Monday</strong> — Tap the orange <strong>+</strong> → <strong>New match</strong>. The wizard walks you through opponent, date, kick-off, arrival, venue, formation. Click Create. Match opens as Draft.</li>
+        <li><strong>Tuesday</strong> — Tap the status pill → <strong>Availability</strong>. The Share modal opens — send the link + each child's access code via WhatsApp (grab codes from the Squad tab). Or say <strong>Yes, share</strong> to the post-wizard prompt.</li>
+        <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (coloured dots appear on pitch chips). Tweak the lineup. Add tactics arrows.</li>
+        <li><strong>Friday</strong> — Tap the status pill → <strong>Published</strong>. Same parent link now shows the pitch — no need to re-share.</li>
+        <li><strong>Match day</strong> — If anyone drops out, edit the lineup; parent view picks up changes within ~6s.</li>
+        <li><strong>Post-match</strong> — Open the match, hit <strong>✎ Edit match</strong>, enter scores, goalscorers and MOTM in the ⚽ Result section. Chips update everywhere.</li>
       </ol>
     `
   },
@@ -1979,6 +2012,7 @@ const HELP_SECTIONS = [
         <li>Email notifications when lineups are published or updated</li>
         <li>Audit log UI to see who changed what</li>
         <li>Team-wide public page so parents can bookmark one URL for the season</li>
+        <li>Per-player season tally of goals and Man of the Match awards</li>
         <li>A holistic look-and-feel polish pass</li>
       </ul>
     `
