@@ -2148,10 +2148,10 @@ body.public-card-view #app { padding-top: 0; }
    into the name-bar area. */
 .pc-photo {
   position: absolute;
-  top: 6%;
+  top: 11%;                   /* starts below the PNG's top notch/curve */
   right: 10%;
   width: 55%;
-  height: 42%;
+  height: 37%;                /* bottom lands at 48% — right on the divider */
   background-color: transparent;
   background-size: cover;
   background-position: center 20%;  /* face sits slightly above centre */
