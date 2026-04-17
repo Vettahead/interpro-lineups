@@ -402,7 +402,23 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 
 /* Formation button column variant (right sidebar) */
 .f-btns.f-btns-col { flex-direction: column; gap: 0.3rem; }
-.f-btns.f-btns-col .f-btn { width: 100%; text-align: left; position: relative; }
+/* Column buttons use a flex row: name grows, badge + delete sit on the right
+   with a consistent gap. (Horizontal .f-btns still relies on floats for .f-del.) */
+.f-btns.f-btns-col .f-btn {
+  width: 100%;
+  text-align: left;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.f-btns.f-btns-col .f-btn .f-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .f-btn-custom { border-left: 3px solid var(--blue-2) !important; }
 .f-btn .f-del {
   float: right;
@@ -420,6 +436,30 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   padding: 0 0.2rem;
 }
 .f-btn .f-edit:hover { color: var(--blue-1); }
+
+/* 'Players stored' indicator on formation buttons (2026-04-17). Pinned to the
+   right-hand side of the button via flex layout on the parent .f-btns-col. */
+.f-btn .f-players-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+  padding: 0.1rem 0.45rem;
+  background: #eef2ff;
+  color: #1e3a8a;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.f-btn.f-btn-has-players {
+  border-left-color: #6366f1 !important;
+}
+.f-btn.f-btn-has-players.active .f-players-badge {
+  background: #1e3a8a;
+  color: #fff;
+}
 
 /* Formation edit mode — position circles (not player chips) */
 .pitch-editing-formation .slots-layer { pointer-events: auto; }
@@ -1864,6 +1904,9 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
 .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
 .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
+/* Tactics page sub-tabs (2026-04-17) */
+.lineup-layout[data-phone-tab="tactics"]   [data-phone-group]:not([data-phone-group="tactics"])   { display: none !important; }
+.lineup-layout[data-phone-tab="edit"]      [data-phone-group]:not([data-phone-group="edit"])      { display: none !important; }
 
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
 .me-avail-bar {
@@ -2649,6 +2692,25 @@ body.mw-open { overflow: hidden; }
   border-color: #f97316;
   box-shadow: 0 0 0 1px #f97316;
 }
+/* Played matches (2026-04-17):
+   - .done = score entered → green outline so finished games fade to "resolved".
+   - .needs-score = KO has passed but no result yet → red outline + warning chip
+     so the coach's eye is drawn to the card that needs attention.
+   .active (currently-loaded match) keeps priority when loaded, via the specific
+   .active.done / .active.needs-score rules below. */
+.me-match-card.done {
+  border-color: #2a7;
+}
+.me-match-card.needs-score {
+  border-color: #c33;
+  box-shadow: 0 0 0 1px #c33;
+}
+.me-match-card.active.done {
+  box-shadow: 0 0 0 2px #2a7;
+}
+.me-match-card.active.needs-score {
+  box-shadow: 0 0 0 2px #c33;
+}
 
 /* Date block on the left. */
 .mc-date {
@@ -2715,6 +2777,26 @@ body.mw-open { overflow: hidden; }
 .me-match-status-published     { background: #dcfce7; color: #14532d; }
 .me-match-status-availability  { background: #fef3c7; color: #78350f; }
 .me-match-status-draft         { background: #eef2f7; color: #3b4b66; }
+/* Tactics page — possession chips on tactic cards (2026-04-17). */
+.me-match-status-in            { background: #dbeafe; color: #1e3a8a; }
+.me-match-status-out           { background: #fee2e2; color: #991b1b; }
+/* Tactics card: left-side icon block (replaces the date block). */
+.mc-tactic-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; min-width: 44px;
+  background: #eef2ff; color: #1e3a8a; border-radius: 6px; font-size: 1.4rem;
+}
+.mc-tactic-emoji { line-height: 1; }
+/* Label + input styling for the inline Edit tactic panel. */
+.tac-label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 0.25rem; }
+.tac-input {
+  width: 100%; box-sizing: border-box;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  font: inherit; font-size: 0.88rem;
+  background: #fff;
+}
+.tac-input:focus { outline: 2px solid rgba(99, 102, 241, 0.35); outline-offset: 1px; border-color: #6366f1; }
 
 /* Delete (X) button top-right of a match card. */
 .me-match-del {
