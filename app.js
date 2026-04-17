@@ -7968,9 +7968,13 @@ function renderPlaysTab() {
     ? availablePlayers.map(p => chipHtml(p, 'palette')).join('')
     : `<p class="muted" style="padding:0.5rem">All players on the pitch.</p>`;
 
-  // Tactics controls (arrows/ball/zones) — reuses the same collapsible card
-  // pattern as the match editor. Same ids so wireTacticsUI picks them up.
-  const tacticsCardHtml = canEdit ? collapsibleCard('tactics-card', 'Arrows, ball, zones', `
+  // Moves sub-tab body — the arrows / ball / zones controls used to live
+  // inside the Edit tactic panel as a collapsible. Split into their own
+  // sub-tab 2026-04-17 because Chris plans to add more drawing features
+  // here. Ids (tactic-btn / btn-ball / chk-zone-* / clear-arrows / clear-tactics)
+  // match what wireTacticsUI looks for — no wiring changes needed.
+  const movesPanelHtml = canEdit ? `
+    <p class="muted me-hint">Drawing tools for this tactic — arrows show player movement, the ball marks starting position, zones show press/defensive lines.</p>
     <div class="tactic-btns">
       <button class="tactic-btn ${tacticMode === 'move' ? 'active' : ''}" data-tactic-mode="move">▶ Move</button>
       <button class="tactic-btn ${tacticMode === 'click' ? 'active' : ''}" data-tactic-mode="click">→ Click</button>
@@ -7992,7 +7996,7 @@ function renderPlaysTab() {
     </div>
     <button class="btn-full" id="clear-arrows">✕ Clear arrows</button>
     <button class="btn-full" id="clear-tactics" style="margin-bottom:0">✕ Clear all tactics</button>
-  `) : '';
+  ` : `<p class="muted" style="padding:0.75rem">Sign in as a coach to edit moves.</p>`;
 
   const isMine = current.id && current.created_by && editor.currentUserId && current.created_by === editor.currentUserId;
   const isAdmin = editor.currentUserRole === 'admin';
@@ -8047,7 +8051,6 @@ function renderPlaysTab() {
           }
         </div>
       </div>
-      ${tacticsCardHtml}
       <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.25rem">
         <button class="primary btn-full" id="tac-save">💾 ${hasLoaded ? 'Save' : 'Save tactic'}</button>
         ${hasLoaded ? `<button class="btn-full" id="tac-save-new">➕ Save as new…</button>` : ''}
@@ -8057,11 +8060,12 @@ function renderPlaysTab() {
     </div>
   ` : `<p class="muted" style="padding:0.75rem">Sign in as a coach to edit tactics.</p>`;
 
-  // Sub-tab strip — Tactics / Squad / Edit tactic
+  // Sub-tab strip — Tactics / Squad / Moves / Edit tactic
   const subTabsHtml = `
     <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Tactics page sections">
       <button class="lineup-phone-tab ${subTab === 'tactics' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'tactics' ? 'true' : 'false'}" data-ptab="tactics">Tactics</button>
       <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"   role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"   data-ptab="squad">Squad</button>
+      <button class="lineup-phone-tab ${subTab === 'moves' ? 'active' : ''}"   role="tab" aria-selected="${subTab === 'moves' ? 'true' : 'false'}"   data-ptab="moves">Moves</button>
       <button class="lineup-phone-tab ${subTab === 'edit' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'edit' ? 'true' : 'false'}"    data-ptab="edit">Edit tactic</button>
     </nav>
   `;
@@ -8086,6 +8090,7 @@ function renderPlaysTab() {
           <div class="me-panel card">
             <div data-phone-group="tactics" class="me-panel-body me-panel-body-matches">${tacticsPanelHtml}</div>
             <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
+            <div data-phone-group="moves" class="me-panel-body">${movesPanelHtml}</div>
             <div data-phone-group="edit" class="me-panel-body">${editPanelHtml}</div>
           </div>
         </div>

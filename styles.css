@@ -1906,6 +1906,7 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
 /* Tactics page sub-tabs (2026-04-17) */
 .lineup-layout[data-phone-tab="tactics"]   [data-phone-group]:not([data-phone-group="tactics"])   { display: none !important; }
+.lineup-layout[data-phone-tab="moves"]     [data-phone-group]:not([data-phone-group="moves"])     { display: none !important; }
 .lineup-layout[data-phone-tab="edit"]      [data-phone-group]:not([data-phone-group="edit"])      { display: none !important; }
 
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
