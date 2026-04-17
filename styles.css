@@ -2074,64 +2074,67 @@ body.public-card-view #app { padding-top: 0; }
   color: #1a1a1a;
 }
 
-/* ----- Card using GOLD_FIFA_22.png as the background ------
-   All text overlaid with absolute positioning in % so it scales with the
-   card. One shared font stack across the whole card (Arial Black / Helvetica
-   Neue / system fallback, weight 900) — bold, punchy, FIFA-like.
-   Palette: #2d250f ink on the cream/gold body. */
+/* ----- FIFA card using GOLD_FIFA_22.png as the background ------
+   Clean rewrite 2026-04-17. Layout mirrors an authentic FIFA gold card
+   (Bernardo Silva reference):
+     • Top-left column: rating-style number, position below, team crest.
+     • Top-right ~55% of card: player photo, blended into diagonals.
+     • Centre ~52% down: player name (reading along the PNG divider).
+     • Bottom: 2×3 stats grid, value + 3-4 letter code per cell.
+   All positions are %-of-card so they scale. No frames/borders on the
+   photo — it should read as integrated, not pasted on. */
 .pc-card {
   position: relative;
   aspect-ratio: 63 / 88;
   max-width: 380px;
   margin: 0 auto;
   background: url('GOLD_FIFA_22.png') no-repeat center / contain;
-  color: #2d250f;
+  color: #231c08;
   overflow: hidden;
   isolation: isolate;
-  /* Shared punchy font family for the whole card */
   font-family: 'Arial Black', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 900;
 }
 
-/* Left column — shirt number, position, crest. */
+/* Number + position + crest column. Pushed in off the PNG's curved left
+   edge (left: 16%) so the shirt number never crops against the notch.
+   Narrow column (15% wide) — enough for the number and the circular crest. */
 .pc-num-col {
   position: absolute;
-  left: 9%;
-  top: 8%;
-  width: 20%;
+  left: 16%;
+  top: 9%;
+  width: 15%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0;
   z-index: 2;
 }
 .pc-num {
-  font-size: 3rem;
-  font-weight: 900;
+  font-size: 2.8rem;
   line-height: 0.95;
-  letter-spacing: -0.03em;
-  color: #2d250f;
+  letter-spacing: -0.04em;
+  color: #231c08;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.35);
 }
 .pc-pos {
-  font-size: 1.1rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  color: #2d250f;
-  margin-top: 0.1rem;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  margin-top: 0.05rem;
+  color: #231c08;
 }
 .pc-crest {
-  margin-top: 0.6rem;
-  width: 58%;
+  margin-top: 0.75rem;
+  width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   background: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 0 0 2px rgba(138,88,0,0.5);
-  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
   padding: 3px;
+  overflow: hidden;
 }
 .pc-crest img {
   width: 100%;
@@ -2139,119 +2142,108 @@ body.public-card-view #app { padding-top: 0; }
   object-fit: contain;
 }
 
-/* Photo — sits in the diagonal-stripe area on the PNG's upper half.
-   Integrated with a subtle gold frame + bottom gradient fade so it blends
-   into the cream body instead of floating. */
+/* Photo — fills the upper-right zone on the PNG. No visible frame. Bottom
+   fades into the gold body so it reads like a real FIFA portrait. Height
+   stops JUST above the PNG's horizontal divider (48%) so it never leaks
+   into the name-bar area. */
 .pc-photo {
   position: absolute;
-  top: 7%;
-  right: 8%;
-  width: 56%;
+  top: 6%;
+  right: 10%;
+  width: 55%;
   height: 42%;
-  background-color: rgba(253, 245, 220, 0.3);
+  background-color: transparent;
   background-size: cover;
-  background-position: center top;
+  background-position: center 20%;  /* face sits slightly above centre */
   display: flex;
   align-items: center;
   justify-content: center;
-  filter: saturate(0.98) contrast(1.03);
   z-index: 1;
-  border-radius: 3px;
-  /* Subtle gold frame + tiny internal shadow so the photo reads as framed */
-  box-shadow:
-    inset 0 0 0 2px rgba(138,88,0,0.35),
-    inset 0 -45px 40px -30px rgba(138,88,0,0.28),
-    0 2px 4px rgba(0,0,0,0.1);
-}
-/* Soft bottom-fade that mixes the photo into the name band underneath */
-.pc-photo::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 28%;
-  background: linear-gradient(180deg,
-    rgba(246,226,170,0) 0%,
-    rgba(246,226,170,0.55) 100%);
-  pointer-events: none;
+  filter: saturate(0.98) contrast(1.02);
+  /* Subtle bottom fade masks the hard cut-off into the divider / name band.
+     No border/shadow — photo reads as part of the card. */
+  -webkit-mask-image: linear-gradient(to bottom,
+    black 0%, black 82%, transparent 100%);
+          mask-image: linear-gradient(to bottom,
+    black 0%, black 82%, transparent 100%);
 }
 .pc-photo-letter {
   font-size: 4.25rem;
   font-weight: 900;
-  color: rgba(45,37,15,0.32);
+  color: rgba(35,28,8,0.32);
   font-family: inherit;
   letter-spacing: -0.03em;
 }
 
-/* Name — slightly tighter, no serif, sits centered on the PNG's divider line. */
+/* Name — positioned right at the PNG's divider. Slightly condensed so longer
+   names (ORIN EARNSHAW, JASPER EARNSHAW) still fit on one line. */
 .pc-name {
   position: absolute;
   left: 8%;
   right: 8%;
-  top: 51%;
+  top: 52%;
   text-align: center;
   font-size: 1.55rem;
-  font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #2d250f;
+  color: #231c08;
   z-index: 2;
-  padding: 0.35rem 0 0.35rem;
-  line-height: 1.05;
-  /* Compress slightly to fit longer names */
-  font-stretch: condensed;
+  padding: 0.2rem 0;
+  line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Stats — 2 columns × 3 rows in the cream lower section. */
+/* Stats — 2 columns × 3 rows matching the PNG's cream lower section.
+   Larger outer padding (14%) so the stats sit comfortably inside the card's
+   bottom curve, not flush against the edges. */
 .pc-stats-grid {
   position: absolute;
-  left: 10%;
-  right: 10%;
-  top: 63%;
-  bottom: 8%;
+  left: 14%;
+  right: 14%;
+  top: 62%;
+  bottom: 12%;
   display: grid;
   grid-template-columns: 1fr 1fr;
   align-content: space-evenly;
-  row-gap: 0.35rem;
-  column-gap: 0.8rem;
+  column-gap: 1rem;
+  row-gap: 0;
   z-index: 2;
 }
 .pc-stat {
   display: flex;
   align-items: baseline;
+  justify-content: flex-start;
   gap: 0.45rem;
   white-space: nowrap;
   overflow: hidden;
 }
 .pc-stat-val {
-  font-size: 1.45rem;
-  font-weight: 900;
-  color: #2d250f;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
+  font-size: 1.55rem;
   line-height: 1;
+  letter-spacing: -0.03em;
+  color: #231c08;
+  font-variant-numeric: tabular-nums;
   min-width: 1.6em;
   text-align: right;
   flex-shrink: 0;
 }
 .pc-stat-lbl {
-  font-size: 0.9rem;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  color: #2d250f;
+  font-size: 1.05rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #231c08;
   text-transform: uppercase;
-  opacity: 0.82;
 }
 
 @media (max-width: 420px) {
-  .pc-num { font-size: 2.6rem; }
-  .pc-pos { font-size: 0.95rem; }
-  .pc-name { font-size: 1.3rem; letter-spacing: 0.05em; }
-  .pc-stat-val { font-size: 1.25rem; }
-  .pc-stat-lbl { font-size: 0.8rem; }
-  .pc-stats-grid { column-gap: 0.5rem; row-gap: 0.3rem; left: 9%; right: 9%; }
+  .pc-num { font-size: 2.4rem; }
+  .pc-pos { font-size: 1rem; }
+  .pc-name { font-size: 1.3rem; }
+  .pc-stat-val { font-size: 1.3rem; }
+  .pc-stat-lbl { font-size: 0.92rem; }
+  .pc-stats-grid { left: 13%; right: 13%; column-gap: 0.7rem; }
 }
 
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
