@@ -966,15 +966,26 @@ async function renderTeamsHome(user, opts = {}) {
       }).join('')
     : '';
 
-  const createCardHtml = `
-    <button type="button" class="me-match-card me-match-new th-new-card" id="th-new-team-card">
-      <div class="me-match-new-ico" aria-hidden="true">+</div>
-      <div class="me-match-new-label">Create new team</div>
-    </button>
-  `;
+  // Gate "+ Create new team" on the picker:
+  //   • brand-new user (0 teams) — always allow, otherwise they're stuck
+  //   • admin in ANY team — allow
+  //   • coach / parent with 1+ teams — hide (admins are the only ones who
+  //     should be founding new teams; coaches can be invited to new ones)
+  const canCreateTeam = memberships.length === 0 ||
+    memberships.some(m => m.role === 'admin');
+  const createCardHtml = canCreateTeam
+    ? `
+      <button type="button" class="me-match-card me-match-new th-new-card" id="th-new-team-card">
+        <div class="me-match-new-ico" aria-hidden="true">+</div>
+        <div class="me-match-new-label">Create new team</div>
+      </button>
+    `
+    : '';
 
   const emptyStateHtml = memberships.length
-    ? `<p class="muted" style="margin:0 0 1rem">Pick a team to open, or create a new one.</p>`
+    ? canCreateTeam
+      ? `<p class="muted" style="margin:0 0 1rem">Pick a team to open, or create a new one.</p>`
+      : `<p class="muted" style="margin:0 0 1rem">Pick a team to open. Only admins can create new teams — ask yours to add you to another team.</p>`
     : `<p class="muted" style="margin:0 0 1rem">You're not on any teams yet — create one below to get started.</p>`;
 
   // No wrapper <h1> here — the app's main header already shows the product
