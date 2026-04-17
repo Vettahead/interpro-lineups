@@ -1377,20 +1377,6 @@ function renderPlayerCardBody() {
        </div>`
     : '';
 
-  // Team-formation label (most-used formation across played matches, fallback "—")
-  const formationCount = {};
-  for (const l of _cardState.lineups) {
-    if (!matchHasBeenPlayed(l)) continue;
-    const f = l.data?.formation;
-    if (!f) continue;
-    formationCount[f] = (formationCount[f] || 0) + 1;
-  }
-  let mostUsedFormation = '';
-  let maxC = 0;
-  for (const [f, c] of Object.entries(formationCount)) {
-    if (c > maxC) { maxC = c; mostUsedFormation = f; }
-  }
-
   const pos = p.position || '—';
   const num = p.number != null ? p.number : '—';
   const photoStyle = p.photo_url
@@ -1423,28 +1409,25 @@ function renderPlayerCardBody() {
       </div>
 
       <div class="pc-card">
-        <div class="pc-top-trim" aria-hidden="true"><span class="pc-dots">· · ·</span></div>
-        <div class="pc-shine" aria-hidden="true"></div>
-        <div class="pc-top">
-          <div class="pc-num-col">
-            <div class="pc-num">${ss}</div>
-            <div class="pc-pos">${escapeHtml(pos)}</div>
-            ${mostUsedFormation ? `<div class="pc-formation" title="Team formation">${escapeHtml(mostUsedFormation)}</div>` : ''}
-            <div class="pc-crest" aria-hidden="true">
-              <img src="logo.png" alt="" />
-            </div>
+        <!-- Background is the GOLD_FIFA_22.png template; everything below is
+             absolutely-positioned overlay. -->
+        <div class="pc-num-col">
+          <div class="pc-num">${ss}</div>
+          <div class="pc-pos">${escapeHtml(pos)}</div>
+          <div class="pc-crest" aria-hidden="true">
+            <img src="logo.png" alt="" />
           </div>
-          <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
-            ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
-          </div>
+        </div>
+        <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
+          ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
         </div>
         <div class="pc-name">${escapeHtml(p.name || '—')}</div>
         <div class="pc-stats-grid">
-          <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">GLS</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOM</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">STR</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">SUB</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">APP</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">Man of the Match</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Sub appearances</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Appearances</span></div>
           <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
         </div>
       </div>
