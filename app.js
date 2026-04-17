@@ -64,6 +64,32 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ---------- Age group helpers (youth football season runs 1 Sep → 31 May) ----------
+// Stored on the teams table as (age_group: INT 7..18, age_group_season_year: INT).
+// The displayed age group auto-bumps on 7 June each year — a week after 31 May so
+// coaches aren't caught out mid-transition. computeCurrentSeasonStartYear returns
+// the year the CURRENT season started (e.g. 2025 for the 2025-26 season).
+function computeCurrentSeasonStartYear(date = new Date()) {
+  const y = date.getFullYear();
+  const m = date.getMonth();   // 0 = Jan, 5 = Jun
+  const d = date.getDate();
+  // From 7 June onwards we're "in" the upcoming season (starts this September).
+  if (m > 5 || (m === 5 && d >= 7)) return y;
+  return y - 1;
+}
+function effectiveAgeGroup(team, date = new Date()) {
+  if (!team || team.age_group == null || team.age_group_season_year == null) return null;
+  const currentStart = computeCurrentSeasonStartYear(date);
+  const bump = Math.max(0, currentStart - team.age_group_season_year);
+  return Math.min(18, team.age_group + bump);
+}
+function ageGroupLabel(team, date = new Date()) {
+  const n = effectiveAgeGroup(team, date);
+  return (n == null) ? '' : `U${n}s`;
+}
+// All the options we support in dropdowns. Covers U7 through U18.
+const AGE_GROUP_OPTIONS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+
 // ---------- Player access codes ----------
 // Personal code: <firstInitial><lastInitial><4 random digits>, e.g. JE1234
 // Family code:   5 random digits, shared by linked siblings
@@ -602,10 +628,55 @@ async function handleGlobalPlusAction(action, user, teamId) {
   }
 }
 
+// ---------- User team list cache ----------
+// Populated lazily via getUserTeams(user). Used to decide whether to render the
+// "Switch team" shortcut in the sidebar / drawer (hidden for single-team
+// non-admin users who'd just bounce straight back anyway) and to drive the
+// team-switcher strip at the top of the Admin tab. Invalidated after creating
+// or leaving a team.
+let _userTeamsCache = null;
+let _userTeamsCacheFor = null;
+async function getUserTeams(user, { force = false } = {}) {
+  if (!user) return [];
+  if (!force && _userTeamsCache && _userTeamsCacheFor === user.id) return _userTeamsCache;
+  // Optimistic fetch with age_group columns — fall back if DB is older.
+  let data, err;
+  {
+    const r = await supabase
+      .from('team_members')
+      .select('role, team_id, teams(id, name, age_group, age_group_season_year)')
+      .eq('user_id', user.id);
+    data = r.data; err = r.error;
+    if (err && /age_group/i.test(err.message || '')) {
+      const r2 = await supabase
+        .from('team_members')
+        .select('role, team_id, teams(id, name)')
+        .eq('user_id', user.id);
+      data = r2.data; err = r2.error;
+    }
+  }
+  if (err) { console.warn('getUserTeams failed', err); return []; }
+  _userTeamsCache = (data || []);
+  _userTeamsCacheFor = user.id;
+  return _userTeamsCache;
+}
+function invalidateUserTeamsCache() {
+  _userTeamsCache = null;
+  _userTeamsCacheFor = null;
+}
+// True if this user should see a "Switch team" shortcut — i.e., they have >1
+// team to choose from, OR any admin role (admins often manage several teams
+// and benefit from the quick switch even on a single-team account).
+function userCanSwitchTeams(memberships) {
+  if (!memberships) return false;
+  if (memberships.length > 1) return true;
+  return memberships.some(m => m.role === 'admin');
+}
+
 // ---------- Phone hamburger drawer ----------
 // Shows a slide-in drawer on phone containing the team header + vertical tabs.
 // Desktop layout is untouched (the hamburger button hides via CSS ≥900px).
-function renderNavDrawer(user, teamId, team, role, canEdit) {
+function renderNavDrawer(user, teamId, team, role, canEdit, memberships) {
   const toggle = document.getElementById('nav-toggle');
   const drawer = document.getElementById('nav-drawer');
   const overlay = document.getElementById('nav-drawer-overlay');
@@ -625,6 +696,7 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
   // Drawer tabs match the mockup: Matches / Squad / Plays / Formations / Help-FAQ / Admin (coach-gated) / Sign out.
   // Matches now opens the unified editor (activeTab='lineups'), landing on the "matches" sub-tab
   // which shows the fixtures-as-cards list. The separate fixtures page is retired.
+  const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
@@ -632,13 +704,15 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
+    ...(showSwitch ? [{ id: '__switchteam', label: 'Switch team', icon: '↻' }] : []),
     { id: '__signout',  label: 'Sign out',   icon: '⏻' },
   ];
 
+  const drawerAgLabel = ageGroupLabel(team);
   drawer.innerHTML = `
     <div class="nav-drawer-head">
       <div class="nav-drawer-team">
-        <strong>${escapeHtml(team.name)}</strong>
+        <strong>${escapeHtml(team.name)}${drawerAgLabel ? ' <span style="font-weight:400;opacity:0.8;font-size:0.85em"> · ' + drawerAgLabel + '</span>' : ''}</strong>
         <span class="nav-drawer-user">${escapeHtml(displayName)} · ${escapeHtml(roleLabel)}</span>
       </div>
     </div>
@@ -700,6 +774,13 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
         await supabase.auth.signOut();
         return;
       }
+      if (next === '__switchteam') {
+        try { await flushAutosave(); } catch (_) {}
+        // force:true so the picker is shown even for single-team users who
+        // would otherwise be auto-bounced back into their only team.
+        location.hash = '';
+        return;
+      }
       if (next === activeTab) return;
       try { await flushAutosave(); } catch (_) {}
       activeTab = next;
@@ -712,7 +793,7 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
 // ---------- Desktop persistent left sidebar ----------
 // Shown on ≥900px viewports. Replaces the old horizontal header tabs.
 // On phone the sidebar is hidden via CSS; the hamburger drawer handles navigation instead.
-function renderDesktopSidebar(user, teamId, team, role, canEdit) {
+function renderDesktopSidebar(user, teamId, team, role, canEdit, memberships) {
   const sidebar = document.getElementById('desktop-sidebar');
   if (!sidebar) return;
 
@@ -722,11 +803,12 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
     ? words[0][0] + words[1][0]
     : (team?.name || 'IB').slice(0, 2)).toUpperCase();
 
-  // Subtitle — keep it short; uses team.age_group / season if we have them, otherwise
-  // falls back to "Team". Fields may not exist yet, so guard each.
+  // Subtitle — age group chip (auto-bumped each June) + role. The raw team.age_group
+  // column is an INT; effectiveAgeGroup handles the season-year rollover logic.
   const subParts = [];
-  if (team?.age_group) subParts.push(team.age_group);
-  if (team?.season)    subParts.push(`${team.season} season`);
+  const ag = ageGroupLabel(team);
+  if (ag) subParts.push(ag);
+  if (team?.season) subParts.push(`${team.season} season`);
   const subtitle = subParts.length ? subParts.join(' · ') : 'Team';
 
   // User badge: display name + role label (admin → "Head coach" to match the drawer)
@@ -740,6 +822,7 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
   // Same tab set as the phone drawer (minus Sign out — that has its own button in the user badge).
   // Matches now opens the unified match editor (activeTab='lineups'), landing on the Matches
   // sub-tab which shows the fixtures-as-cards list.
+  const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
@@ -747,6 +830,7 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
+    ...(showSwitch ? [{ id: '__switchteam', label: 'Switch team', icon: '↻' }] : []),
   ];
 
   // Mark the body so CSS can reveal the sidebar + shift main content + hide the
@@ -784,6 +868,14 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
   sidebar.querySelectorAll('[data-ds-tab]').forEach(btn => {
     btn.onclick = async () => {
       const next = btn.dataset.dsTab;
+      if (next === '__switchteam') {
+        try { await flushAutosave(); } catch (_) {}
+        // Pops back to the team picker. renderTeamsHome sees no hash and shows
+        // the grid (force:true so a single-team admin can still switch — though
+        // single-team non-admins normally wouldn't see this button anyway).
+        location.hash = '';
+        return;
+      }
       if (next === activeTab) return;
       try { await flushAutosave(); } catch (_) {}
       activeTab = next;
@@ -801,71 +893,193 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
 }
 
 // ---------- Teams home ----------
-async function renderTeamsHome(user) {
+async function renderTeamsHome(user, opts = {}) {
   appEl.innerHTML = `<p class="loading">Loading your teams…</p>`;
 
-  const { data: memberships, error } = await supabase
-    .from('team_members')
-    .select('role, team_id, teams(id, name)')
-    .eq('user_id', user.id);
+  // Fetch memberships with the team row expanded so we can see age_group too.
+  // Columns age_group + age_group_season_year may not exist in older databases —
+  // we request them optimistically and fall back gracefully if they're missing.
+  let memberships;
+  let mErr;
+  {
+    const res = await supabase
+      .from('team_members')
+      .select('role, team_id, teams(id, name, age_group, age_group_season_year)')
+      .eq('user_id', user.id);
+    memberships = res.data;
+    mErr = res.error;
+    // If the age_group columns don't exist yet, retry without them.
+    if (mErr && /age_group/i.test(mErr.message || '')) {
+      const r2 = await supabase
+        .from('team_members')
+        .select('role, team_id, teams(id, name)')
+        .eq('user_id', user.id);
+      memberships = r2.data;
+      mErr = r2.error;
+    }
+  }
 
-  if (error) {
-    appEl.innerHTML = `<div class="card"><p class="error">Error: ${escapeHtml(error.message)}</p></div>`;
+  if (mErr) {
+    appEl.innerHTML = `<div class="card"><p class="error">Error: ${escapeHtml(mErr.message)}</p></div>`;
     return;
   }
 
-  const teamsHtml = (memberships && memberships.length)
-    ? `<ul class="team-list">
-        ${memberships.map(m => `
-          <li>
-            <div>
-              <strong>${escapeHtml(m.teams.name)}</strong>
-              <div class="muted">Role: ${m.role}</div>
+  memberships = memberships || [];
+
+  // Auto-load: if the user has exactly 1 membership AND their role there isn't
+  // 'admin', skip the picker and go straight into that team. Admins always see
+  // the picker so they can switch easily; multi-team users always see it too.
+  // opts.force === true bypasses this (used by the Switch team link so it doesn't
+  // bounce straight back to the single team).
+  if (!opts.force && memberships.length === 1 && memberships[0].role !== 'admin') {
+    location.hash = `#/team/${memberships[0].team_id}`;
+    return;
+  }
+
+  // Card grid — same visual language as match / tactic cards.
+  const teamCardsHtml = memberships.length
+    ? memberships.map(m => {
+        const t = m.teams || {};
+        const ag = ageGroupLabel(t);
+        const roleLabel = m.role === 'admin' ? 'Admin'
+          : m.role === 'coach' ? 'Coach'
+          : m.role === 'parent' ? 'Parent'
+          : escapeHtml(m.role);
+        const roleClass = m.role === 'admin' ? 'me-match-status-published' : 'me-match-status-availability';
+        return `
+          <div class="me-match-card th-team-card" data-team="${m.team_id}">
+            <div class="mc-date mc-tactic-icon" aria-hidden="true"><span class="mc-tactic-emoji">⚽</span></div>
+            <div class="mc-body">
+              <div class="me-match-title">${escapeHtml(t.name || '—')}</div>
+              <div class="me-match-meta lineup-meta">${ag ? ag + ' · ' : ''}Role: ${roleLabel}</div>
             </div>
-            <button class="primary" data-team="${m.team_id}">Open</button>
-          </li>
-        `).join('')}
-      </ul>`
-    : `<p class="muted">You're not on any teams yet. Create one below to get started.</p>`;
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.2rem">
+              <div class="me-match-status ${roleClass}">${roleLabel}</div>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '';
+
+  const createCardHtml = `
+    <button type="button" class="me-match-card me-match-new th-new-card" id="th-new-team-card">
+      <div class="me-match-new-ico" aria-hidden="true">+</div>
+      <div class="me-match-new-label">Create new team</div>
+    </button>
+  `;
+
+  const emptyStateHtml = memberships.length
+    ? ''
+    : `<p class="muted" style="margin:0 0 0.5rem">You're not on any teams yet — create one below to get started.</p>`;
 
   appEl.innerHTML = `
-    <div class="card">
-      <h2>Your teams</h2>
-      ${teamsHtml}
-    </div>
-    <div class="card">
-      <h2>Create a new team</h2>
-      <p class="muted">You'll be the admin of this team.</p>
-      <form id="new-team-form">
-        <label>Team name</label>
-        <input type="text" id="team-name" placeholder="e.g. Interpro Blues U10" required />
-        <div id="team-error" class="error"></div>
-        <button class="primary" type="submit">Create team</button>
-      </form>
+    <div class="teams-home">
+      <header class="th-header">
+        <h1 style="margin:0">Your teams</h1>
+        <p class="muted" style="margin:0.25rem 0 0">Pick a team to open, or create a new one.</p>
+      </header>
+      ${emptyStateHtml}
+      <div class="me-matches-grid th-grid">
+        ${teamCardsHtml}
+        ${createCardHtml}
+      </div>
     </div>
   `;
 
-  document.getElementById('new-team-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const errEl = document.getElementById('team-error');
-    errEl.textContent = '';
-    const name = document.getElementById('team-name').value.trim();
-    if (!name) return;
-
-    const { data: team, error: tErr } = await supabase
-      .from('teams').insert({ name, created_by: user.id }).select().single();
-    if (tErr) { errEl.textContent = tErr.message; return; }
-
-    const { error: mErr } = await supabase
-      .from('team_members').insert({ team_id: team.id, user_id: user.id, role: 'admin' });
-    if (mErr) { errEl.textContent = mErr.message; return; }
-
-    location.hash = `#/team/${team.id}`;
-  };
-
-  appEl.querySelectorAll('[data-team]').forEach(btn => {
-    btn.onclick = () => { location.hash = `#/team/${btn.dataset.team}`; };
+  // Open a team
+  appEl.querySelectorAll('.th-team-card').forEach(card => {
+    card.onclick = () => { location.hash = `#/team/${card.dataset.team}`; };
   });
+
+  // + Create new team — opens the create modal
+  const newCard = document.getElementById('th-new-team-card');
+  if (newCard) newCard.onclick = () => openCreateTeamModal(user, async () => {
+    // After creating, just refresh this page (new team joins the list, doesn't auto-switch)
+    await renderTeamsHome(user, { force: true });
+  });
+}
+
+// Create-team modal — shared between the team-picker page and the Admin tab.
+// Collects team name + optional age group, inserts teams row + team_members row
+// (creator becomes admin), and invokes onCreated(team) on success.
+function openCreateTeamModal(user, onCreated) {
+  // Default age group: whatever the user most often coaches (unknown here) —
+  // offer a blank "(not set)" option plus U7..U18.
+  const currentSeasonYear = computeCurrentSeasonStartYear();
+  const ageOpts = AGE_GROUP_OPTIONS.map(n =>
+    `<option value="${n}">U${n}s</option>`
+  ).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:460px;height:auto;max-height:92vh">
+      <div class="map-modal-header">
+        <strong>Create a new team</strong>
+        <button class="btn-secondary" id="ct-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:0.9rem">
+        <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">You'll be the admin of this team. You can change any of this later from the Admin tab.</p>
+        <label class="tac-label">Team name</label>
+        <input type="text" id="ct-name" class="tac-input" placeholder="e.g. Interpro Blues" autocomplete="off" />
+        <label class="tac-label" style="margin-top:0.7rem">Age group <span class="muted" style="font-weight:400">(optional)</span></label>
+        <select id="ct-age" class="tac-input">
+          <option value="">— not set —</option>
+          ${ageOpts}
+        </select>
+        <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Age group rolls up by one on 7 June each year (the week after the season ends).</p>
+        <div id="ct-msg" class="error" style="min-height:1.1em;font-size:0.85rem;margin-top:0.6rem"></div>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem">
+          <button type="button" class="btn-secondary" id="ct-cancel">Cancel</button>
+          <button type="button" class="primary" id="ct-save">Create team</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#ct-close').onclick = close;
+  overlay.querySelector('#ct-cancel').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  setTimeout(() => overlay.querySelector('#ct-name')?.focus(), 20);
+
+  overlay.querySelector('#ct-save').onclick = async () => {
+    const msg = overlay.querySelector('#ct-msg');
+    const name = (overlay.querySelector('#ct-name').value || '').trim();
+    if (!name) { msg.textContent = 'Team name is required.'; return; }
+    const ageVal = overlay.querySelector('#ct-age').value;
+
+    // Build insert payload. Optional age fields only included when set.
+    const payload = { name, created_by: user.id };
+    if (ageVal) {
+      payload.age_group = parseInt(ageVal, 10);
+      payload.age_group_season_year = currentSeasonYear;
+    }
+
+    // Attempt insert. If the age_group columns don't exist yet in Supabase, fall back.
+    let team, tErr;
+    {
+      const res = await supabase.from('teams').insert(payload).select().single();
+      team = res.data;
+      tErr = res.error;
+      if (tErr && /age_group/i.test(tErr.message || '')) {
+        const r2 = await supabase.from('teams').insert({ name, created_by: user.id }).select().single();
+        team = r2.data; tErr = r2.error;
+      }
+    }
+    if (tErr) { msg.textContent = tErr.message; return; }
+
+    const { error: memErr } = await supabase
+      .from('team_members').insert({ team_id: team.id, user_id: user.id, role: 'admin' });
+    if (memErr) { msg.textContent = memErr.message; return; }
+
+    // The cache is now stale — the new team needs to show up in the picker +
+    // sidebar Switch team list.
+    invalidateUserTeamsCache();
+
+    close();
+    if (onCreated) await onCreated(team);
+  };
 }
 
 // ---------- Parent / public view ----------
@@ -1620,16 +1834,20 @@ async function renderTeamDashboard(user, teamId) {
     });
   }
 
+  // Pull the user's team list once and pass it into both the sidebar and the
+  // drawer so they can render the "Switch team" shortcut consistently.
+  const memberships = await getUserTeams(user);
+
   // Desktop persistent left sidebar (CSS hides it on phone). Render BEFORE
   // renderGlobalPlus so the sidebar's #global-plus-sidebar slot exists in time.
-  renderDesktopSidebar(user, teamId, team, role, canEdit);
+  renderDesktopSidebar(user, teamId, team, role, canEdit, memberships);
 
   // Global "+" quick-create menu — coaches/admins only. Populates every .global-plus slot
   // on the page (header slot for phone, sidebar slot for desktop).
   renderGlobalPlus(user, teamId, canEdit);
 
   // Phone hamburger drawer — mirrors the horizontal tabs
-  renderNavDrawer(user, teamId, team, role, canEdit);
+  renderNavDrawer(user, teamId, team, role, canEdit, memberships);
 
   appEl.innerHTML = `<div id="tab-content"></div>`;
 
@@ -2176,6 +2394,34 @@ function renderSquadTab(team, canEdit, players) {
     ? players
     : players.filter(p => groupForPos(p.position || '') === currentFilter);
 
+  // Team info card — age group editing. Shows the effective age group (auto-
+  // bumped each year on 7 June) and lets admins/coaches update the stored
+  // age group + season year for the team.
+  const currentEffectiveAge = effectiveAgeGroup(team);
+  const storedSeasonYear = team.age_group_season_year ?? computeCurrentSeasonStartYear();
+  const storedAgeRaw = team.age_group ?? null;
+  const teamInfoCard = canEdit ? `
+    <div class="card">
+      <h3 style="margin-top:0">Team info</h3>
+      <label>Team name</label>
+      <input type="text" id="ti-name" value="${escapeHtml(team.name || '')}" placeholder="Team name" />
+      <label style="margin-top:0.5rem">Age group</label>
+      <select id="ti-age" style="width:100%">
+        <option value="">— not set —</option>
+        ${AGE_GROUP_OPTIONS.map(n =>
+          `<option value="${n}" ${currentEffectiveAge === n ? 'selected' : ''}>U${n}s</option>`
+        ).join('')}
+      </select>
+      <p class="muted" style="font-size:0.72rem;margin:0.3rem 0 0">
+        ${currentEffectiveAge != null
+          ? `Currently showing as <strong>U${currentEffectiveAge}s</strong>. Rolls up automatically on 7 June each year (the week after the season ends).`
+          : `Optional. Once set, the displayed age group rolls up on 7 June each year.`}
+      </p>
+      <div id="ti-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+      <button class="primary" id="ti-save" style="margin-top:0.4rem">Save team info</button>
+    </div>
+  ` : '';
+
   const homeGroundCard = canEdit ? `
     <div class="card">
       <h3 style="margin-top:0">Home ground</h3>
@@ -2264,6 +2510,7 @@ function renderSquadTab(team, canEdit, players) {
   tabEl.innerHTML = `
     <div class="squad-layout">
       <div class="squad-main">
+        ${teamInfoCard}
         ${homeGroundCard}
         ${addForm}
         <div class="card">
@@ -2362,6 +2609,41 @@ function renderSquadTab(team, canEdit, players) {
       team._pending_hg_lng = result.lng;
       const msg = document.getElementById('hg-msg');
       if (msg) msg.innerHTML = `✓ ${result.lat.toFixed(5)}, ${result.lng.toFixed(5)} (unsaved — click Save home ground) — <a href="https://www.google.com/maps/search/?api=1&query=${result.lat},${result.lng}" target="_blank" rel="noopener">Google</a> · <a href="https://what3words.com/${result.lat},${result.lng}" target="_blank" rel="noopener">what3words</a>`;
+    };
+
+    // Save team info (name + age group). Updating age_group also stamps
+    // age_group_season_year = current season start year, so the auto-bump
+    // logic starts from the moment the coach set it.
+    const tiSaveBtn = document.getElementById('ti-save');
+    if (tiSaveBtn) tiSaveBtn.onclick = async () => {
+      const msg = document.getElementById('ti-msg');
+      const name = (document.getElementById('ti-name').value || '').trim();
+      const ageVal = document.getElementById('ti-age').value;
+      if (!name) { msg.textContent = 'Team name is required.'; msg.className = 'error'; return; }
+      const payload = { name };
+      if (ageVal) {
+        payload.age_group = parseInt(ageVal, 10);
+        payload.age_group_season_year = computeCurrentSeasonStartYear();
+      } else {
+        payload.age_group = null;
+        payload.age_group_season_year = null;
+      }
+      // Optimistic with fallback if age columns don't exist yet.
+      let data, error;
+      {
+        const r = await supabase.from('teams').update(payload).eq('id', team.id).select().single();
+        data = r.data; error = r.error;
+        if (error && /age_group/i.test(error.message || '')) {
+          const r2 = await supabase.from('teams').update({ name }).eq('id', team.id).select().single();
+          data = r2.data; error = r2.error;
+          if (!error) msg.textContent = '⚠ Team name saved. Age group needs a database migration — ask the developer.';
+        }
+      }
+      if (error) { msg.textContent = 'Save failed: ' + error.message; msg.className = 'error'; return; }
+      Object.assign(team, data);
+      invalidateUserTeamsCache();
+      if (!msg.textContent.startsWith('⚠')) { msg.textContent = '✓ Saved'; msg.className = 'ok'; }
+      setTimeout(() => renderSquadTab(team, canEdit, players), 700);
     };
 
     // Save home ground
@@ -8976,10 +9258,49 @@ async function renderMembersTab(currentUser) {
 
   const memberCount = _membersUi.members.length;
 
+  // Admin-only team switcher strip — shows every team the user is a member of
+  // (highlighting the current one), plus a + Create new team card. Click any
+  // card to switch teams from right here without bouncing to the picker.
+  const userTeams = await getUserTeams(currentUser);
+  const switcherHtml = isAdmin ? (() => {
+    const cardsHtml = userTeams.map(m => {
+      const t = m.teams || {};
+      const ag = ageGroupLabel(t);
+      const active = t.id === team.id;
+      const roleLabel = m.role === 'admin' ? 'Admin' : m.role === 'coach' ? 'Coach' : m.role === 'parent' ? 'Parent' : escapeHtml(m.role);
+      const roleCls = m.role === 'admin' ? 'me-match-status-published' : 'me-match-status-availability';
+      return `
+        <div class="me-match-card th-team-card am-team-card ${active ? 'active' : ''}" data-am-team="${t.id}">
+          <div class="mc-date mc-tactic-icon" aria-hidden="true"><span class="mc-tactic-emoji">⚽</span></div>
+          <div class="mc-body">
+            <div class="me-match-title">${escapeHtml(t.name || '—')}${active ? ' <span class="muted" style="font-weight:400;font-size:0.78rem">(current)</span>' : ''}</div>
+            <div class="me-match-meta lineup-meta">${ag ? ag + ' · ' : ''}Role: ${roleLabel}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.2rem">
+            <div class="me-match-status ${roleCls}">${roleLabel}</div>
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="card">
+        <h3 style="margin:0 0 0.5rem">Your teams</h3>
+        <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">Click a team to switch to it, or create a new one.</p>
+        <div class="me-matches-grid">
+          ${cardsHtml}
+          <button type="button" class="me-match-card me-match-new am-new-team">
+            <div class="me-match-new-ico" aria-hidden="true">+</div>
+            <div class="me-match-new-label">Create new team</div>
+          </button>
+        </div>
+      </div>
+    `;
+  })() : '';
+
   tabEl.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;max-width:900px">
+      ${switcherHtml}
       <div class="card">
-        <h3 style="margin:0 0 0.5rem">Invite someone</h3>
+        <h3 style="margin:0 0 0.5rem">Invite someone <span class="muted" style="font-weight:400;font-size:0.82rem">to ${escapeHtml(team.name)}</span></h3>
         <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">They'll get an email with a magic link. When they sign in, they're automatically added to this team.</p>
         <label>Email</label>
         <input type="email" id="inv-email" placeholder="name@example.com" autocomplete="off" />
@@ -9058,6 +9379,27 @@ async function renderMembersTab(currentUser) {
 
 function wireMembersEvents(currentUser) {
   const { team } = editor;
+  const tabEl = document.getElementById('tab-content');
+
+  // Team switcher cards on the Admin panel — click a team to switch to it.
+  if (tabEl) {
+    tabEl.querySelectorAll('[data-am-team]').forEach(card => {
+      card.onclick = async () => {
+        const nextTeam = card.dataset.amTeam;
+        if (!nextTeam || nextTeam === team.id) return;
+        try { await flushAutosave(); } catch (_) {}
+        activeTab = 'members'; // stay on the Admin tab after the switch
+        openCards.clear();
+        location.hash = `#/team/${nextTeam}`;
+      };
+    });
+    // + Create new team card
+    const newTeamBtn = tabEl.querySelector('.am-new-team');
+    if (newTeamBtn) newTeamBtn.onclick = () => openCreateTeamModal(currentUser, async () => {
+      // Refresh the Admin tab so the new team appears in the strip (doesn't auto-switch).
+      renderMembersTab(currentUser);
+    });
+  }
   const tabEl = document.getElementById('tab-content');
 
   // Show / hide player picker based on role

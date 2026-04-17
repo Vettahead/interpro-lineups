@@ -2849,6 +2849,39 @@ body.mw-open { overflow: hidden; }
   font-weight: 600;
 }
 
+/* Team-picker page (rebuilt 2026-04-17) — uses the same me-match-card skeleton
+   wrapped in a .teams-home container. Card grid, wider max-width, centered. */
+.teams-home {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+.th-header {
+  margin-bottom: 1.25rem;
+}
+.th-header h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.th-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.th-team-card { cursor: pointer; }
+.th-new-card { font-size: 0.95rem; padding: 1rem 1rem; }
+
+/* Admin tab — team switcher card styling. Current team card gets a blue outline
+   to signal "you're on this one". Identical to match-card active orange otherwise. */
+.am-team-card { cursor: pointer; }
+.am-team-card.active {
+  border-color: #1e3a8a !important;
+  box-shadow: 0 0 0 1px #1e3a8a;
+  background: #f5f7ff;
+}
+.am-new-team { font-size: 0.95rem; }
+
 /* The matches panel hosts its own list — override the generic .me-panel padding
    when on this sub-tab so the heading strips sit flush. Already handled via
    the [data-phone-tab="matches"] .me-panel rule above. */
