@@ -1701,10 +1701,55 @@ async function renderTeamDashboard(user, teamId) {
       // Wizard/+ menu provided a lineup to land on — skip the Matches list and go straight to Squad.
       _lineupPhoneTab = 'squad';
     } else {
-      current = base;
-      // No match pre-loaded → land on the Matches sub-tab (card list) so the
-      // coach can pick or create a match.
-      _lineupPhoneTab = 'matches';
+      // No pending lineup — pick the "nearest" eligible match so the coach lands
+      // straight inside it. Eligibility (per 2026-04-17 spec):
+      //   • Any future match is eligible.
+      //   • A past match is eligible only if ≤24h has elapsed since its kickoff
+      //     time (so the coach stays parked on the match they just played and
+      //     can enter the result). After 24h, we roll forward to the next upcoming.
+      // Of the eligible set, pick the one with the smallest |dist-from-now|.
+      const chosenId = _findDefaultLineupId(lineups);
+      const chosen = chosenId ? lineups.find(x => x.id === chosenId) : null;
+      if (chosen) {
+        current = {
+          id: chosen.id,
+          name: chosen.name || '',
+          opponent: chosen.opponent || '',
+          game_date: chosen.game_date || '',
+          match_type: chosen.match_type || 'league',
+          home_away: chosen.home_away || 'home',
+          kickoff_time: chosen.kickoff_time || '',
+          arrival_time: chosen.arrival_time || '',
+          notes: chosen.notes || '',
+          formation: chosen.data?.formation || '4-3-3',
+          slots: { ...(chosen.data?.slots || {}) },
+          subs: [...(chosen.data?.subs || [])],
+          lbl: Array.isArray(chosen.data?.lbl) ? [...chosen.data.lbl] : undefined,
+          pos: Array.isArray(chosen.data?.pos) ? chosen.data.pos.map(p => Array.isArray(p) ? [...p] : p) : undefined,
+          arrows: (chosen.data?.arrows || []).map(a => ({ ...a })),
+          zoneLines: [...(chosen.data?.zoneLines || [null, null])],
+          ballVisible: !!chosen.data?.ballVisible,
+          ballPos: { ...(chosen.data?.ballPos || { x: 50, y: 50 }) },
+          published: !!chosen.published,
+          lineup_status: chosen.lineup_status || (chosen.published ? 'published' : 'draft'),
+          location_name: chosen.location_name || '',
+          location_postcode: chosen.location_postcode || '',
+          location_lat: chosen.location_lat ?? null,
+          location_lng: chosen.location_lng ?? null,
+          our_score_ht: chosen.our_score_ht ?? null,
+          opp_score_ht: chosen.opp_score_ht ?? null,
+          our_score_ft: chosen.our_score_ft ?? null,
+          opp_score_ft: chosen.opp_score_ft ?? null,
+          goalscorers: Array.isArray(chosen.data?.goalscorers) ? chosen.data.goalscorers.map(g => ({ ...g })) : [],
+          motm: Array.isArray(chosen.data?.motm) ? chosen.data.motm.map(m => ({ ...m })) : []
+        };
+        _lastSavedHash = _lineupContentHash(current);
+        _lineupPhoneTab = 'squad';
+      } else {
+        current = base;
+        // Nothing eligible (no upcoming, no past within 24h) → show the card list.
+        _lineupPhoneTab = 'matches';
+      }
     }
     _pendingLineupLoad = null;
     editor = {
@@ -2495,6 +2540,33 @@ function renderSquadTab(team, canEdit, players) {
 }
 
 // ---------- Lineups tab ----------
+// When the Lineups tab opens with no pending lineup to load, auto-pick the match
+// the coach most likely wants to see: the closest upcoming match, OR the most
+// recent past match whose kickoff was within the last 24 hours (so the coach
+// stays parked on a just-played match long enough to enter the result).
+// Returns the lineup id or null if nothing is eligible.
+function _findDefaultLineupId(lineups) {
+  if (!Array.isArray(lineups) || lineups.length === 0) return null;
+  const now = Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  let best = null;
+  let bestAbs = Infinity;
+  for (const l of lineups) {
+    if (!l || !l.game_date) continue;
+    const hasKo = typeof l.kickoff_time === 'string' && /^\d{1,2}:\d{2}/.test(l.kickoff_time);
+    const ko = hasKo ? l.kickoff_time : '12:00';
+    const [hh, mm] = ko.split(':').map(Number);
+    const d = new Date(l.game_date + 'T00:00:00'); // local midnight of game_date
+    d.setHours(hh || 0, mm || 0, 0, 0);
+    const dist = d.getTime() - now; // >0 future, <0 past
+    const abs = Math.abs(dist);
+    // Past matches are only eligible within 24h of KO (so the "stay for 24h" rule holds).
+    if (dist < 0 && abs > DAY_MS) continue;
+    if (abs < bestAbs) { best = l; bestAbs = abs; }
+  }
+  return best ? best.id : null;
+}
+
 // Has the match's kick-off (or end of day, if no time set) already passed?
 // Used to decide whether to show the post-match Result form on the Match details modal.
 function matchHasBeenPlayed(current) {
@@ -3278,6 +3350,360 @@ function matchResultSectionHtml(current, canEdit) {
   `;
 }
 
+// 4-step post-match result wizard (added 2026-04-17).
+// Primary entry point for entering/updating a match result once KO has passed.
+// Steps: 1) Half-time score · 2) Full-time score · 3) Goalscorers · 4) Man of the Match.
+// Goalscorers and MOTM use an add-one-at-a-time flow: a list of added entries +
+// "+ Add…" button that reveals an in-panel player picker. Local wizard state is
+// only committed to editor.current on Save (autosave then persists).
+function openResultWizard() {
+  const { current, canEdit } = editor;
+  if (!current || !current.id) {
+    alert('Save the match details first before entering a result.');
+    return;
+  }
+  if (!canEdit) return;
+
+  // Clone current state so the wizard is cancelable.
+  const state = {
+    step: 1,
+    ht_us:  current.our_score_ht,
+    ht_opp: current.opp_score_ht,
+    ft_us:  current.our_score_ft,
+    ft_opp: current.opp_score_ft,
+    scorers: (Array.isArray(current.goalscorers) ? current.goalscorers : [])
+      .map(g => ({ player_id: g.player_id, count: parseInt(g.count, 10) || 0 }))
+      .filter(g => g.player_id && g.count > 0),
+    motm: (Array.isArray(current.motm) ? current.motm : [])
+      .map(m => ({ player_id: m.player_id, reason: (m.reason || '').toString() }))
+      .filter(m => m.player_id),
+    pickMode: null,  // 'scorer' | 'motm' | null — within-step picker toggle
+  };
+
+  // Candidate players for pickers: matchday squad (slots ∪ subs) if any, else full squad.
+  const allPlayers = editor.players || [];
+  const slotIds = current.slots ? Object.values(current.slots).filter(Boolean) : [];
+  const subIds = Array.isArray(current.subs) ? current.subs.filter(Boolean) : [];
+  const matchdayIds = new Set([...slotIds, ...subIds]);
+  const useMatchday = matchdayIds.size > 0;
+  const candidates = (useMatchday ? allPlayers.filter(p => matchdayIds.has(p.id)) : allPlayers)
+    .slice()
+    .sort((a, b) => {
+      const an = a.number == null ? 99 : a.number;
+      const bn = b.number == null ? 99 : b.number;
+      if (an !== bn) return an - bn;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  const playersById = Object.fromEntries(allPlayers.map(p => [p.id, p]));
+
+  // Modal shell
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:500px;height:auto;max-height:92vh;display:flex;flex-direction:column">
+      <div class="map-modal-header">
+        <strong id="rw-title">Enter result</strong>
+        <button class="btn-secondary" id="rw-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="rw-steps" style="display:flex;gap:0.25rem;padding:0.5rem 0.9rem 0.25rem">
+        ${[1,2,3,4].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
+      </div>
+      <div class="map-modal-body" id="rw-body" style="padding:0.9rem;overflow-y:auto;flex:1"></div>
+      <div id="rw-footer" style="padding:0.6rem 0.9rem;border-top:1px solid #eee;display:flex;gap:0.5rem;justify-content:space-between;align-items:center"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector('#rw-close').onclick = () => {
+    if (state.pickMode) { state.pickMode = null; render(); return; }
+    close();
+  };
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      if (state.pickMode) { state.pickMode = null; render(); return; }
+      close();
+    }
+  });
+
+  const oppName = escapeHtml(current.opponent || 'Opponent');
+  const intOrNull = v => {
+    const s = String(v == null ? '' : v).trim();
+    if (s === '') return null;
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
+  // ---- Per-step body renderers ----
+
+  const htmlStepHt = () => `
+    <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the half-time score. Leave blank if you didn't track HT.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem">
+        <span style="font-size:0.8rem;font-weight:600">Us</span>
+        <input type="number" id="rw-ht-us" value="${state.ht_us == null ? '' : state.ht_us}" min="0" step="1" placeholder="—" inputmode="numeric"
+               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:0.25rem">
+        <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
+        <input type="number" id="rw-ht-opp" value="${state.ht_opp == null ? '' : state.ht_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
+               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
+      </label>
+    </div>
+  `;
+
+  const htmlStepFt = () => `
+    <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the full-time score.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+      <label style="display:flex;flex-direction:column;gap:0.25rem">
+        <span style="font-size:0.8rem;font-weight:600">Us</span>
+        <input type="number" id="rw-ft-us" value="${state.ft_us == null ? '' : state.ft_us}" min="0" step="1" placeholder="—" inputmode="numeric"
+               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:0.25rem">
+        <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
+        <input type="number" id="rw-ft-opp" value="${state.ft_opp == null ? '' : state.ft_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
+               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
+      </label>
+    </div>
+    ${state.ht_us != null && state.ht_opp != null
+      ? `<div class="muted" style="margin-top:0.6rem;font-size:0.78rem">HT was ${state.ht_us}-${state.ht_opp}.</div>`
+      : ''}
+  `;
+
+  const _pickerHtml = (mode) => {
+    // Filter out players already selected (MOTM only — scorers can be tapped again to +1).
+    const rows = candidates.map(p => {
+      const alreadyMotm = mode === 'motm' && state.motm.some(m => m.player_id === p.id);
+      const numBadge = (p.number != null)
+        ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
+        : '<span style="display:inline-block;min-width:1.7em;margin-right:0.55em"></span>';
+      return `
+        <button type="button" class="rw-pick-row" data-rw-pick-id="${escapeHtml(p.id)}" ${alreadyMotm ? 'disabled' : ''}
+          style="display:flex;width:100%;align-items:center;padding:0.6rem 0.7rem;border:1px solid #e5e5e5;background:${alreadyMotm ? '#f5f5f5' : '#fff'};color:${alreadyMotm ? '#999' : '#111'};border-radius:6px;margin-bottom:0.3rem;cursor:${alreadyMotm ? 'default' : 'pointer'};text-align:left">
+          ${numBadge}
+          <span style="flex:1;font-size:0.95rem">${escapeHtml(p.name || '—')}</span>
+          ${alreadyMotm ? '<span style="font-size:0.75rem;color:#888">already MOTM</span>' : '<span style="font-size:1.1rem;color:#2a7">+</span>'}
+        </button>
+      `;
+    }).join('');
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <strong style="font-size:0.95rem">${mode === 'scorer' ? 'Add goalscorer' : 'Add Man of the Match'}</strong>
+        <button type="button" class="btn-secondary" id="rw-pick-cancel" style="font-size:0.8rem">← Back</button>
+      </div>
+      <p class="muted" style="margin:0 0 0.5rem;font-size:0.78rem">${useMatchday ? `Tap a player from the matchday squad (${candidates.length}).` : 'No matchday squad yet — showing full squad.'}</p>
+      <div>${rows || '<p class="muted">No players available.</p>'}</div>
+    `;
+  };
+
+  const htmlStepGoals = () => {
+    if (state.pickMode === 'scorer') return _pickerHtml('scorer');
+    const total = state.scorers.reduce((s, g) => s + (g.count || 0), 0);
+    const ftUs = state.ft_us;
+    const mismatch = (ftUs != null && total !== ftUs);
+    const rows = state.scorers.length === 0
+      ? '<p class="muted" style="font-size:0.85rem;padding:0.75rem 0;text-align:center">No goalscorers added yet.</p>'
+      : state.scorers.map((g, idx) => {
+          const p = playersById[g.player_id];
+          if (!p) return '';
+          const numBadge = (p.number != null)
+            ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
+            : '';
+          return `
+            <div class="rw-scorer-row" data-rw-idx="${idx}" style="display:flex;align-items:center;gap:0.4rem;padding:0.5rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.35rem;background:#fff">
+              ${numBadge}
+              <span style="flex:1;font-size:0.9rem">${escapeHtml(p.name || '—')}</span>
+              <button type="button" class="rw-sc-minus" aria-label="Decrease" style="width:2em;height:2em;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:1rem;cursor:pointer">−</button>
+              <strong style="min-width:1.4em;text-align:center;font-size:1rem">${g.count}</strong>
+              <button type="button" class="rw-sc-plus" aria-label="Increase" style="width:2em;height:2em;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:1rem;cursor:pointer">+</button>
+              <button type="button" class="rw-sc-del" aria-label="Remove" style="width:2em;height:2em;border:1px solid #eee;background:#fff;color:#c33;border-radius:4px;font-size:0.9rem;cursor:pointer;margin-left:0.2rem">✕</button>
+            </div>
+          `;
+        }).join('');
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
+        <strong style="font-size:0.95rem">⚽ Our goalscorers</strong>
+        <span class="muted" style="font-size:0.78rem">Total: <strong${mismatch ? ' style="color:#c33"' : ''}>${total}</strong>${ftUs != null ? ` / ${ftUs}` : ''}</span>
+      </div>
+      ${rows}
+      ${mismatch ? `<div class="muted" style="font-size:0.72rem;color:#c33;margin:0.25rem 0 0.5rem">⚠ Scorer total (${total}) doesn't match full-time goals (${ftUs}).</div>` : ''}
+      <button type="button" id="rw-add-scorer" class="primary" style="width:100%;margin-top:0.5rem">+ Add goalscorer</button>
+    `;
+  };
+
+  const htmlStepMotm = () => {
+    if (state.pickMode === 'motm') return _pickerHtml('motm');
+    const rows = state.motm.length === 0
+      ? '<p class="muted" style="font-size:0.85rem;padding:0.75rem 0;text-align:center">No Man of the Match yet.</p>'
+      : state.motm.map((m, idx) => {
+          const p = playersById[m.player_id];
+          if (!p) return '';
+          const numBadge = (p.number != null)
+            ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
+            : '';
+          return `
+            <div class="rw-motm-row" data-rw-idx="${idx}" style="padding:0.55rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.35rem;background:#fff">
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <span style="color:#b88800;font-size:1.1rem">★</span>
+                ${numBadge}
+                <span style="flex:1;font-size:0.9rem;font-weight:600">${escapeHtml(p.name || '—')}</span>
+                <button type="button" class="rw-motm-del" aria-label="Remove" style="width:2em;height:2em;border:1px solid #eee;background:#fff;color:#c33;border-radius:4px;font-size:0.9rem;cursor:pointer">✕</button>
+              </div>
+              <input type="text" class="rw-motm-reason" value="${escapeHtml(m.reason || '')}" placeholder="Why? (optional)" maxlength="200"
+                style="width:100%;margin-top:0.35rem;padding:0.4rem 0.5rem;font-size:0.85rem;border:1px solid #ddd;border-radius:4px" />
+            </div>
+          `;
+        }).join('');
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
+        <strong style="font-size:0.95rem">🏆 Man of the Match</strong>
+        <span class="muted" style="font-size:0.78rem">${state.motm.length} selected</span>
+      </div>
+      <p class="muted" style="margin:0 0 0.35rem;font-size:0.78rem">Pick one or more. Reason is optional.</p>
+      ${rows}
+      <button type="button" id="rw-add-motm" class="primary" style="width:100%;margin-top:0.5rem">+ Add Man of the Match</button>
+    `;
+  };
+
+  // ---- Main render + wire ----
+
+  const render = () => {
+    const titleEl = overlay.querySelector('#rw-title');
+    const body    = overlay.querySelector('#rw-body');
+    const footer  = overlay.querySelector('#rw-footer');
+
+    // Title + step chips
+    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match'];
+    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 4: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
+    overlay.querySelectorAll('[data-rw-chip]').forEach(c => {
+      const n = parseInt(c.getAttribute('data-rw-chip'), 10);
+      c.style.background = n <= state.step ? '#1e3a8a' : '#e5e5e5';
+    });
+
+    // Body
+    if (state.step === 1) body.innerHTML = htmlStepHt();
+    else if (state.step === 2) body.innerHTML = htmlStepFt();
+    else if (state.step === 3) body.innerHTML = htmlStepGoals();
+    else if (state.step === 4) body.innerHTML = htmlStepMotm();
+
+    // Footer — hide Back/Next while a picker is open (the picker has its own Back).
+    if (state.pickMode) {
+      footer.innerHTML = '';
+    } else {
+      const backBtn = state.step > 1
+        ? '<button type="button" class="btn-secondary" id="rw-back">← Back</button>'
+        : '<span></span>';
+      const rightBtn = state.step < 4
+        ? '<button type="button" class="primary" id="rw-next">Next →</button>'
+        : '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
+      footer.innerHTML = `
+        <div>${backBtn}</div>
+        <div style="display:flex;gap:0.5rem">
+          <button type="button" class="btn-secondary" id="rw-cancel">Cancel</button>
+          ${rightBtn}
+        </div>
+      `;
+    }
+
+    wire();
+  };
+
+  const wire = () => {
+    // Step 1 inputs
+    const htUs  = overlay.querySelector('#rw-ht-us');
+    const htOpp = overlay.querySelector('#rw-ht-opp');
+    if (htUs)  htUs.oninput  = e => { state.ht_us  = intOrNull(e.target.value); };
+    if (htOpp) htOpp.oninput = e => { state.ht_opp = intOrNull(e.target.value); };
+
+    // Step 2 inputs
+    const ftUs  = overlay.querySelector('#rw-ft-us');
+    const ftOpp = overlay.querySelector('#rw-ft-opp');
+    if (ftUs)  ftUs.oninput  = e => { state.ft_us  = intOrNull(e.target.value); };
+    if (ftOpp) ftOpp.oninput = e => { state.ft_opp = intOrNull(e.target.value); };
+
+    // Step 3 — goalscorer list controls
+    overlay.querySelectorAll('.rw-scorer-row').forEach(row => {
+      const idx = parseInt(row.dataset.rwIdx, 10);
+      const minus = row.querySelector('.rw-sc-minus');
+      const plus  = row.querySelector('.rw-sc-plus');
+      const del   = row.querySelector('.rw-sc-del');
+      if (plus)  plus.onclick  = () => { state.scorers[idx].count++; render(); };
+      if (minus) minus.onclick = () => {
+        state.scorers[idx].count = Math.max(0, state.scorers[idx].count - 1);
+        if (state.scorers[idx].count === 0) state.scorers.splice(idx, 1);
+        render();
+      };
+      if (del)   del.onclick   = () => { state.scorers.splice(idx, 1); render(); };
+    });
+    const addSc = overlay.querySelector('#rw-add-scorer');
+    if (addSc) addSc.onclick = () => { state.pickMode = 'scorer'; render(); };
+
+    // Step 4 — MOTM list controls
+    overlay.querySelectorAll('.rw-motm-row').forEach(row => {
+      const idx = parseInt(row.dataset.rwIdx, 10);
+      const del = row.querySelector('.rw-motm-del');
+      const rea = row.querySelector('.rw-motm-reason');
+      if (del) del.onclick = () => { state.motm.splice(idx, 1); render(); };
+      if (rea) rea.oninput = e => { state.motm[idx].reason = e.target.value; };
+    });
+    const addMotm = overlay.querySelector('#rw-add-motm');
+    if (addMotm) addMotm.onclick = () => { state.pickMode = 'motm'; render(); };
+
+    // Picker rows
+    overlay.querySelectorAll('.rw-pick-row').forEach(btn => {
+      if (btn.disabled) return;
+      btn.onclick = () => {
+        const pid = btn.dataset.rwPickId;
+        if (state.pickMode === 'scorer') {
+          const existing = state.scorers.find(g => g.player_id === pid);
+          if (existing) existing.count++;
+          else state.scorers.push({ player_id: pid, count: 1 });
+        } else if (state.pickMode === 'motm') {
+          if (!state.motm.some(m => m.player_id === pid)) {
+            state.motm.push({ player_id: pid, reason: '' });
+          }
+        }
+        state.pickMode = null;
+        render();
+      };
+    });
+    const pickCancel = overlay.querySelector('#rw-pick-cancel');
+    if (pickCancel) pickCancel.onclick = () => { state.pickMode = null; render(); };
+
+    // Footer
+    const backBtn = overlay.querySelector('#rw-back');
+    const nextBtn = overlay.querySelector('#rw-next');
+    const saveBtn = overlay.querySelector('#rw-save');
+    const cancelBtn = overlay.querySelector('#rw-cancel');
+    if (backBtn) backBtn.onclick = () => { state.step = Math.max(1, state.step - 1); render(); };
+    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(4, state.step + 1); render(); };
+    if (cancelBtn) cancelBtn.onclick = close;
+    if (saveBtn) saveBtn.onclick = () => {
+      // Commit state → editor.current. Autosave hash covers these fields so this
+      // will persist on the 800ms schedule. We also trigger immediately.
+      editor.current.our_score_ht = state.ht_us;
+      editor.current.opp_score_ht = state.ht_opp;
+      editor.current.our_score_ft = state.ft_us;
+      editor.current.opp_score_ft = state.ft_opp;
+      editor.current.goalscorers = state.scorers.filter(g => g.player_id && g.count > 0)
+        .map(g => ({ player_id: g.player_id, count: g.count }));
+      editor.current.motm = state.motm.filter(m => m.player_id)
+        .map(m => ({ player_id: m.player_id, reason: (m.reason || '').trim() }));
+      close();
+      try { if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished(); } catch (_) {}
+      renderLineupsTab();
+    };
+  };
+
+  render();
+  // Autofocus first input for keyboard users
+  setTimeout(() => {
+    const first = overlay.querySelector('#rw-ht-us, #rw-ft-us');
+    if (first && first.focus) first.focus();
+  }, 20);
+}
+
 function openMatchDetailsModal() {
   const { current, team, canEdit } = editor;
   const overlay = document.createElement('div');
@@ -3711,20 +4137,16 @@ function renderLineupsTab() {
     `;
   };
 
-  const _newMatchCard = canEdit ? `
-    <button type="button" class="me-match-card me-match-new" id="me-new-match-card">
-      <div class="me-match-new-ico" aria-hidden="true">+</div>
-      <div class="me-match-new-label">New match</div>
-    </button>
-  ` : '';
+  // Dashed "+ New match" card removed 2026-04-17 — the global + (sidebar / phone header)
+  // is the single entry point for creating a match. Top-right "+ New" in the editor
+  // header also now opens the wizard.
 
   const matchesPanelHtml = `
     <div class="me-matches">
       <div class="me-matches-group">
         <div class="me-matches-heading">Upcoming</div>
         <div class="me-matches-grid">
-          ${_newMatchCard}
-          ${_upcoming.length ? _upcoming.map(_matchCardHtml).join('') : (canEdit ? '' : `<p class="muted" style="padding:0.25rem">No upcoming matches.</p>`)}
+          ${_upcoming.length ? _upcoming.map(_matchCardHtml).join('') : `<p class="muted" style="padding:0.25rem">No upcoming matches — tap the orange <strong>+</strong> to add one.</p>`}
         </div>
       </div>
       ${_past.length ? `
@@ -3787,6 +4209,20 @@ function renderLineupsTab() {
     `
     : '';
 
+  // Prominent "Enter result" button — visible only once kickoff has passed.
+  // Primary entry point for the 4-step result wizard. Label flips to "Edit result"
+  // once a result has been recorded so the coach knows where to return for tweaks.
+  const showEnterResult = canEdit && current?.id && matchHasBeenPlayed(current);
+  const enterResultBtnHtml = showEnterResult
+    ? `
+      <button type="button" class="me-enter-result-btn" id="me-enter-result"
+        style="width:100%;margin:0.4rem 0;padding:0.75rem 1rem;background:${matchHasResult(current) ? '#2a7' : '#b88800'};color:#fff;border:none;border-radius:6px;font-weight:700;font-size:0.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:0.5rem;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+        <span aria-hidden="true">⚽</span>
+        <span>${matchHasResult(current) ? 'Edit result' : 'Enter result'}</span>
+      </button>
+    `
+    : '';
+
   // Info panel: just the match-summary card (Arrange / Share buttons + save-msg).
   const infoPanelHtml = `
     <div class="me-info-block">
@@ -3841,6 +4277,9 @@ function renderLineupsTab() {
 
           <!-- Phone-only status row (hidden on desktop where the header shows status) -->
           ${phoneStatusRowHtml}
+
+          <!-- Enter/edit result — only once KO has passed -->
+          ${enterResultBtnHtml}
 
           ${subTabsHtml}
           <div class="me-panel card">
@@ -5399,11 +5838,14 @@ function wireLineupEvents() {
   if (shareBtn) shareBtn.onclick = () => openShareForCurrent(shareBtn);
   if (shareFab) shareFab.onclick = () => openShareForCurrent(shareFab);
   if (newBtnTop) newBtnTop.onclick = () => {
-    // Mirrors the "+ New lineup" card button — starts a fresh blank lineup in the editor.
+    // Fixed 2026-04-17 — previously this started a bare blank lineup state which is
+    // no longer the right behavior now that match creation is wizard-driven. Matches
+    // the sidebar/drawer global + and opens the guided wizard.
     if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
-    editor.current = newLineupState();
-    _lastSavedHash = _lineupContentHash(editor.current);
-    renderLineupsTab();
+    const uid = editor.currentUserId;
+    const teamId = editor.team?.id;
+    if (!uid || !teamId) return;
+    openMatchWizard({ id: uid }, teamId);
   };
 
   // Status pill → open status-change modal. Both the desktop header pill and the
@@ -5411,6 +5853,11 @@ function wireLineupEvents() {
   document.querySelectorAll('.js-open-status').forEach(btn => {
     btn.onclick = () => openStatusModal();
   });
+
+  // Enter/edit result → opens the 4-step result wizard. Button is only rendered
+  // when the match has kicked off (matchHasBeenPlayed).
+  const enterResultBtn = tabEl.querySelector('#me-enter-result');
+  if (enterResultBtn) enterResultBtn.onclick = () => openResultWizard();
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
@@ -5544,15 +5991,9 @@ function wireLineupEvents() {
     };
   });
 
-  // "+ New match" card in the Matches sub-tab → open the guided wizard.
-  const newMatchCard = tabEl.querySelector('#me-new-match-card');
-  if (newMatchCard) newMatchCard.onclick = () => {
-    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
-    const uid = editor.currentUserId;
-    const teamId = editor.team?.id;
-    if (!uid || !teamId) return;
-    openMatchWizard({ id: uid }, teamId);
-  };
+  // (The dashed "+ New match" card used to live here — removed 2026-04-17.
+  //  Top-right "+ New" in the editor header + the global + button are now the
+  //  only entry points, both wired to openMatchWizard.)
 
   // Delete saved lineup
   tabEl.querySelectorAll('[data-del-lineup]').forEach(btn => {

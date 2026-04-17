@@ -1,3 +1,77 @@
+# Interpro Coach / Manager Assistant — Handoff (2026-04-17)
+
+## 🔖 Where we left off on 2026-04-17 (session 5 — read this first)
+
+Matches sub-tab / match-editor UX tightened up, and the post-match result entry was pulled out into a dedicated wizard.
+
+### Shipped this session (session 5)
+
+1. **Removed the dashed "+ New match" card** from the Matches sub-tab (was the last remaining card in the Upcoming grid, redundant with the global +). Empty-upcoming fallback now reads "No upcoming matches — tap the orange + to add one." See `app.js` around where `_newMatchCard` used to live (search for the removal comment dated 2026-04-17) and the corresponding handler cleanup in `wireLineupEvents`.
+2. **Fixed the top-right "+ New" button** in `.me-header`. Previously it just blanked `editor.current` via `newLineupState()` (a relic from before the wizard existed). Now it mirrors the global + and calls `openMatchWizard({ id: uid }, teamId)`. `hasUnsaved()` guard retained.
+3. **Auto-load of the closest match** when opening Lineups with no pending lineup. New helper `_findDefaultLineupId(lineups)` (placed just above `matchHasBeenPlayed`) picks the match with the smallest |distance-from-now|, with a hard filter: past matches are only eligible if kickoff was within the last 24 hours (so the coach stays parked on a just-played match). KO time falls back to 12:00 if missing. After 24h, rolls forward to the next upcoming automatically. The `else` branch in the Lineups section of `renderTeamDashboard` then hydrates `editor.current` from the chosen lineup and lands on the Squad sub-tab (same shape as the wizard-load branch). Falls back to the Matches card list when nothing is eligible.
+4. **New "Enter / Edit result" button** above the sub-tab strip (`.me-enter-result-btn` / `#me-enter-result`). Rendered only when `canEdit && current?.id && matchHasBeenPlayed(current)`. Label flips to "Edit result" once `matchHasResult(current)` is true, and the button colour goes green (`#2a7`) vs amber (`#b88800`) to telegraph state. Wired in `wireLineupEvents` near the status-pill wiring.
+5. **4-step result wizard** (`openResultWizard()` — placed just above `openMatchDetailsModal`):
+   - Step chips at top (1→4) fill with brand blue as the coach advances.
+   - **Step 1** Half-time score — big Us / Opp number inputs.
+   - **Step 2** Full-time score — same layout, with a "HT was X-Y" hint if HT was entered.
+   - **Step 3** Goalscorers — list of added entries with +/− count and ✕ remove; "+ Add goalscorer" toggles an in-panel picker over the matchday squad (slots ∪ subs, falling back to full squad if empty). Tapping a player appends them with count=1 or increments if already added. Live FT-tally mismatch warning underneath.
+   - **Step 4** Man of the Match — list of added MOTMs (★ badge, optional reason input per row), "+ Add Man of the Match" opens the same picker style but disables already-selected players.
+   - Wizard uses **local state**; Save commits `our_score_ht/opp_score_ht/our_score_ft/opp_score_ft/goalscorers/motm` to `editor.current` and triggers `scheduleAutosaveIfPublished()` so persistence is handled by the existing hash-based autosave. Cancel / ✕ / outside-click all bail without writing.
+   - The old inline Result section inside `matchDetailsFormHtml` / `matchResultSectionHtml` is **still there and still works** — it just isn't the primary path anymore. Safe to keep as a fallback; it also keeps the ✎ Edit match modal feature-complete.
+
+### SQL to run in Supabase before deploy
+None. Pure client-side. All fields already exist (`our_score_ht/opp_score_ht/our_score_ft/opp_score_ft` + `data.goalscorers` + `data.motm`).
+
+### Files touched (session 5)
+- `web/app.js` — dashed-card removal + handler cleanup, `me-btn-new` rewire, `_findDefaultLineupId` helper + auto-load `else` branch rewrite, `openResultWizard` function, `enterResultBtnHtml` injection, `#me-enter-result` wiring
+- `web/HANDOFF.md` — this entry + Slice 6 roadmap update (parent season page brief moved below)
+
+### Sanity-check script (session 5)
+1. **Dashed card gone:** open Lineups → Matches sub-tab → Upcoming section should have no dashed "+ New match" card. Only real matches show. If empty, you see the muted "No upcoming matches" line.
+2. **Top-right + New:** desktop ≥900px, inside a match → tap **+ New** in the header (next to Share) → the Match creation wizard opens. Previously this just blanked the editor.
+3. **Auto-load closest:** navigate away (e.g. Squad tab) and back to Matches → you should land *inside* the closest upcoming match, not on the card list. Change a match's game_date to yesterday with KO < 24h ago → on next tab-revisit you should still land on it. Move the game_date to 2 days ago → next tab-revisit skips it and picks the next upcoming.
+4. **Enter result button:** for a match with KO still in the future → no button visible. For a match with KO passed → amber "⚽ Enter result" button sits above the Matches/Squad/Subs/Formation/Info strip. Tap → wizard opens. After saving a result, reload → button is green "⚽ Edit result".
+5. **Wizard flow:** enter HT 1-0 → Next → FT 3-2 → Next → **+ Add goalscorer** → picker lists matchday squad → tap Smith → Smith appears with count 1 → **+ Add goalscorer** → tap Smith again → count becomes 2 → **+ Add goalscorer** → tap Jones → Jones with count 1. Total shows 3, FT says 3, no warning. If mismatch, red warning appears. → Next → **+ Add Man of the Match** → tap Smith → ★ row with optional reason input → tap Save → modal closes, Info card and match-card chip update, pitch ★/⚽ overlays update after render.
+6. **Cancel path:** open wizard, change things, Cancel or ✕ → nothing persists.
+
+### Start-here on the new machine (session 5)
+Push `web/app.js` + `web/HANDOFF.md`. No migration.
+
+**Next up:** Admin panel is still the biggest remaining Slice 5 piece. Visual/design pass is queued. Slice 6 parent season page (brief captured below) is the next big-idea piece once Slice 5 is finished.
+
+---
+
+## 🔖 New TODO requested 2026-04-17 — Parent season page (gated by player access code)
+
+Chris wants a **parent-facing season page** that a parent opens with their child's **access code** (the existing `players.access_code`, or the shared `players.family_code` for siblings) and sees that player's season at a glance — not a single lineup.
+
+**What it should show, per player unlocked:**
+- List of all played matches (date, opponent, home/away, HT & FT score, W/D/L badge).
+- Which of those matches the player featured in (slot or sub).
+- Per-match: did this player score? how many? were they MOTM? (reason if given).
+- Season totals for this player: appearances, goals, MOTM count — same numbers the Slice 6 season tally was going to surface, but scoped to the family.
+- Upcoming matches (availability + published) where the player is in the squad — with kickoff / arrival / venue summary so parents can see it in one place instead of hunting through individual share links.
+
+**Auth model (reuse what exists):**
+- Gate on `players.access_code` / `players.family_code` exactly like the availability flow does. Unlock persists in `localStorage` per-team.
+- Anon RPC pattern: new `validate_player_code_for_season(team, code)` returning matching `player_id`s, plus a read RPC that returns the filtered history for those IDs. Keep direct anon SELECTs off the lineups/players tables beyond what's already exposed — codes must not leak in the payload.
+- URL: probably `#/season/{team_id}` with the code-entry box, mirroring the availability unlock. (Or `#/player/{family_code}` — decide when we start.)
+
+**Data is already there:**
+- `lineups.our_score_ht/opp_score_ht/our_score_ft/opp_score_ft` for scores
+- `lineups.data.goalscorers = [{player_id, count}]`
+- `lineups.data.motm = [{player_id, reason}]`
+- Slots + subs already store player assignments, so "appearances" = count of lineups where this player is in `slots` ∪ `subs`.
+- Everything above is per-lineup; aggregation is pure SQL / client-side reduce.
+
+**Why this is worth doing:**
+- It's the real shape of the Slice 6 "team-wide public page" idea combined with the "per-player season tally" idea — a single parent-facing URL, gated safely, that becomes the thing parents actually bookmark.
+- Zero new capture work (results, MOTM, goalscorers all landed in the 2026-04-16 session 3 work) — this is pure read-side.
+
+**Where it sits in the plan:** slots naturally at the top of **Slice 6**. Do *not* squeeze this into Slice 5 ahead of the admin panel / email / audit UI items — those are the blockers for Slice 5 being "done". Add to Slice 6 roadmap below.
+
+---
+
 # Interpro Coach / Manager Assistant — Handoff (2026-04-16, session 4)
 
 ## 🔖 Where we left off on 2026-04-16 (session 4 — read this first)
@@ -240,10 +314,9 @@ Optional / nice-to-have observed during photo work:
 ## Future slices (rough roadmap, not locked in)
 
 **Slice 6 — Season & history**
-- Team-wide public page so parents bookmark one URL for the whole season.
+- **Parent season page gated by player access code (requested 2026-04-17).** Single bookmarkable URL per team. Parent enters their child's `access_code` (or `family_code` for siblings) — page then shows that player's season: played matches with scores / W-D-L, whether the player featured, goals + MOTM, season totals, upcoming matches they're squadded for. Reuses the existing access-code unlock + localStorage pattern from availability. All source data already captured (scores, `goalscorers`, `motm`, slots/subs) — this is read-side only. Likely the anchor feature of Slice 6; see top of this handoff for fuller brief.
 - League table / results tracker (W-D-L, GF-GA).
-- Player stats over time (appearances, minutes, goals, assists).
-- **Per-player season tally of goals and Man of the Match awards.** Data is already captured per-match (`goalscorers` and `motm` JSONB on each lineup); this is the aggregation/UI on top — leaderboard view, per-player profile totals, and surfacing on the parent-facing pages. Parked deliberately while the per-match capture beds in.
+- Player stats over time (appearances, minutes, goals, assists) — feeds the parent season page.
 - Season export (PDF or CSV).
 
 **Slice 7 — Match day live**
