@@ -492,8 +492,8 @@ function wireGlobalPlusSlot(slot, user, teamId) {
       <button type="button" class="gp-item" data-gp="play">
         <span class="gp-ico">📋</span>
         <span class="gp-label">
-          <strong>New tactic</strong>
-          <em>Open Tactics tab</em>
+          <strong>New play</strong>
+          <em>Open Plays tab</em>
         </span>
       </button>
       <button type="button" class="gp-item" data-gp="formation">
@@ -629,7 +629,7 @@ function renderNavDrawer(user, teamId, team, role, canEdit) {
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Tactics',    icon: '📋' },
+    { id: 'plays',      label: 'Plays',      icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
@@ -744,7 +744,7 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit) {
   const tabs = [
     { id: 'lineups',    label: 'Matches',    icon: '🌐' },
     { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Tactics',    icon: '📋' },
+    { id: 'plays',      label: 'Plays',      icon: '📋' },
     { id: 'formations', label: 'Formations', icon: '▦' },
     { id: 'help',       label: 'Help / FAQ', icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
@@ -1604,7 +1604,7 @@ async function renderTeamDashboard(user, teamId) {
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches</button>
-      <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Tactics</button>
+      <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Plays</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
       <button class="h-tab ${activeTab === 'help' ? 'active' : ''}" data-tab="help">Help</button>
     `;
@@ -1701,55 +1701,10 @@ async function renderTeamDashboard(user, teamId) {
       // Wizard/+ menu provided a lineup to land on — skip the Matches list and go straight to Squad.
       _lineupPhoneTab = 'squad';
     } else {
-      // No pending lineup — pick the "nearest" eligible match so the coach lands
-      // straight inside it. Eligibility (per 2026-04-17 spec):
-      //   • Any future match is eligible.
-      //   • A past match is eligible only if ≤24h has elapsed since its kickoff
-      //     time (so the coach stays parked on the match they just played and
-      //     can enter the result). After 24h, we roll forward to the next upcoming.
-      // Of the eligible set, pick the one with the smallest |dist-from-now|.
-      const chosenId = _findDefaultLineupId(lineups);
-      const chosen = chosenId ? lineups.find(x => x.id === chosenId) : null;
-      if (chosen) {
-        current = {
-          id: chosen.id,
-          name: chosen.name || '',
-          opponent: chosen.opponent || '',
-          game_date: chosen.game_date || '',
-          match_type: chosen.match_type || 'league',
-          home_away: chosen.home_away || 'home',
-          kickoff_time: chosen.kickoff_time || '',
-          arrival_time: chosen.arrival_time || '',
-          notes: chosen.notes || '',
-          formation: chosen.data?.formation || '4-3-3',
-          slots: { ...(chosen.data?.slots || {}) },
-          subs: [...(chosen.data?.subs || [])],
-          lbl: Array.isArray(chosen.data?.lbl) ? [...chosen.data.lbl] : undefined,
-          pos: Array.isArray(chosen.data?.pos) ? chosen.data.pos.map(p => Array.isArray(p) ? [...p] : p) : undefined,
-          arrows: (chosen.data?.arrows || []).map(a => ({ ...a })),
-          zoneLines: [...(chosen.data?.zoneLines || [null, null])],
-          ballVisible: !!chosen.data?.ballVisible,
-          ballPos: { ...(chosen.data?.ballPos || { x: 50, y: 50 }) },
-          published: !!chosen.published,
-          lineup_status: chosen.lineup_status || (chosen.published ? 'published' : 'draft'),
-          location_name: chosen.location_name || '',
-          location_postcode: chosen.location_postcode || '',
-          location_lat: chosen.location_lat ?? null,
-          location_lng: chosen.location_lng ?? null,
-          our_score_ht: chosen.our_score_ht ?? null,
-          opp_score_ht: chosen.opp_score_ht ?? null,
-          our_score_ft: chosen.our_score_ft ?? null,
-          opp_score_ft: chosen.opp_score_ft ?? null,
-          goalscorers: Array.isArray(chosen.data?.goalscorers) ? chosen.data.goalscorers.map(g => ({ ...g })) : [],
-          motm: Array.isArray(chosen.data?.motm) ? chosen.data.motm.map(m => ({ ...m })) : []
-        };
-        _lastSavedHash = _lineupContentHash(current);
-        _lineupPhoneTab = 'squad';
-      } else {
-        current = base;
-        // Nothing eligible (no upcoming, no past within 24h) → show the card list.
-        _lineupPhoneTab = 'matches';
-      }
+      current = base;
+      // No match pre-loaded → land on the Matches sub-tab (card list) so the
+      // coach can pick or create a match.
+      _lineupPhoneTab = 'matches';
     }
     _pendingLineupLoad = null;
     editor = {
@@ -1782,15 +1737,14 @@ async function renderTeamDashboard(user, teamId) {
   } else if (activeTab === 'help') {
     renderHelpTab(canEdit, role);
   } else if (activeTab === 'formations') {
-    editor = {
-      mode: 'formation',
-      team, canEdit, players, lineups, plays, customFormations,
-      currentUser: user,
-      currentUserId: user.id,
-      currentUserRole: role,
-      current: newFormationState()
-    };
-    renderFormationsTab();
+    // Placeholder — full Formations management UI is a later step in the redesign.
+    const host = document.getElementById('tab-content');
+    host.innerHTML = `
+      <div class="card">
+        <h2>Formations</h2>
+        <p class="muted">Formation management will live here soon. For now, you can create and edit custom formations from inside a match — open any match and go to the <strong>Formation</strong> tab.</p>
+      </div>
+    `;
   }
 }
 
@@ -1853,9 +1807,9 @@ const HELP_SECTIONS = [
     id: 'dashboard', title: 'Dashboard layout & the + button', adminOnly: false,
     body: `
       <h4>Desktop, tablet, phone</h4>
-      <p>On <strong>desktop (≥900px)</strong> tabs live in a left sidebar: Matches, Squad, Tactics, Formations, Help and (coach/admin only) Admin. Your user badge + Log out sit at the bottom. On <strong>phone</strong> the same tabs are in a ☰ drawer. On <strong>tablet</strong> they sit in a horizontal strip along the top.</p>
+      <p>On <strong>desktop (≥900px)</strong> tabs live in a left sidebar: Matches, Squad, Plays, Formations, Help and (coach/admin only) Admin. Your user badge + Log out sit at the bottom. On <strong>phone</strong> the same tabs are in a ☰ drawer. On <strong>tablet</strong> they sit in a horizontal strip along the top.</p>
       <h4>The orange <strong>+</strong> quick-create menu <em>(coach/admin only)</em></h4>
-      <p>The orange + button (sidebar on desktop, header on phone) is the primary entry point for anything new. It opens a small menu with <strong>+ New match</strong> (opens the wizard), <strong>+ New player</strong>, <strong>+ New tactic</strong> and <strong>+ New formation</strong>. You don't need to be on the matching tab first.</p>
+      <p>The orange + button (sidebar on desktop, header on phone) is the primary entry point for anything new. It opens a small menu with <strong>+ New match</strong> (opens the wizard), <strong>+ New player</strong>, <strong>+ New play</strong> and <strong>+ New formation</strong>. You don't need to be on the matching tab first.</p>
     `
   },
   {
@@ -1958,10 +1912,10 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'plays', title: 'Tactics', adminOnly: true,
+    id: 'plays', title: 'Plays', adminOnly: true,
     body: `
-      <h4>What's a tactic?</h4>
-      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns. Each one is marked In possession or Out of possession.</p>
+      <h4>What's a play?</h4>
+      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns.</p>
       <h4>Saving a play</h4>
       <p>Set up the formation/tactics on a lineup, then click <strong>Save as play</strong>. Name it.</p>
       <h4>Using a saved play</h4>
@@ -2541,33 +2495,6 @@ function renderSquadTab(team, canEdit, players) {
 }
 
 // ---------- Lineups tab ----------
-// When the Lineups tab opens with no pending lineup to load, auto-pick the match
-// the coach most likely wants to see: the closest upcoming match, OR the most
-// recent past match whose kickoff was within the last 24 hours (so the coach
-// stays parked on a just-played match long enough to enter the result).
-// Returns the lineup id or null if nothing is eligible.
-function _findDefaultLineupId(lineups) {
-  if (!Array.isArray(lineups) || lineups.length === 0) return null;
-  const now = Date.now();
-  const DAY_MS = 24 * 60 * 60 * 1000;
-  let best = null;
-  let bestAbs = Infinity;
-  for (const l of lineups) {
-    if (!l || !l.game_date) continue;
-    const hasKo = typeof l.kickoff_time === 'string' && /^\d{1,2}:\d{2}/.test(l.kickoff_time);
-    const ko = hasKo ? l.kickoff_time : '12:00';
-    const [hh, mm] = ko.split(':').map(Number);
-    const d = new Date(l.game_date + 'T00:00:00'); // local midnight of game_date
-    d.setHours(hh || 0, mm || 0, 0, 0);
-    const dist = d.getTime() - now; // >0 future, <0 past
-    const abs = Math.abs(dist);
-    // Past matches are only eligible within 24h of KO (so the "stay for 24h" rule holds).
-    if (dist < 0 && abs > DAY_MS) continue;
-    if (abs < bestAbs) { best = l; bestAbs = abs; }
-  }
-  return best ? best.id : null;
-}
-
 // Has the match's kick-off (or end of day, if no time set) already passed?
 // Used to decide whether to show the post-match Result form on the Match details modal.
 function matchHasBeenPlayed(current) {
@@ -2658,26 +2585,15 @@ function compactMatchResultCardHtml(current) {
   const htSet = current.our_score_ht != null && current.opp_score_ht != null;
   const showHtDetail = ftSet && htSet;
 
-  // Inline "Edit" pencil button — only rendered for editors. Shares the
-  // #me-enter-result id with the full-width amber button (only one or the
-  // other is on-screen at a time) so the existing wire-up just works.
-  const canEditResult = !!(editor?.canEdit) && !!current.id;
-  const editBtnHtml = canEditResult
-    ? `<button type="button" id="me-enter-result" aria-label="Edit result" title="Edit result"
-         style="box-sizing:border-box;flex:0 0 auto;padding:0.3rem 0.55rem;background:#2a7;color:#fff;border:none;border-radius:4px;font-size:0.75rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:0.3rem;line-height:1">
-         <span aria-hidden="true">✎</span><span>Edit</span>
-       </button>`
-    : '';
-
   return `
     <div class="me-result-card" style="background:#fafafa;border:1px solid #e5e5e5;border-left:4px solid ${color};border-radius:6px;padding:0.5rem 0.65rem;margin-bottom:0.4rem">
-      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-        ${badge ? `<span style="background:${color};color:#fff;font-weight:700;font-size:0.78rem;padding:0.15rem 0.5rem;border-radius:3px;letter-spacing:0.02em">${escapeHtml(badge.text)}</span>` : ''}
-        ${showHtDetail ? `<span class="muted" style="font-size:0.72rem">HT ${current.our_score_ht}-${current.opp_score_ht}</span>` : ''}
-        <span style="flex:1 1 auto"></span>
-        ${editBtnHtml}
-      </div>
-      ${scorerLine ? `<div style="font-size:0.78rem;margin-top:0.3rem;color:#333">⚽ ${scorerLine}</div>` : ''}
+      ${badge ? `
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <span style="background:${color};color:#fff;font-weight:700;font-size:0.78rem;padding:0.15rem 0.5rem;border-radius:3px;letter-spacing:0.02em">${escapeHtml(badge.text)}</span>
+          ${showHtDetail ? `<span class="muted" style="font-size:0.72rem">HT ${current.our_score_ht}-${current.opp_score_ht}</span>` : ''}
+        </div>
+      ` : ''}
+      ${scorerLine ? `<div style="font-size:0.78rem;margin-top:${badge ? '0.3rem' : '0'};color:#333">⚽ ${scorerLine}</div>` : ''}
       ${motmLine ? `<div style="font-size:0.78rem;margin-top:0.15rem;color:#333">🏆 ${motmLine}</div>` : ''}
     </div>
   `;
@@ -2773,19 +2689,7 @@ function allFormations(customFormations) {
   for (const cf of (customFormations || [])) {
     const d = cf.data || {};
     if (Array.isArray(d.pos) && Array.isArray(d.lbl) && d.pos.length === d.lbl.length) {
-      // _hasPlayers is a quick flag for UI — true if this formation was saved
-      // with pre-placed players. Count is the number of filled slots.
-      const playersMap = d.players && typeof d.players === 'object' ? d.players : null;
-      const playerCount = playersMap
-        ? Object.values(playersMap).filter(Boolean).length
-        : 0;
-      out[cf.name] = {
-        pos: d.pos.map(p => [...p]),
-        lbl: [...d.lbl],
-        _customId: cf.id,
-        _hasPlayers: playerCount > 0,
-        _playerCount: playerCount
-      };
+      out[cf.name] = { pos: d.pos.map(p => [...p]), lbl: [...d.lbl], _customId: cf.id };
     }
   }
   return out;
@@ -3374,370 +3278,6 @@ function matchResultSectionHtml(current, canEdit) {
   `;
 }
 
-// 4-step post-match result wizard (added 2026-04-17).
-// Primary entry point for entering/updating a match result once KO has passed.
-// Steps: 1) Half-time score · 2) Full-time score · 3) Goalscorers · 4) Man of the Match.
-// Goalscorers and MOTM use an add-one-at-a-time flow: a list of added entries +
-// "+ Add…" button that reveals an in-panel player picker. Local wizard state is
-// only committed to editor.current on Save (autosave then persists).
-function openResultWizard() {
-  const { current, canEdit } = editor;
-  if (!current || !current.id) {
-    alert('Save the match details first before entering a result.');
-    return;
-  }
-  if (!canEdit) return;
-
-  // Clone current state so the wizard is cancelable.
-  const state = {
-    step: 1,
-    ht_us:  current.our_score_ht,
-    ht_opp: current.opp_score_ht,
-    ft_us:  current.our_score_ft,
-    ft_opp: current.opp_score_ft,
-    scorers: (Array.isArray(current.goalscorers) ? current.goalscorers : [])
-      .map(g => ({ player_id: g.player_id, count: parseInt(g.count, 10) || 0 }))
-      .filter(g => g.player_id && g.count > 0),
-    motm: (Array.isArray(current.motm) ? current.motm : [])
-      .map(m => ({ player_id: m.player_id, reason: (m.reason || '').toString() }))
-      .filter(m => m.player_id),
-    pickMode: null,  // 'scorer' | 'motm' | null — within-step picker toggle
-  };
-
-  // Candidate players for pickers: matchday squad (slots ∪ subs) if any, else full squad.
-  const allPlayers = editor.players || [];
-  const slotIds = current.slots ? Object.values(current.slots).filter(Boolean) : [];
-  const subIds = Array.isArray(current.subs) ? current.subs.filter(Boolean) : [];
-  const matchdayIds = new Set([...slotIds, ...subIds]);
-  const useMatchday = matchdayIds.size > 0;
-  const candidates = (useMatchday ? allPlayers.filter(p => matchdayIds.has(p.id)) : allPlayers)
-    .slice()
-    .sort((a, b) => {
-      const an = a.number == null ? 99 : a.number;
-      const bn = b.number == null ? 99 : b.number;
-      if (an !== bn) return an - bn;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-  const playersById = Object.fromEntries(allPlayers.map(p => [p.id, p]));
-
-  // Modal shell
-  const overlay = document.createElement('div');
-  overlay.className = 'map-modal-overlay';
-  overlay.innerHTML = `
-    <div class="map-modal" style="max-width:500px;height:auto;max-height:92vh;display:flex;flex-direction:column">
-      <div class="map-modal-header">
-        <strong id="rw-title">Enter result</strong>
-        <button class="btn-secondary" id="rw-close" type="button" aria-label="Close">✕</button>
-      </div>
-      <div id="rw-steps" style="display:flex;gap:0.25rem;padding:0.5rem 0.9rem 0.25rem">
-        ${[1,2,3,4].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
-      </div>
-      <div class="map-modal-body" id="rw-body" style="padding:0.9rem;overflow-y:auto;flex:1"></div>
-      <div id="rw-footer" style="padding:0.6rem 0.9rem;border-top:1px solid #eee;display:flex;gap:0.5rem;justify-content:space-between;align-items:center"></div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  const close = () => overlay.remove();
-  overlay.querySelector('#rw-close').onclick = () => {
-    if (state.pickMode) { state.pickMode = null; render(); return; }
-    close();
-  };
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      if (state.pickMode) { state.pickMode = null; render(); return; }
-      close();
-    }
-  });
-
-  const oppName = escapeHtml(current.opponent || 'Opponent');
-  const intOrNull = v => {
-    const s = String(v == null ? '' : v).trim();
-    if (s === '') return null;
-    const n = parseInt(s, 10);
-    return Number.isFinite(n) && n >= 0 ? n : null;
-  };
-
-  // ---- Per-step body renderers ----
-
-  const htmlStepHt = () => `
-    <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the half-time score. Leave blank if you didn't track HT.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
-      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
-        <span style="font-size:0.8rem;font-weight:600">Us</span>
-        <input type="number" id="rw-ht-us" value="${state.ht_us == null ? '' : state.ht_us}" min="0" step="1" placeholder="—" inputmode="numeric"
-               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
-        <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
-        <input type="number" id="rw-ht-opp" value="${state.ht_opp == null ? '' : state.ht_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
-               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
-      </label>
-    </div>
-  `;
-
-  const htmlStepFt = () => `
-    <p class="muted" style="margin:0 0 0.6rem;font-size:0.82rem">Enter the full-time score.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
-      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
-        <span style="font-size:0.8rem;font-weight:600">Us</span>
-        <input type="number" id="rw-ft-us" value="${state.ft_us == null ? '' : state.ft_us}" min="0" step="1" placeholder="—" inputmode="numeric"
-               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
-      </label>
-      <label style="display:flex;flex-direction:column;gap:0.25rem;margin:0">
-        <span style="font-size:0.8rem;font-weight:600">${oppName}</span>
-        <input type="number" id="rw-ft-opp" value="${state.ft_opp == null ? '' : state.ft_opp}" min="0" step="1" placeholder="—" inputmode="numeric"
-               style="font-size:1.4rem;text-align:center;padding:0.5rem;border:1px solid #ccc;border-radius:6px" />
-      </label>
-    </div>
-    ${state.ht_us != null && state.ht_opp != null
-      ? `<div class="muted" style="margin-top:0.6rem;font-size:0.78rem">HT was ${state.ht_us}-${state.ht_opp}.</div>`
-      : ''}
-  `;
-
-  const _pickerHtml = (mode) => {
-    // Filter out players already selected (MOTM only — scorers can be tapped again to +1).
-    const rows = candidates.map(p => {
-      const alreadyMotm = mode === 'motm' && state.motm.some(m => m.player_id === p.id);
-      const numBadge = (p.number != null)
-        ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
-        : '<span style="display:inline-block;min-width:1.7em;margin-right:0.55em"></span>';
-      return `
-        <button type="button" class="rw-pick-row" data-rw-pick-id="${escapeHtml(p.id)}" ${alreadyMotm ? 'disabled' : ''}
-          style="display:flex;width:100%;align-items:center;padding:0.6rem 0.7rem;border:1px solid #e5e5e5;background:${alreadyMotm ? '#f5f5f5' : '#fff'};color:${alreadyMotm ? '#999' : '#111'};border-radius:6px;margin-bottom:0.3rem;cursor:${alreadyMotm ? 'default' : 'pointer'};text-align:left">
-          ${numBadge}
-          <span style="flex:1;font-size:0.95rem">${escapeHtml(p.name || '—')}</span>
-          ${alreadyMotm ? '<span style="font-size:0.75rem;color:#888">already MOTM</span>' : '<span style="font-size:1.1rem;color:#2a7">+</span>'}
-        </button>
-      `;
-    }).join('');
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-        <strong style="font-size:0.95rem">${mode === 'scorer' ? 'Add goalscorer' : 'Add Man of the Match'}</strong>
-        <button type="button" class="btn-secondary" id="rw-pick-cancel" style="font-size:0.8rem">← Back</button>
-      </div>
-      <p class="muted" style="margin:0 0 0.5rem;font-size:0.78rem">${useMatchday ? `Tap a player from the matchday squad (${candidates.length}).` : 'No matchday squad yet — showing full squad.'}</p>
-      <div>${rows || '<p class="muted">No players available.</p>'}</div>
-    `;
-  };
-
-  const htmlStepGoals = () => {
-    if (state.pickMode === 'scorer') return _pickerHtml('scorer');
-    const total = state.scorers.reduce((s, g) => s + (g.count || 0), 0);
-    const ftUs = state.ft_us;
-    const mismatch = (ftUs != null && total !== ftUs);
-    const rows = state.scorers.length === 0
-      ? '<p class="muted" style="font-size:0.85rem;padding:0.75rem 0;text-align:center">No goalscorers added yet.</p>'
-      : state.scorers.map((g, idx) => {
-          const p = playersById[g.player_id];
-          if (!p) return '';
-          const numBadge = (p.number != null)
-            ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
-            : '';
-          return `
-            <div class="rw-scorer-row" data-rw-idx="${idx}" style="display:flex;align-items:center;gap:0.4rem;padding:0.5rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.35rem;background:#fff">
-              ${numBadge}
-              <span style="flex:1;font-size:0.9rem">${escapeHtml(p.name || '—')}</span>
-              <button type="button" class="rw-sc-minus" aria-label="Decrease" style="width:2em;height:2em;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:1rem;cursor:pointer">−</button>
-              <strong style="min-width:1.4em;text-align:center;font-size:1rem">${g.count}</strong>
-              <button type="button" class="rw-sc-plus" aria-label="Increase" style="width:2em;height:2em;border:1px solid #ccc;background:#fff;border-radius:4px;font-size:1rem;cursor:pointer">+</button>
-              <button type="button" class="rw-sc-del" aria-label="Remove" style="width:2em;height:2em;border:1px solid #eee;background:#fff;color:#c33;border-radius:4px;font-size:0.9rem;cursor:pointer;margin-left:0.2rem">✕</button>
-            </div>
-          `;
-        }).join('');
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
-        <strong style="font-size:0.95rem">⚽ Our goalscorers</strong>
-        <span class="muted" style="font-size:0.78rem">Total: <strong${mismatch ? ' style="color:#c33"' : ''}>${total}</strong>${ftUs != null ? ` / ${ftUs}` : ''}</span>
-      </div>
-      ${rows}
-      ${mismatch ? `<div class="muted" style="font-size:0.72rem;color:#c33;margin:0.25rem 0 0.5rem">⚠ Scorer total (${total}) doesn't match full-time goals (${ftUs}).</div>` : ''}
-      <button type="button" id="rw-add-scorer" class="primary" style="width:100%;margin-top:0.5rem">+ Add goalscorer</button>
-    `;
-  };
-
-  const htmlStepMotm = () => {
-    if (state.pickMode === 'motm') return _pickerHtml('motm');
-    const rows = state.motm.length === 0
-      ? '<p class="muted" style="font-size:0.85rem;padding:0.75rem 0;text-align:center">No Man of the Match yet.</p>'
-      : state.motm.map((m, idx) => {
-          const p = playersById[m.player_id];
-          if (!p) return '';
-          const numBadge = (p.number != null)
-            ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
-            : '';
-          return `
-            <div class="rw-motm-row" data-rw-idx="${idx}" style="padding:0.55rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.35rem;background:#fff">
-              <div style="display:flex;align-items:center;gap:0.4rem">
-                <span style="color:#b88800;font-size:1.1rem">★</span>
-                ${numBadge}
-                <span style="flex:1;font-size:0.9rem;font-weight:600">${escapeHtml(p.name || '—')}</span>
-                <button type="button" class="rw-motm-del" aria-label="Remove" style="width:2em;height:2em;border:1px solid #eee;background:#fff;color:#c33;border-radius:4px;font-size:0.9rem;cursor:pointer">✕</button>
-              </div>
-              <input type="text" class="rw-motm-reason" value="${escapeHtml(m.reason || '')}" placeholder="Why? (optional)" maxlength="200"
-                style="width:100%;margin-top:0.35rem;padding:0.4rem 0.5rem;font-size:0.85rem;border:1px solid #ddd;border-radius:4px" />
-            </div>
-          `;
-        }).join('');
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
-        <strong style="font-size:0.95rem">🏆 Man of the Match</strong>
-        <span class="muted" style="font-size:0.78rem">${state.motm.length} selected</span>
-      </div>
-      <p class="muted" style="margin:0 0 0.35rem;font-size:0.78rem">Pick one or more. Reason is optional.</p>
-      ${rows}
-      <button type="button" id="rw-add-motm" class="primary" style="width:100%;margin-top:0.5rem">+ Add Man of the Match</button>
-    `;
-  };
-
-  // ---- Main render + wire ----
-
-  const render = () => {
-    const titleEl = overlay.querySelector('#rw-title');
-    const body    = overlay.querySelector('#rw-body');
-    const footer  = overlay.querySelector('#rw-footer');
-
-    // Title + step chips
-    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match'];
-    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 4: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
-    overlay.querySelectorAll('[data-rw-chip]').forEach(c => {
-      const n = parseInt(c.getAttribute('data-rw-chip'), 10);
-      c.style.background = n <= state.step ? '#1e3a8a' : '#e5e5e5';
-    });
-
-    // Body
-    if (state.step === 1) body.innerHTML = htmlStepHt();
-    else if (state.step === 2) body.innerHTML = htmlStepFt();
-    else if (state.step === 3) body.innerHTML = htmlStepGoals();
-    else if (state.step === 4) body.innerHTML = htmlStepMotm();
-
-    // Footer — hide Back/Next while a picker is open (the picker has its own Back).
-    if (state.pickMode) {
-      footer.innerHTML = '';
-    } else {
-      const backBtn = state.step > 1
-        ? '<button type="button" class="btn-secondary" id="rw-back">← Back</button>'
-        : '<span></span>';
-      const rightBtn = state.step < 4
-        ? '<button type="button" class="primary" id="rw-next">Next →</button>'
-        : '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
-      footer.innerHTML = `
-        <div>${backBtn}</div>
-        <div style="display:flex;gap:0.5rem">
-          <button type="button" class="btn-secondary" id="rw-cancel">Cancel</button>
-          ${rightBtn}
-        </div>
-      `;
-    }
-
-    wire();
-  };
-
-  const wire = () => {
-    // Step 1 inputs
-    const htUs  = overlay.querySelector('#rw-ht-us');
-    const htOpp = overlay.querySelector('#rw-ht-opp');
-    if (htUs)  htUs.oninput  = e => { state.ht_us  = intOrNull(e.target.value); };
-    if (htOpp) htOpp.oninput = e => { state.ht_opp = intOrNull(e.target.value); };
-
-    // Step 2 inputs
-    const ftUs  = overlay.querySelector('#rw-ft-us');
-    const ftOpp = overlay.querySelector('#rw-ft-opp');
-    if (ftUs)  ftUs.oninput  = e => { state.ft_us  = intOrNull(e.target.value); };
-    if (ftOpp) ftOpp.oninput = e => { state.ft_opp = intOrNull(e.target.value); };
-
-    // Step 3 — goalscorer list controls
-    overlay.querySelectorAll('.rw-scorer-row').forEach(row => {
-      const idx = parseInt(row.dataset.rwIdx, 10);
-      const minus = row.querySelector('.rw-sc-minus');
-      const plus  = row.querySelector('.rw-sc-plus');
-      const del   = row.querySelector('.rw-sc-del');
-      if (plus)  plus.onclick  = () => { state.scorers[idx].count++; render(); };
-      if (minus) minus.onclick = () => {
-        state.scorers[idx].count = Math.max(0, state.scorers[idx].count - 1);
-        if (state.scorers[idx].count === 0) state.scorers.splice(idx, 1);
-        render();
-      };
-      if (del)   del.onclick   = () => { state.scorers.splice(idx, 1); render(); };
-    });
-    const addSc = overlay.querySelector('#rw-add-scorer');
-    if (addSc) addSc.onclick = () => { state.pickMode = 'scorer'; render(); };
-
-    // Step 4 — MOTM list controls
-    overlay.querySelectorAll('.rw-motm-row').forEach(row => {
-      const idx = parseInt(row.dataset.rwIdx, 10);
-      const del = row.querySelector('.rw-motm-del');
-      const rea = row.querySelector('.rw-motm-reason');
-      if (del) del.onclick = () => { state.motm.splice(idx, 1); render(); };
-      if (rea) rea.oninput = e => { state.motm[idx].reason = e.target.value; };
-    });
-    const addMotm = overlay.querySelector('#rw-add-motm');
-    if (addMotm) addMotm.onclick = () => { state.pickMode = 'motm'; render(); };
-
-    // Picker rows
-    overlay.querySelectorAll('.rw-pick-row').forEach(btn => {
-      if (btn.disabled) return;
-      btn.onclick = () => {
-        const pid = btn.dataset.rwPickId;
-        if (state.pickMode === 'scorer') {
-          const existing = state.scorers.find(g => g.player_id === pid);
-          if (existing) existing.count++;
-          else state.scorers.push({ player_id: pid, count: 1 });
-        } else if (state.pickMode === 'motm') {
-          if (!state.motm.some(m => m.player_id === pid)) {
-            state.motm.push({ player_id: pid, reason: '' });
-          }
-        }
-        state.pickMode = null;
-        render();
-      };
-    });
-    const pickCancel = overlay.querySelector('#rw-pick-cancel');
-    if (pickCancel) pickCancel.onclick = () => { state.pickMode = null; render(); };
-
-    // Footer
-    const backBtn = overlay.querySelector('#rw-back');
-    const nextBtn = overlay.querySelector('#rw-next');
-    const saveBtn = overlay.querySelector('#rw-save');
-    const cancelBtn = overlay.querySelector('#rw-cancel');
-    if (backBtn) backBtn.onclick = () => { state.step = Math.max(1, state.step - 1); render(); };
-    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(4, state.step + 1); render(); };
-    if (cancelBtn) cancelBtn.onclick = close;
-    if (saveBtn) saveBtn.onclick = () => {
-      // Commit state → editor.current. Autosave hash covers these fields so this
-      // will persist on the 800ms schedule. We also trigger immediately.
-      editor.current.our_score_ht = state.ht_us;
-      editor.current.opp_score_ht = state.ht_opp;
-      editor.current.our_score_ft = state.ft_us;
-      editor.current.opp_score_ft = state.ft_opp;
-      editor.current.goalscorers = state.scorers.filter(g => g.player_id && g.count > 0)
-        .map(g => ({ player_id: g.player_id, count: g.count }));
-      editor.current.motm = state.motm.filter(m => m.player_id)
-        .map(m => ({ player_id: m.player_id, reason: (m.reason || '').trim() }));
-      close();
-      try { if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished(); } catch (_) {}
-      renderLineupsTab();
-      // After rerender, scroll back to the top of the panel/tab content so the
-      // sub-tab strip is visible on phone (otherwise the result card + any
-      // availability bar can push it below the fold, making it look like the
-      // tabs have disappeared).
-      try {
-        const tc = document.getElementById('tab-content');
-        if (tc && typeof tc.scrollTo === 'function') tc.scrollTo({ top: 0, behavior: 'auto' });
-        else if (tc) tc.scrollTop = 0;
-        if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo({ top: 0, behavior: 'auto' });
-      } catch (_) {}
-    };
-  };
-
-  render();
-  // Autofocus first input for keyboard users
-  setTimeout(() => {
-    const first = overlay.querySelector('#rw-ht-us, #rw-ft-us');
-    if (first && first.focus) first.focus();
-  }, 20);
-}
-
 function openMatchDetailsModal() {
   const { current, team, canEdit } = editor;
   const overlay = document.createElement('div');
@@ -4006,210 +3546,14 @@ const _LINEUP_PHONE_TABS = [
   { key: 'info',      label: 'Info',         icon: '' },
 ];
 
-// Formations top-level page sub-tab state. Only two sub-tabs: Formation (list +
-// edit/save) and Squad (palette for drag-preview).
-let _formationPhoneTab = 'formation';
-
-// Shape of editor.current when editing/previewing a formation on the top-level
-// Formations page. Intentionally slim — formations don't own match metadata.
-function newFormationState() {
-  return {
-    id: null,
-    formation: '4-3-3',
-    slots: {},
-    subs: [],            // always empty — Formations page has no subs row
-    arrows: [],
-    zoneLines: [null, null],
-    ballVisible: false,
-    ballPos: { x: 50, y: 50 }
-  };
-}
-
-// Render the Formations top-level page (2026-04-17 rebuild). Same pitch-left +
-// sub-tabs-right skeleton as the match editor, trimmed down to Formation +
-// Squad. Shares the edit-positions + save / save-as-new handlers with the
-// match editor (they've been made mode-aware via _rerenderEditor).
-function renderFormationsTab() {
-  const tabEl = document.getElementById('tab-content');
-  const { team, canEdit, players, customFormations, current } = editor;
-
-  const FORMS = allFormations(customFormations);
-  const formationBtns = Object.keys(FORMS).map(f => {
-    const info = FORMS[f];
-    const cid = info._customId;
-    // Players-stored indicator: 👥N badge when this custom formation has
-    // pre-placed players saved with it. Only shown on the Formations page
-    // (this function) — the match editor doesn't actually load stored
-    // players, so an indicator there would be misleading.
-    const playersBadge = info._hasPlayers
-      ? `<span class="f-players-badge" title="${info._playerCount} player${info._playerCount === 1 ? '' : 's'} pre-placed">👥${info._playerCount}</span>`
-      : '';
-    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}${info._hasPlayers ? ' f-btn-has-players' : ''}" data-formation="${f}">${escapeHtml(f)}${playersBadge}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
-  }).join('');
-
-  // Palette: players not already in a slot on the pitch.
-  const usedIds = new Set([...Object.values(current.slots || {})].filter(Boolean));
-  const availablePlayers = (players || []).filter(p => !usedIds.has(p.id));
-  const paletteHtml = availablePlayers.length
-    ? availablePlayers.map(p => chipHtml(p, 'palette')).join('')
-    : `<p class="muted" style="padding:0.5rem">All players on the pitch.</p>`;
-
-  // Formation panel body — formation list + edit/save controls.
-  // Save / Save-as-new are visible at ALL times (not just in edit mode) so the
-  // coach can persist player placements on a formation without needing to enter
-  // position-editing first. The ✎ Edit formation / ✓ Done pair only exists to
-  // enter/leave the drag-handle position-editing mode; saves work in either.
-  const formationPanelHtml = `
-    <div class="f-btns f-btns-col">${formationBtns}</div>
-    ${canEdit ? `
-      <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
-        ${_posEditMode
-          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done editing</button>
-             <button class="btn-full" id="pos-edit-cancel">✕ Cancel edits</button>
-             <p class="muted" style="font-size:0.72rem;margin:0.2rem 0 0.35rem">Drag handles to reposition. Double-click a label to rename.</p>`
-          : `<button class="btn-full" id="pos-edit-toggle">✎ Edit formation</button>`
-        }
-        <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
-        <button class="btn-full" id="pos-edit-save-new" style="margin-bottom:0">➕ Save as new formation…</button>
-      </div>
-    ` : ''}
-  `;
-
-  const squadPanelHtml = `
-    <p class="muted me-hint">Drag players onto the pitch to preview this formation with your squad. On save you'll be asked whether to keep the placements.</p>
-    <div class="palette" id="palette">${paletteHtml}</div>
-    ${canEdit ? `<button type="button" class="btn-full me-btn-clear-pitch" id="clear-pitch-squad">Clear pitch</button>` : ''}
-  `;
-
-  // Sub-tab strip — just two tabs here.
-  const subTabsHtml = `
-    <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Formations sections">
-      <button class="lineup-phone-tab ${_formationPhoneTab === 'formation' ? 'active' : ''}" role="tab" aria-selected="${_formationPhoneTab === 'formation' ? 'true' : 'false'}" data-ptab="formation">Formation</button>
-      <button class="lineup-phone-tab ${_formationPhoneTab === 'squad' ? 'active' : ''}"     role="tab" aria-selected="${_formationPhoneTab === 'squad' ? 'true' : 'false'}"     data-ptab="squad">Squad</button>
-    </nav>
-  `;
-
-  tabEl.innerHTML = `
-    <div class="match-editor lineup-layout formations-layout" data-phone-tab="${_formationPhoneTab}">
-      <div class="me-body">
-        <div class="me-pitch-col">
-          <div class="card pitch-card">
-            <div class="pitch" id="pitch">
-              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-              <div class="slots-layer" id="slots-layer"></div>
-            </div>
-          </div>
-        </div>
-        <div class="me-panel-col">
-          ${subTabsHtml}
-          <div class="me-panel card">
-            <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
-            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // Paint the pitch and wire up events.
-  renderPitch();
-  wireFormationsEvents();
-  // Position editing needs special wiring (drag handles, label double-click)
-  if (canEdit && _posEditMode) wirePositionEditing();
-  // Drag-and-drop uses a capture-phase listener that's wired once globally;
-  // calling wireDragAndDrop ensures it's live if this is the first editor
-  // surface the user has opened this session.
-  if (typeof wireDragAndDrop === 'function') wireDragAndDrop();
-}
-
-// Wire events for the Formations top-level page. Formation-button clicks and
-// the pos-edit-* handlers are already wired inside wireLineupEvents, but we
-// don't call that function here (it would try to wire match-specific things
-// that don't exist on this page). Instead we re-bind the slice that the
-// Formations page renders: formation buttons, delete-formation X's,
-// pos-edit-* buttons, clear-pitch button, and the sub-tab switcher.
-function wireFormationsEvents() {
-  const tabEl = document.getElementById('tab-content');
-  const { canEdit } = editor;
-
-  // Sub-tab switcher (Formation ↔ Squad)
-  const layoutEl = tabEl.querySelector('.lineup-layout');
-  tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.ptab;
-      if (!key) return;
-      _formationPhoneTab = key;
-      if (layoutEl) layoutEl.setAttribute('data-phone-tab', key);
-      tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(b => {
-        const on = b.dataset.ptab === key;
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
-    };
-  });
-
-  // Formation buttons — reuse the same data-formation logic as the match editor
-  tabEl.querySelectorAll('[data-formation]').forEach(b => {
-    b.onclick = () => {
-      if (!canEdit) return;
-      const picked = b.dataset.formation;
-      editor.current.formation = picked;
-      delete editor.current.pos;
-      delete editor.current.lbl;
-      _posEditMode = false;
-      // Pull stored player placements if this formation was saved with them
-      const custom = (editor.customFormations || []).find(c => c.name === picked);
-      editor.current.slots = custom?.data?.players ? { ...custom.data.players } : {};
-      _rerenderEditor();
-    };
-  });
-
-  // Custom-formation delete X on a formation button
-  tabEl.querySelectorAll('[data-del-formation]').forEach(btn => {
-    btn.onclick = async (ev) => {
-      ev.stopPropagation(); ev.preventDefault();
-      const id = btn.dataset.delFormation;
-      if (!confirm('Delete this custom formation?')) return;
-      const { error } = await supabase.from('formations').delete().eq('id', id);
-      if (error) { alert('Delete failed: ' + error.message); return; }
-      const cfs = editor.customFormations || [];
-      const idx = cfs.findIndex(c => c.id === id);
-      if (idx >= 0) cfs.splice(idx, 1);
-      await logAudit(editor.team.id, 'formation', id, 'delete', {});
-      if (!getFormation(editor.current.formation)) editor.current.formation = '4-3-3';
-      _rerenderEditor();
-    };
-  });
-
-  // Edit formation / Save / Save-as-new / Cancel / Done — shared extracted
-  // handlers that also drive the match editor's (now-removed) sub-tab.
-  wirePosEditingHandlers();
-
-  // Collapsibles reused elsewhere — harmless no-op if no <details> cards exist.
-  if (typeof wireCollapsibles === 'function') wireCollapsibles(tabEl);
-
-  // Clear pitch button (Squad sub-tab) — wipe slots without re-rendering whole tab
-  const clearBtn = document.getElementById('clear-pitch-squad');
-  if (clearBtn) clearBtn.onclick = () => {
-    editor.current.slots = {};
-    refreshAfterChipMove();
-  };
-}
-
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, players, lineups, plays, customFormations, current } = editor;
 
   const FORMS = allFormations(customFormations);
   const formationBtns = Object.keys(FORMS).map(f => {
-    const info = FORMS[f];
-    const cid = info._customId;
-    // 👥N badge signals the formation has pre-placed players you can load into
-    // the match with one click. Uses the same shape as the Formations page.
-    const playersBadge = info._hasPlayers
-      ? `<span class="f-players-badge" title="${info._playerCount} player${info._playerCount === 1 ? '' : 's'} pre-placed — click formation to load them">👥${info._playerCount}</span>`
-      : '';
-    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}${info._hasPlayers ? ' f-btn-has-players' : ''}" data-formation="${f}">${escapeHtml(f)}${playersBadge}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
+    const cid = FORMS[f]._customId;
+    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}" data-formation="${f}">${escapeHtml(f)}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
   }).join('');
 
   // Players used in current lineup
@@ -4299,15 +3643,15 @@ function renderLineupsTab() {
 
   // ---- Matches sub-tab: fixtures list as cards, upcoming first, past second ----
   // Build once per render. Cards get availability pills decorated after mount.
-  // Split rule (updated 2026-04-17): a match moves to Past the moment kickoff
-  // has passed — not at midnight. So a 7pm kickoff earlier today is "past" by
-  // 8pm, and the coach sees it in the Past section where they're prompted to
-  // enter the score. matchHasBeenPlayed() has the same KO-vs-now logic as the
-  // Enter-result button so the two features agree.
+  const _todayIso = (() => {
+    const d = new Date();
+    const pad2 = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  })();
   const _upcoming = [];
   const _past = [];
   lineups.forEach(l => {
-    if (matchHasBeenPlayed(l)) _past.push(l);
+    if (l.game_date && l.game_date < _todayIso) _past.push(l);
     else _upcoming.push(l);
   });
   // Upcoming: soonest first (undated go last). Past: most recent first.
@@ -4343,33 +3687,23 @@ function renderLineupsTab() {
       </div>`;
     }
 
-    // Result state drives card colour + right-hand chip (added 2026-04-17):
-    //   • played + score recorded → green outline, coloured FT/HT chip (existing)
-    //   • played + no score yet   → red outline + "⚠ Needs score" chip
-    //   • not yet played          → neutral outline, no chip
+    // Result chip — shown only when a score has been entered. Sits above the
+    // status pill on past matches so the season-at-a-glance is the score, not
+    // the publish state.
     const resBadge = matchResultBadge(l);
-    const played   = matchHasBeenPlayed(l);
-    const hasResult = matchHasResult(l);
-    const needsScore = played && !hasResult;
-    const doneScored = played && hasResult;
-    const stateClass = doneScored ? 'done' : needsScore ? 'needs-score' : '';
-
-    let rightChipHtml = '';
-    if (resBadge) {
-      rightChipHtml = `<div class="me-match-result" style="font-weight:700;font-size:0.78rem;color:#fff;background:${resBadge.color};padding:0.15rem 0.4rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em">${escapeHtml(resBadge.text)}</div>`;
-    } else if (needsScore) {
-      rightChipHtml = `<div class="me-match-needs-score" style="font-weight:700;font-size:0.72rem;color:#fff;background:#c33;padding:0.15rem 0.45rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em;white-space:nowrap">⚠ Needs score</div>`;
-    }
+    const resChipHtml = resBadge
+      ? `<div class="me-match-result" style="font-weight:700;font-size:0.78rem;color:#fff;background:${resBadge.color};padding:0.15rem 0.4rem;border-radius:3px;margin-bottom:0.2rem;text-align:center;letter-spacing:0.02em">${escapeHtml(resBadge.text)}</div>`
+      : '';
 
     return `
-      <div class="me-match-card ${current?.id === l.id ? 'active' : ''} ${stateClass}" data-me-lineup="${l.id}">
+      <div class="me-match-card ${current?.id === l.id ? 'active' : ''}" data-me-lineup="${l.id}">
         ${dateBlock}
         <div class="mc-body">
           <div class="me-match-title">${title}</div>
           <div class="me-match-meta lineup-meta">${metaParts.join(' · ')}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.2rem">
-          ${rightChipHtml}
+          ${resChipHtml}
           <div class="me-match-status me-match-status-${st}">${stLbl}</div>
         </div>
         ${canEdit ? `<button class="me-match-del" data-del-lineup="${l.id}" title="Delete">✕</button>` : ''}
@@ -4377,16 +3711,20 @@ function renderLineupsTab() {
     `;
   };
 
-  // Dashed "+ New match" card removed 2026-04-17 — the global + (sidebar / phone header)
-  // is the single entry point for creating a match. Top-right "+ New" in the editor
-  // header also now opens the wizard.
+  const _newMatchCard = canEdit ? `
+    <button type="button" class="me-match-card me-match-new" id="me-new-match-card">
+      <div class="me-match-new-ico" aria-hidden="true">+</div>
+      <div class="me-match-new-label">New match</div>
+    </button>
+  ` : '';
 
   const matchesPanelHtml = `
     <div class="me-matches">
       <div class="me-matches-group">
         <div class="me-matches-heading">Upcoming</div>
         <div class="me-matches-grid">
-          ${_upcoming.length ? _upcoming.map(_matchCardHtml).join('') : `<p class="muted" style="padding:0.25rem">No upcoming matches — tap the orange <strong>+</strong> to add one.</p>`}
+          ${_newMatchCard}
+          ${_upcoming.length ? _upcoming.map(_matchCardHtml).join('') : (canEdit ? '' : `<p class="muted" style="padding:0.25rem">No upcoming matches.</p>`)}
         </div>
       </div>
       ${_past.length ? `
@@ -4413,42 +3751,27 @@ function renderLineupsTab() {
     ${canEdit ? `<p class="muted me-hint" style="margin-top:0.5rem">Tap an empty sub slot to add a player, or tap a sub's chip to remove.</p>` : ''}
   `;
 
-  // Match editor Formation sub-tab is read-only (2026-04-17 restructure) — just
-  // a formation picker. Edit / save / save-as-new now live on the top-level
-  // Formations page. The in-match tactics card (Tactics / Ball / Zones) is
-  // still here since those live with the match, not the formation template.
   const formationPanelHtml = `
     <div class="f-btns f-btns-col">${formationBtns}</div>
     ${canEdit ? `
-      <p class="muted" style="font-size:0.72rem;margin:0.6rem 0 0">Pick a formation. To edit or save a new one, use the <strong>Formations</strong> tab.</p>
+      <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+        ${_posEditMode
+          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
+             <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+             <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
+             <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
+             <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
+          : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
+        }
+      </div>
     ` : ''}
     ${tacticsCardHtml}
   `;
 
   // Availability bar — always visible above the editor sub-tabs when a match is open.
-  // Render the tally button synchronously using the in-memory cache (editor.availability)
-  // so there's no layout shift when the async DB fetch in renderCoachAvailabilityPanel
-  // returns. The async call replaces the same-sized button with fresh numbers — no
-  // empty-div-grows-into-button flicker (was a jarring ~30px height jump before).
-  // Stale cache is handled: if _availabilityFor doesn't match the current lineup id,
-  // we treat the cache as empty so we don't briefly show last match's numbers.
-  const _availTallyBtnHtml = () => {
-    const cacheHitsThisLineup = editor && editor._availabilityFor === current?.id;
-    const byPlayer = cacheHitsThisLineup ? (editor.availability || {}) : {};
-    const plist = editor?.players || [];
-    const tally = { available: 0, maybe: 0, unavailable: 0, none: 0 };
-    plist.forEach(p => {
-      const s = byPlayer[p.id];
-      if (s === 'available' || s === 'maybe' || s === 'unavailable') tally[s]++;
-      else tally.none++;
-    });
-    return `<button type="button" class="btn-full" id="availability-panel-open" style="text-align:left;padding:0.5rem 0.6rem;font-size:0.85rem;margin-bottom:0">
-      📋 Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
-    </button>`;
-  };
   const availBarHtml = current?.id
     ? (availableOnThisMatch
-        ? `<div class="me-avail-bar" id="availability-panel">${_availTallyBtnHtml()}</div>`
+        ? `<div class="me-avail-bar" id="availability-panel"></div>`
         : `<div class="me-avail-bar"><p class="muted" style="font-size:0.85rem;margin:0">No availability responses yet — open availability from <em>Edit match</em> (Info tab).</p></div>`)
     : '';
 
@@ -4461,26 +3784,6 @@ function renderLineupsTab() {
         <span class="me-phone-status-label">Status</span>
         <button type="button" class="me-status-pill me-status-pill-${_stat} js-open-status">${statusLabel} ▾</button>
       </div>
-    `
-    : '';
-
-  // "Enter result" button — visible only once kickoff has passed.
-  // Two flavours:
-  //   • No result yet (amber) — full-width prominent call-to-action, pushing
-  //     the coach to record the score asap.
-  //   • Result already recorded (green, compact) — a small inline "Edit"
-  //     button docked to the top-right of the compact result card so the
-  //     big button doesn't keep eating vertical space after the entry is done.
-  // The compact version is rendered INSIDE compactMatchResultCardHtml below;
-  // here we only render the big amber version when there's no result yet.
-  const showEnterResultFull = canEdit && current?.id && matchHasBeenPlayed(current) && !matchHasResult(current);
-  const enterResultBtnHtml = showEnterResultFull
-    ? `
-      <button type="button" class="me-enter-result-btn" id="me-enter-result"
-        style="box-sizing:border-box;width:100%;margin:0.4rem 0;padding:0.7rem 0.9rem;background:#b88800;color:#fff;border:none;border-radius:6px;font-weight:700;font-size:0.92rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:0.45rem;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
-        <span aria-hidden="true">⚽</span>
-        <span>Enter result</span>
-      </button>
     `
     : '';
 
@@ -4538,9 +3841,6 @@ function renderLineupsTab() {
 
           <!-- Phone-only status row (hidden on desktop where the header shows status) -->
           ${phoneStatusRowHtml}
-
-          <!-- Enter/edit result — only once KO has passed -->
-          ${enterResultBtnHtml}
 
           ${subTabsHtml}
           <div class="me-panel card">
@@ -6004,9 +5304,6 @@ function pitchSvgInner() {
 
 function renderSubsBar() {
   const row = document.getElementById('subs-row');
-  // Formations top-level page (re-uses pitch rendering) has no subs row, so
-  // renderSubsBar is a safe no-op there. Other callers always have one.
-  if (!row) return;
   const { current, players } = editor;
   const pById = id => players.find(p => p.id === id);
 
@@ -6068,47 +5365,21 @@ function wireLineupEvents() {
     };
   });
 
-  // Formation buttons. Shared by match editor + Formations top-level page. The
-  // Formations page loads the formation's stored player placements (if any)
-  // instead of carrying over whatever was on the pitch.
+  // Formation buttons
   tabEl.querySelectorAll('[data-formation]').forEach(b => {
     b.onclick = () => {
       if (!canEdit) return;
-      const picked = b.dataset.formation;
-      editor.current.formation = picked;
+      editor.current.formation = b.dataset.formation;
       // Changing formation resets any session-custom positions
       delete editor.current.pos;
       delete editor.current.lbl;
       _posEditMode = false;
-      // Handle stored players on custom formations.
-      const custom = (editor.customFormations || []).find(c => c.name === picked);
-      const storedPlayers = custom?.data?.players || null;
-      const storedCount = storedPlayers ? Object.values(storedPlayers).filter(Boolean).length : 0;
-
-      if (editor?.mode === 'formation') {
-        // Formations page: always swap to the stored arrangement (or empty) —
-        // this is where the coach explicitly manages those templates.
-        editor.current.slots = storedPlayers ? { ...storedPlayers } : {};
-      } else {
-        // Match editor: if the formation has stored players, offer to apply
-        // them. Only prompt when there's something at risk of being overwritten
-        // (current pitch has players). Empty pitch → load stored silently.
-        const currentFilled = Object.values(editor.current.slots || {}).filter(Boolean).length;
-        const applyStored = storedCount > 0 && (
-          currentFilled === 0 ||
-          confirm(`"${picked}" has ${storedCount} pre-placed player${storedCount === 1 ? '' : 's'} saved with it. Load them onto the pitch?\n\nOK — replace your current players with the stored ones.\nCancel — keep your current players, just change the formation shape.`)
-        );
-        if (applyStored) {
-          editor.current.slots = { ...storedPlayers };
-        } else {
-          // Drop any slotted players beyond the new formation's slot count
-          const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
-          Object.keys(editor.current.slots).forEach(k => {
-            if (parseInt(k) >= newCount) delete editor.current.slots[k];
-          });
-        }
-      }
-      _rerenderEditor();
+      // Drop any slotted players beyond the new formation's slot count
+      const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
+      Object.keys(editor.current.slots).forEach(k => {
+        if (parseInt(k) >= newCount) delete editor.current.slots[k];
+      });
+      renderLineupsTab();
     };
   });
 
@@ -6128,14 +5399,11 @@ function wireLineupEvents() {
   if (shareBtn) shareBtn.onclick = () => openShareForCurrent(shareBtn);
   if (shareFab) shareFab.onclick = () => openShareForCurrent(shareFab);
   if (newBtnTop) newBtnTop.onclick = () => {
-    // Fixed 2026-04-17 — previously this started a bare blank lineup state which is
-    // no longer the right behavior now that match creation is wizard-driven. Matches
-    // the sidebar/drawer global + and opens the guided wizard.
+    // Mirrors the "+ New lineup" card button — starts a fresh blank lineup in the editor.
     if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
-    const uid = editor.currentUserId;
-    const teamId = editor.team?.id;
-    if (!uid || !teamId) return;
-    openMatchWizard({ id: uid }, teamId);
+    editor.current = newLineupState();
+    _lastSavedHash = _lineupContentHash(editor.current);
+    renderLineupsTab();
   };
 
   // Status pill → open status-change modal. Both the desktop header pill and the
@@ -6143,20 +5411,6 @@ function wireLineupEvents() {
   document.querySelectorAll('.js-open-status').forEach(btn => {
     btn.onclick = () => openStatusModal();
   });
-
-  // Enter/edit result → opens the 4-step result wizard. Button is only rendered
-  // when the match has kicked off (matchHasBeenPlayed).
-  const enterResultBtn = tabEl.querySelector('#me-enter-result');
-  if (enterResultBtn) enterResultBtn.onclick = () => openResultWizard();
-
-  // Availability tally button — wired synchronously so the button works from the
-  // instant it renders, even before renderCoachAvailabilityPanel's async DB fetch
-  // replaces its innerHTML. renderCoachAvailabilityPanel re-attaches its own
-  // handler after replacement, so both paths work.
-  const availOpenBtn = tabEl.querySelector('#availability-panel-open');
-  if (availOpenBtn && editor?.current?.id) {
-    availOpenBtn.onclick = () => openAvailabilityModal(editor.current.id);
-  }
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
@@ -6290,9 +5544,15 @@ function wireLineupEvents() {
     };
   });
 
-  // (The dashed "+ New match" card used to live here — removed 2026-04-17.
-  //  Top-right "+ New" in the editor header + the global + button are now the
-  //  only entry points, both wired to openMatchWizard.)
+  // "+ New match" card in the Matches sub-tab → open the guided wizard.
+  const newMatchCard = tabEl.querySelector('#me-new-match-card');
+  if (newMatchCard) newMatchCard.onclick = () => {
+    if (hasUnsaved() && !confirm('Discard current unsaved changes?')) return;
+    const uid = editor.currentUserId;
+    const teamId = editor.team?.id;
+    if (!uid || !teamId) return;
+    openMatchWizard({ id: uid }, teamId);
+  };
 
   // Delete saved lineup
   tabEl.querySelectorAll('[data-del-lineup]').forEach(btn => {
@@ -6330,43 +5590,11 @@ function wireLineupEvents() {
       await logAudit(team.id, 'formation', id, 'delete', {});
       // If current lineup used it, reset to 4-3-3
       if (!getFormation(editor.current.formation)) editor.current.formation = '4-3-3';
-      _rerenderEditor();
+      renderLineupsTab();
     };
   });
 
-  // Position-editing handlers (Edit formation / Save / Save-as-new / Cancel /
-  // Done). Extracted so the Formations top-level page can share them via
-  // wireFormationsEvents. Idempotent — safe to call on any page; all
-  // lookups null-guard.
-  wirePosEditingHandlers();
-
-  if (canEdit && _posEditMode) wirePositionEditing();
-
-  wireCollapsibles(tabEl);
-
-  if (canEdit && !_posEditMode) wireDragAndDrop();
-  if (canEdit && !_posEditMode) wireTacticsUI();
-  if (canEdit && !_posEditMode) wirePicker();
-}
-
-// Shared by wireLineupEvents (harmless — match editor Formation sub-tab no
-// longer renders these buttons) and wireFormationsEvents (Formations top-level
-// page — this is the real user of it). Uses editor.mode to branch on
-// side-effects (autosave only in 'lineup' mode; player-placements prompt only
-// in 'formation' mode). Idempotent; all DOM lookups null-guard.
-function wirePosEditingHandlers() {
-  // Optional prompt: when the coach has players on the pitch on the Formations
-  // page, ask whether to remember those placements with the saved formation.
-  // Returns the slots object to save, or null to save shape-only.
-  const _maybeIncludePlayersInSave = () => {
-    if (editor?.mode !== 'formation') return null;
-    const slots = editor.current.slots || {};
-    const filled = Object.values(slots).filter(Boolean).length;
-    if (filled === 0) return null;
-    return confirm(`Remember the ${filled} player placement${filled === 1 ? '' : 's'} currently on the pitch with this formation?\n\nOK — save players too (they'll be pre-placed next time you open this formation).\nCancel — save the shape only.`)
-      ? { ...slots } : null;
-  };
-
+  // Edit positions toggle
   const posToggle = document.getElementById('pos-edit-toggle');
   if (posToggle) posToggle.onclick = () => {
     const f = getFormation(editor.current.formation);
@@ -6374,21 +5602,22 @@ function wirePosEditingHandlers() {
     if (!Array.isArray(editor.current.pos)) editor.current.pos = f.pos.map(p => [...p]);
     if (!Array.isArray(editor.current.lbl)) editor.current.lbl = [...f.lbl];
     _posEditMode = true;
-    _rerenderEditor();
+    renderLineupsTab();
   };
 
   const posDone = document.getElementById('pos-edit-done');
   if (posDone) posDone.onclick = () => {
     _posEditMode = false;
-    _rerenderEditor();
+    renderLineupsTab();
   };
 
   const posCancel = document.getElementById('pos-edit-cancel');
   if (posCancel) posCancel.onclick = () => {
+    // Revert to formation defaults for this session
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    _rerenderEditor();
+    renderLineupsTab();
   };
 
   const posSave = document.getElementById('pos-edit-save');
@@ -6399,8 +5628,10 @@ function wirePosEditingHandlers() {
 
     let trimmed = baseName;
     if (existingCustomId) {
+      // Update existing custom formation in place (overwrite)
       if (!confirm(`Overwrite custom formation "${baseName}"?`)) return;
     } else {
+      // Built-in preset — must save as new (can't overwrite presets)
       const suggested = baseName + ' (custom)';
       const name = prompt('Preset formations can\'t be overwritten. Save as new custom formation — name:', suggested);
       if (!name) return;
@@ -6408,17 +5639,10 @@ function wirePosEditingHandlers() {
       if (!trimmed) return;
     }
 
-    // Fall back to the formation's own defaults when the coach hasn't entered
-    // Edit-formation mode (pos/lbl only exist while _posEditMode was on). This
-    // lets Save work purely for player-placement changes too.
-    const srcPos = Array.isArray(editor.current.pos) ? editor.current.pos : currentFormation.pos;
-    const srcLbl = Array.isArray(editor.current.lbl) ? editor.current.lbl : currentFormation.lbl;
     const payloadData = {
-      pos: srcPos.map(p => [...p]),
-      lbl: [...srcLbl]
+      pos: editor.current.pos.map(p => [...p]),
+      lbl: [...editor.current.lbl]
     };
-    const includePlayers = _maybeIncludePlayersInSave();
-    if (includePlayers) payloadData.players = includePlayers;
 
     if (existingCustomId) {
       const { data, error } = await supabase.from('formations')
@@ -6443,8 +5667,9 @@ function wirePosEditingHandlers() {
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    if (editor?.mode !== 'formation' && typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
-    _rerenderEditor();
+    // Persist formation-name change on the lineup itself
+    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
+    renderLineupsTab();
   };
 
   const posSaveNew = document.getElementById('pos-edit-save-new');
@@ -6455,20 +5680,14 @@ function wirePosEditingHandlers() {
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;
+    // Check for name clash with existing custom formations
     const clash = (editor.customFormations || []).find(cf => cf.name === trimmed);
     if (clash && !confirm(`A formation named "${trimmed}" already exists. Overwrite it?`)) return;
 
-    // Same pos/lbl fallback as Save formation — so Save-as-new works when the
-    // coach hasn't entered position-edit mode (e.g. just placed players).
-    const baseFormation = getFormation(baseName);
-    const srcPos = Array.isArray(editor.current.pos) ? editor.current.pos : baseFormation.pos;
-    const srcLbl = Array.isArray(editor.current.lbl) ? editor.current.lbl : baseFormation.lbl;
     const payloadData = {
-      pos: srcPos.map(p => [...p]),
-      lbl: [...srcLbl]
+      pos: editor.current.pos.map(p => [...p]),
+      lbl: [...editor.current.lbl]
     };
-    const includePlayers = _maybeIncludePlayersInSave();
-    if (includePlayers) payloadData.players = includePlayers;
 
     if (clash) {
       const { data, error } = await supabase.from('formations')
@@ -6492,9 +5711,17 @@ function wirePosEditingHandlers() {
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    if (editor?.mode !== 'formation' && typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
-    _rerenderEditor();
+    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
+    renderLineupsTab();
   };
+
+  if (canEdit && _posEditMode) wirePositionEditing();
+
+  wireCollapsibles(tabEl);
+
+  if (canEdit && !_posEditMode) wireDragAndDrop();
+  if (canEdit && !_posEditMode) wireTacticsUI();
+  if (canEdit && !_posEditMode) wirePicker();
 }
 
 function wirePositionEditing() {
@@ -6772,8 +5999,7 @@ function openPlayerPicker(kind, idx) {
   if (rm) rm.onclick = () => {
     if (kind === 'slot') delete current.slots[idx];
     else current.subs[idx] = undefined;
-    // Targeted refresh so the right-hand panel (Matches/Info/etc.) doesn't flicker.
-    refreshAfterChipMove();
+    renderLineupsTab();
     close();
   };
 }
@@ -7145,68 +6371,6 @@ function removeFromSource(payload) {
   }
 }
 
-// Re-render the currently-active editor tab. The position-editing handlers and
-// the formation-button click handler are shared between the match editor and
-// the Formations top-level page; both set editor.mode so this dispatch picks
-// the right renderer.
-function _rerenderEditor() {
-  if (editor?.mode === 'formation') {
-    renderFormationsTab();
-  } else {
-    renderLineupsTab();
-  }
-}
-
-// Lightweight re-render after a chip move (drop or player-picker remove).
-// Previously every drop called renderLineupsTab() which rebuilt the entire tab
-// HTML — including the Matches list, Info panel, availability bar, etc. On any
-// non-Squad sub-tab that caused a visible "realign then go back" flicker every
-// time a player was moved. Now we only update the bits that actually changed:
-//   • pitch slots  (renderPitch)
-//   • subs row     (renderSubsBar)
-//   • subs count label
-//   • available-players palette
-//   • availability dots + MOTM/goal overlays on the new chip positions
-//   • autosave (standard hash-based flow)
-// Touches zero DOM outside the match editor's left pitch column + right palette
-// inside Squad sub-tab, so whatever tab the coach is currently looking at stays
-// exactly where it was. (Added 2026-04-17.)
-function refreshAfterChipMove() {
-  const { current, players } = editor;
-  if (!current) return;
-
-  // Pitch slots
-  renderPitch();
-
-  // Subs row chips + label count
-  renderSubsBar();
-  const subsLabelEl = document.querySelector('.subs-label');
-  if (subsLabelEl) {
-    const filled = (current.subs || []).filter(Boolean).length;
-    subsLabelEl.textContent = `SUBSTITUTES (${filled}/${MAX_SUBS})`;
-  }
-
-  // Available-players palette — rebuild its innerHTML in place
-  const paletteEl = document.getElementById('palette');
-  if (paletteEl) {
-    const usedIds = new Set([...Object.values(current.slots || {}), ...(current.subs || [])].filter(Boolean));
-    const available = (players || []).filter(p => !usedIds.has(p.id));
-    paletteEl.innerHTML = available.length
-      ? available.map(p => chipHtml(p, 'palette')).join('')
-      : `<p class="muted" style="padding:0.5rem">All players on the pitch or subs.</p>`;
-  }
-
-  // Re-apply availability dots + MOTM/goal overlays to any newly-rendered chips
-  applyAvailabilityDecorations();
-  const slotsLayer = document.getElementById('slots-layer');
-  const subsRow = document.getElementById('subs-row');
-  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
-  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers);
-
-  // Persist
-  try { scheduleAutosaveIfPublished(); } catch (_) {}
-}
-
 function handleDropToSlot(slotIdx, payload) {
   const { current } = editor;
   const targetPid = current.slots[slotIdx];
@@ -7221,14 +6385,14 @@ function handleDropToSlot(slotIdx, payload) {
       delete current.slots[fromIdx];
     }
     current.slots[slotIdx] = payload.playerId;
-    refreshAfterChipMove();
+    renderLineupsTab();
     return;
   }
 
   // From sub or palette: if slot occupied, bump occupant back to palette
   removeFromSource(payload);
   current.slots[slotIdx] = payload.playerId;
-  refreshAfterChipMove();
+  renderLineupsTab();
 }
 
 function handleDropToSub(subIdx, payload) {
@@ -7242,7 +6406,7 @@ function handleDropToSub(subIdx, payload) {
     if (fromIdx === subIdx) return;
     current.subs[fromIdx] = targetPid;
     current.subs[subIdx] = payload.playerId;
-    refreshAfterChipMove();
+    renderLineupsTab();
     return;
   }
 
@@ -7253,12 +6417,12 @@ function handleDropToSub(subIdx, payload) {
   }
   removeFromSource(payload);
   current.subs[subIdx] = payload.playerId;
-  refreshAfterChipMove();
+  renderLineupsTab();
 }
 
 function handleDropToPalette(payload) {
   removeFromSource(payload);
-  refreshAfterChipMove();
+  renderLineupsTab();
 }
 
 function hasUnsaved() {
@@ -7962,7 +7126,7 @@ function renderPlaysTab() {
           <div class="plays-details">
             <div class="card">${detailHtml}</div>
             <p class="muted" style="font-size:0.78rem;margin-top:0.5rem">
-              Tactics are created on the <strong>Match</strong> tab — set up the pitch, then click <strong>★ Save as tactic…</strong>.
+              Plays are created on the <strong>Lineup</strong> tab — set up the pitch, then click <strong>★ Save as play…</strong>.
             </p>
           </div>
         </div>
