@@ -7999,6 +7999,17 @@ function renderPlaysTab() {
   const canDelete = canEdit && current.id && (isMine || isAdmin);
   const hasLoaded = !!current.id;
 
+  // Squad sub-tab body — palette for dragging players onto pitch, same as the
+  // match editor's Squad tab. Ephemeral on Tactics: players on the pitch get
+  // saved as part of the tactic's slots, but formations themselves are unaffected.
+  const squadPanelHtml = canEdit ? `
+    <p class="muted me-hint">Drag players onto pitch positions if you want to pin specific players. Optional.</p>
+    <div class="palette" id="palette">${paletteHtml}</div>
+    <button type="button" class="btn-full me-btn-clear-pitch" id="clear-pitch-squad">Clear pitch</button>
+  ` : `<p class="muted" style="padding:0.75rem">Sign in as a coach to place players.</p>`;
+
+  // Edit tactic sub-tab body — name / possession / description / formation /
+  // arrows-ball-zones / save buttons. Squad moved to its own sub-tab.
   const editPanelHtml = canEdit ? `
     <div class="tac-edit-body" style="display:flex;flex-direction:column;gap:0.7rem">
       <div>
@@ -8024,15 +8035,17 @@ function renderPlaysTab() {
         <textarea id="tac-desc" class="tac-input" rows="2" placeholder="Optional notes">${escapeHtml(current.description || '')}</textarea>
       </div>
       <div>
-        <label class="tac-label">Formation (read-only)</label>
-        <p class="muted" style="font-size:0.72rem;margin:0 0 0.35rem">Pick one to base this tactic on. Edit formations on the <strong>Formations</strong> tab.</p>
+        <label class="tac-label">Formation</label>
+        <p class="muted" style="font-size:0.72rem;margin:0 0 0.35rem">Pick a formation to base this tactic on. Editing the underlying formation happens on the <strong>Formations</strong> tab — but you can nudge positions here just for this tactic.</p>
         <div class="f-btns f-btns-col">${tacticFormationBtns}</div>
-      </div>
-      <div>
-        <label class="tac-label">Squad (optional)</label>
-        <p class="muted" style="font-size:0.72rem;margin:0 0 0.35rem">Drag players onto pitch positions if you want to pin specific players.</p>
-        <div class="palette" id="palette">${paletteHtml}</div>
-        <button type="button" class="btn-full me-btn-clear-pitch" id="clear-pitch-squad" style="margin-top:0.4rem">Clear pitch</button>
+        <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+          ${_posEditMode
+            ? `<button class="primary btn-full" id="pos-edit-done">✓ Done editing</button>
+               <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel edits</button>
+               <p class="muted" style="font-size:0.72rem;margin:0.2rem 0 0">Drag handles to reposition. Double-click a label to rename. Positions save with this tactic only — the underlying formation isn't changed.</p>`
+            : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit positions</button>`
+          }
+        </div>
       </div>
       ${tacticsCardHtml}
       <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.25rem">
@@ -8044,10 +8057,11 @@ function renderPlaysTab() {
     </div>
   ` : `<p class="muted" style="padding:0.75rem">Sign in as a coach to edit tactics.</p>`;
 
-  // Sub-tab strip
+  // Sub-tab strip — Tactics / Squad / Edit tactic
   const subTabsHtml = `
     <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Tactics page sections">
       <button class="lineup-phone-tab ${subTab === 'tactics' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'tactics' ? 'true' : 'false'}" data-ptab="tactics">Tactics</button>
+      <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"   role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"   data-ptab="squad">Squad</button>
       <button class="lineup-phone-tab ${subTab === 'edit' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'edit' ? 'true' : 'false'}"    data-ptab="edit">Edit tactic</button>
     </nav>
   `;
@@ -8071,6 +8085,7 @@ function renderPlaysTab() {
           ${subTabsHtml}
           <div class="me-panel card">
             <div data-phone-group="tactics" class="me-panel-body me-panel-body-matches">${tacticsPanelHtml}</div>
+            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
             <div data-phone-group="edit" class="me-panel-body">${editPanelHtml}</div>
           </div>
         </div>
@@ -8088,9 +8103,17 @@ function renderPlaysTab() {
   updateTacticsCanvasClass();
 
   wireTacticsPageEvents();
-  if (canEdit) wireDragAndDrop();
-  if (canEdit) wireTacticsUI();
-  if (canEdit) wirePicker();
+  // Shared pos-editing handlers. Only the toggle/done/cancel buttons are
+  // rendered on this page (no Save formation / Save-as-new — the tactic's
+  // pos/lbl ride along with the main Save tactic button), but the others are
+  // all null-guarded so there's no harm in calling the shared wirer.
+  wirePosEditingHandlers();
+  // Drag handles for position editing (same implementation as match editor +
+  // Formations page). Only bound when the coach is in edit mode.
+  if (canEdit && _posEditMode) wirePositionEditing();
+  if (canEdit && !_posEditMode) wireDragAndDrop();
+  if (canEdit && !_posEditMode) wireTacticsUI();
+  if (canEdit && !_posEditMode) wirePicker();
   if (typeof wireCollapsibles === 'function') wireCollapsibles(tabEl);
 }
 
