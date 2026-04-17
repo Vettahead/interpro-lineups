@@ -242,6 +242,11 @@ function resetHeader() {
 }
 
 async function render() {
+  // Clear the body class that public card mode sets. If we're still on the
+  // card route it gets re-added below; if we're navigating away this removes
+  // the header-hide CSS.
+  document.body.classList.remove('public-card-view');
+
   // Public parent view — no auth required
   const preRoute = currentRoute();
   if (preRoute.name === 'view') {
@@ -1248,6 +1253,10 @@ async function renderPlayerCardPage(teamId) {
     return;
   }
   _cardState.teamId = teamId;
+  // Hide the app's main header/sidebar/userbar on this public route so the
+  // card is the only thing on-screen — no admin chrome leaking into a page
+  // that's meant for a kid to look at.
+  document.body.classList.add('public-card-view');
   appEl.innerHTML = `<p class="loading">Loading…</p>`;
 
   // Fetch team + team's visible lineups (published/availability only, per the RLS policy).
@@ -1414,6 +1423,7 @@ function renderPlayerCardBody() {
       </div>
 
       <div class="pc-card">
+        <div class="pc-top-trim" aria-hidden="true"><span class="pc-dots">· · ·</span></div>
         <div class="pc-shine" aria-hidden="true"></div>
         <div class="pc-top">
           <div class="pc-num-col">

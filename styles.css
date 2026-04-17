@@ -1951,9 +1951,18 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .sd-subtabs { margin: 0.5rem 0 0.75rem; }
 
 /* ---------- Public player card (/#/card/{team_id}) ---------- */
-/* FIFA-style gold-gradient card with player photo, position, shirt number,
-   team formation, circular Interpro logo, and a 6-stat grid. Optimised for
-   phone-portrait viewing — that's where kids will look at it. */
+/* When the card route is active the body gets .public-card-view so we can
+   hide the regular app chrome — no admin header, sidebar or drawer leaking
+   into what kids and parents see. */
+body.public-card-view > header,
+body.public-card-view #nav-drawer,
+body.public-card-view #nav-drawer-overlay,
+body.public-card-view #desktop-sidebar {
+  display: none !important;
+}
+body.public-card-view { background: #f4f2ed; }
+body.public-card-view #app { padding-top: 0; }
+
 .player-card-wrap {
   max-width: 420px;
   margin: 0 auto;
@@ -1963,19 +1972,19 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
 }
 .pc-topline-logo {
-  width: 40px; height: 40px;
+  width: 42px; height: 42px;
   border-radius: 50%;
   background: #fff;
-  padding: 4px;
+  padding: 5px;
   object-fit: contain;
   box-shadow: 0 1px 4px rgba(0,0,0,0.12);
 }
 .pc-topline-txt { flex: 1; min-width: 0; }
-.pc-topline-team { font-weight: 700; font-size: 1rem; color: var(--text); }
-.pc-topline-sub { font-size: 0.78rem; margin-top: 0.1rem; }
+.pc-topline-team { font-weight: 700; font-size: 1rem; color: #1a1a1a; }
+.pc-topline-sub { font-size: 0.78rem; margin-top: 0.1rem; color: #666; }
 .pc-forget {
   padding: 0.35rem 0.6rem;
   font-size: 0.75rem;
@@ -2010,8 +2019,8 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .pc-sibling {
   padding: 0.35rem 0.7rem;
   background: #fff;
-  color: var(--text);
-  border: 1px solid var(--border);
+  color: #1a1a1a;
+  border: 1px solid #d9d4c3;
   border-radius: 999px;
   cursor: pointer;
   font: inherit;
@@ -2019,9 +2028,9 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   font-weight: 600;
 }
 .pc-sibling.active {
-  background: #1e3a8a;
-  color: #fff;
-  border-color: #1e3a8a;
+  background: #1a1a1a;
+  color: #f6d97e;
+  border-color: #1a1a1a;
 }
 
 /* Season selector row — arrows flanking the label */
@@ -2030,13 +2039,13 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.85rem;
 }
 .pc-arrow {
   width: 36px; height: 36px;
-  border: 1px solid var(--border);
+  border: 1px solid #d9d4c3;
   background: #fff;
-  color: var(--text);
+  color: #1a1a1a;
   border-radius: 50%;
   font: inherit;
   font-size: 1.4rem;
@@ -2047,9 +2056,9 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   justify-content: center;
 }
 .pc-arrow:hover:not(:disabled) {
-  background: #f5f7ff;
-  border-color: #1e3a8a;
-  color: #1e3a8a;
+  background: #fff7d6;
+  border-color: #b88800;
+  color: #8a5800;
 }
 .pc-arrow:disabled {
   opacity: 0.35;
@@ -2060,99 +2069,166 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   text-align: center;
   font-weight: 700;
   font-size: 0.95rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text);
+  color: #1a1a1a;
 }
 
-/* The card itself — gold metallic, FIFA-style */
+/* ----- FIFA Ultimate Team style card -----
+   Cream interior with gold metallic trim on the outside. The card fills its
+   aspect ratio (~3:4.4); a thin gold border gives it the trading-card feel.
+   Palette:
+     --pc-gold-dark   #a77a28  deep metallic edge / name bar
+     --pc-gold        #c8992e  main gold
+     --pc-gold-light  #e6c563  top highlight
+     --pc-cream       #f4ead7  card interior
+     --pc-ink         #2d250f  text on cream
+*/
 .pc-card {
   position: relative;
-  aspect-ratio: 3 / 4.5;
+  aspect-ratio: 63 / 88;  /* classic trading-card ratio */
   max-width: 380px;
   margin: 0 auto;
-  padding: 0.9rem 0.9rem 0.7rem;
+  padding: 0;
   background:
-    linear-gradient(180deg, #fcefb9 0%, #f5d88a 42%, #e8bd56 100%);
-  border: 3px solid #d8aa3a;
-  border-radius: 14px;
+    /* Subtle inner cream body */
+    linear-gradient(180deg, #fdf7e7 0%, #f4ead7 60%, #ecdfc0 100%);
+  border: 2px solid transparent;
+  border-radius: 18px;
+  background-clip: padding-box;
   box-shadow:
-    0 6px 20px rgba(0,0,0,0.15),
-    inset 0 0 0 1px rgba(255,255,255,0.5),
-    inset 0 1px 0 rgba(255,255,255,0.9);
-  color: #2a2210;
+    0 10px 30px rgba(0,0,0,0.22),
+    0 2px 6px rgba(0,0,0,0.08);
+  color: #2d250f;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   isolation: isolate;
 }
-/* Subtle diagonal shine overlay */
+/* Metallic gold outer trim — wrapped via a pseudo-element so we get a
+   gradient *border* without CSS image border-slicing headaches. */
+.pc-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 20px;
+  padding: 2px;
+  background: linear-gradient(180deg, #f2d27d 0%, #c8992e 24%, #8a5800 50%, #c8992e 78%, #f2d27d 100%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
+}
+/* Decorative gold top strip — 3 dots + horizontal hairline like FIFA cards */
+.pc-card > .pc-top-trim {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 28px;
+  background: linear-gradient(180deg, #f2d27d 0%, #d5a94a 60%, #b7871e 100%);
+  border-bottom: 1px solid #8a5800;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.pc-card > .pc-top-trim::before,
+.pc-card > .pc-top-trim::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(45,37,15,0.35);
+  margin: 0 12px;
+}
+.pc-top-trim .pc-dots {
+  display: inline-flex;
+  gap: 5px;
+  color: #2d250f;
+  font-size: 0.85rem;
+  letter-spacing: 0.15em;
+}
+
+/* Subtle diagonal shine overlay — gives the card that glossy laminated look
+   without drowning the content. Sits UNDER the border trim but over the body. */
 .pc-shine {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(115deg,
+  background: linear-gradient(112deg,
     rgba(255,255,255,0) 0%,
-    rgba(255,255,255,0) 38%,
-    rgba(255,255,255,0.55) 52%,
-    rgba(255,255,255,0) 62%,
+    rgba(255,255,255,0) 32%,
+    rgba(255,255,255,0.35) 50%,
+    rgba(255,255,255,0) 68%,
     rgba(255,255,255,0) 100%);
-  opacity: 0.6;
+  opacity: 0.5;
+  z-index: 1;
 }
 
 .pc-top {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: flex-start;
   gap: 0.6rem;
   flex: 1 1 auto;
   min-height: 0;
+  padding: 2.25rem 1rem 0.4rem 1rem;  /* top padding clears the gold trim */
 }
 .pc-num-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1rem;
+  gap: 0.15rem;
   flex: 0 0 auto;
-  width: 64px;
+  width: 72px;
+  padding-top: 0.25rem;
 }
 .pc-num {
-  font-size: 2.6rem;
+  font-size: 3rem;
   font-weight: 900;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: #2a2210;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  color: #2d250f;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.5);
 }
 .pc-pos {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 900;
-  letter-spacing: 0.06em;
-  color: #2a2210;
+  letter-spacing: 0.1em;
+  color: #2d250f;
+  margin-top: -0.15rem;
 }
 .pc-formation {
-  margin-top: 0.4rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.1rem 0.45rem;
-  border: 1px solid rgba(42,34,16,0.35);
-  border-radius: 4px;
-  letter-spacing: 0.04em;
-  background: rgba(255,255,255,0.25);
-  color: #2a2210;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid rgba(45,37,15,0.4);
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+  background: rgba(255,255,255,0.4);
+  color: #2d250f;
+  font-variant-numeric: tabular-nums;
 }
 .pc-crest {
-  margin-top: 0.45rem;
+  margin-top: 0.5rem;
   width: 46px; height: 46px;
   border-radius: 50%;
   background: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(45,37,15,0.15);
   overflow: hidden;
+  padding: 4px;
 }
 .pc-crest img {
-  width: 80%;
-  height: 80%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -2160,70 +2236,88 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   flex: 1 1 auto;
   min-height: 0;
   align-self: stretch;
-  background-color: rgba(255,255,255,0.25);
+  background-color: rgba(255,255,255,0.5);
   background-size: cover;
   background-position: center top;
-  border-radius: 8px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(42,34,16,0.15);
+  filter: saturate(0.95) contrast(1.02);
 }
+.pc-photo.has-photo { box-shadow: inset 0 -30px 40px -20px rgba(45,37,15,0.15); }
 .pc-photo-letter {
-  font-size: 3.5rem;
+  font-size: 4rem;
   font-weight: 900;
-  color: rgba(42,34,16,0.35);
+  color: rgba(45,37,15,0.25);
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
+/* Separator name bar — darker gold bar with the player's surname large */
 .pc-name {
-  margin: 0.6rem 0 0.45rem;
+  position: relative;
+  z-index: 2;
+  margin: 0 0.9rem;
   text-align: center;
-  font-size: 1.15rem;
+  font-size: 1.35rem;
   font-weight: 900;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
-  color: #2a2210;
-  border-bottom: 1px solid rgba(42,34,16,0.35);
-  padding-bottom: 0.45rem;
+  color: #2d250f;
+  padding: 0.55rem 0 0.35rem;
+  border-top: 1.5px solid #8a5800;
+  border-bottom: 1.5px solid #8a5800;
+  font-family: Georgia, 'Times New Roman', serif;
+  /* Cream-to-gold vertical highlight so the name bar echoes the top trim */
+  background:
+    linear-gradient(180deg, rgba(242,210,125,0.25) 0%, rgba(181,132,36,0.05) 100%);
 }
 
 .pc-stats-grid {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  row-gap: 0.3rem;
-  column-gap: 1rem;
-  padding: 0 0.25rem;
+  row-gap: 0.35rem;
+  column-gap: 1.5rem;
+  padding: 0.75rem 1.1rem 1rem;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 .pc-stat {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 0.55rem;
+  white-space: nowrap;
 }
 .pc-stat-val {
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   font-weight: 900;
-  color: #2a2210;
+  color: #2d250f;
   min-width: 2.5em;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 .pc-stat-lbl {
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   font-weight: 900;
-  letter-spacing: 0.08em;
-  color: #2a2210;
+  letter-spacing: 0.12em;
+  color: #2d250f;
   text-transform: uppercase;
   opacity: 0.85;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 @media (max-width: 420px) {
-  .pc-card { padding: 0.7rem; }
-  .pc-num { font-size: 2.3rem; }
-  .pc-pos { font-size: 0.85rem; }
-  .pc-crest { width: 40px; height: 40px; }
-  .pc-name { font-size: 1rem; margin: 0.5rem 0 0.35rem; padding-bottom: 0.35rem; }
-  .pc-stat-val { font-size: 1.1rem; }
-  .pc-stat-lbl { font-size: 0.78rem; }
-  .pc-num-col { width: 56px; }
+  .pc-num { font-size: 2.6rem; }
+  .pc-pos { font-size: 0.9rem; }
+  .pc-crest { width: 42px; height: 42px; }
+  .pc-name { font-size: 1.2rem; padding: 0.45rem 0 0.3rem; }
+  .pc-stats-grid { padding: 0.65rem 0.9rem 0.85rem; column-gap: 1rem; }
+  .pc-stat-val { font-size: 1.2rem; }
+  .pc-stat-lbl { font-size: 0.85rem; }
+  .pc-num-col { width: 62px; }
+  .pc-top { padding: 2rem 0.75rem 0.3rem 0.75rem; }
 }
 
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
