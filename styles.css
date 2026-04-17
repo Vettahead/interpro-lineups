@@ -1950,6 +1950,282 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .squad-details-layout[data-squad-tab="squad"]    [data-squad-group]:not([data-squad-group="squad"])    { display: none !important; }
 .sd-subtabs { margin: 0.5rem 0 0.75rem; }
 
+/* ---------- Public player card (/#/card/{team_id}) ---------- */
+/* FIFA-style gold-gradient card with player photo, position, shirt number,
+   team formation, circular Interpro logo, and a 6-stat grid. Optimised for
+   phone-portrait viewing — that's where kids will look at it. */
+.player-card-wrap {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+.pc-topline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.pc-topline-logo {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  padding: 4px;
+  object-fit: contain;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+.pc-topline-txt { flex: 1; min-width: 0; }
+.pc-topline-team { font-weight: 700; font-size: 1rem; color: var(--text); }
+.pc-topline-sub { font-size: 0.78rem; margin-top: 0.1rem; }
+.pc-forget {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.pc-locked {
+  max-width: 420px;
+  margin: 3rem auto 2rem;
+  padding: 1.5rem 1.25rem;
+}
+.pc-locked-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pc-locked-logo {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: #fff;
+  padding: 4px;
+  object-fit: contain;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+
+/* Sibling switcher chips (family codes) */
+.pc-siblings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.pc-sibling {
+  padding: 0.35rem 0.7rem;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.pc-sibling.active {
+  background: #1e3a8a;
+  color: #fff;
+  border-color: #1e3a8a;
+}
+
+/* Season selector row — arrows flanking the label */
+.pc-season-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.pc-arrow {
+  width: 36px; height: 36px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: 50%;
+  font: inherit;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-arrow:hover:not(:disabled) {
+  background: #f5f7ff;
+  border-color: #1e3a8a;
+  color: #1e3a8a;
+}
+.pc-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.pc-season-label {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+/* The card itself — gold metallic, FIFA-style */
+.pc-card {
+  position: relative;
+  aspect-ratio: 3 / 4.5;
+  max-width: 380px;
+  margin: 0 auto;
+  padding: 0.9rem 0.9rem 0.7rem;
+  background:
+    linear-gradient(180deg, #fcefb9 0%, #f5d88a 42%, #e8bd56 100%);
+  border: 3px solid #d8aa3a;
+  border-radius: 14px;
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.15),
+    inset 0 0 0 1px rgba(255,255,255,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.9);
+  color: #2a2210;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* Subtle diagonal shine overlay */
+.pc-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0) 38%,
+    rgba(255,255,255,0.55) 52%,
+    rgba(255,255,255,0) 62%,
+    rgba(255,255,255,0) 100%);
+  opacity: 0.6;
+}
+
+.pc-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pc-num-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  flex: 0 0 auto;
+  width: 64px;
+}
+.pc-num {
+  font-size: 2.6rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #2a2210;
+}
+.pc-pos {
+  font-size: 0.95rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #2a2210;
+}
+.pc-formation {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid rgba(42,34,16,0.35);
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.25);
+  color: #2a2210;
+}
+.pc-crest {
+  margin-top: 0.45rem;
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+.pc-crest img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.pc-photo {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-self: stretch;
+  background-color: rgba(255,255,255,0.25);
+  background-size: cover;
+  background-position: center top;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(42,34,16,0.15);
+}
+.pc-photo-letter {
+  font-size: 3.5rem;
+  font-weight: 900;
+  color: rgba(42,34,16,0.35);
+}
+
+.pc-name {
+  margin: 0.6rem 0 0.45rem;
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #2a2210;
+  border-bottom: 1px solid rgba(42,34,16,0.35);
+  padding-bottom: 0.45rem;
+}
+
+.pc-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  row-gap: 0.3rem;
+  column-gap: 1rem;
+  padding: 0 0.25rem;
+}
+.pc-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.pc-stat-val {
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #2a2210;
+  min-width: 2.5em;
+  text-align: right;
+}
+.pc-stat-lbl {
+  font-size: 0.85rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #2a2210;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+@media (max-width: 420px) {
+  .pc-card { padding: 0.7rem; }
+  .pc-num { font-size: 2.3rem; }
+  .pc-pos { font-size: 0.85rem; }
+  .pc-crest { width: 40px; height: 40px; }
+  .pc-name { font-size: 1rem; margin: 0.5rem 0 0.35rem; padding-bottom: 0.35rem; }
+  .pc-stat-val { font-size: 1.1rem; }
+  .pc-stat-lbl { font-size: 0.78rem; }
+  .pc-num-col { width: 56px; }
+}
+
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
 .me-avail-bar {
   background: #fff;

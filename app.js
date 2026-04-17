@@ -90,6 +90,68 @@ function ageGroupLabel(team, date = new Date()) {
 // All the options we support in dropdowns. Covers U7 through U18.
 const AGE_GROUP_OPTIONS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
+// ---------- Player stats aggregation (for the public card page) ----------
+// All stats are derived on the fly from lineups — no cached totals column, so
+// editing a match's result always reflects accurately the next time someone
+// opens a card. "Season" means the season start year (e.g. 2025 = 2025-26).
+// Matches count toward stats only once matchHasBeenPlayed(l) is true — draft
+// matches in the future don't inflate appearance counts.
+function computePlayerStats(playerId, lineups, seasonYear) {
+  const stats = { goals: 0, motm: 0, starts: 0, bench: 0, apps: 0, wins: 0, draws: 0, losses: 0 };
+  if (!playerId || !Array.isArray(lineups)) return stats;
+  for (const l of lineups) {
+    if (!l || !l.game_date) continue;
+    if (!matchHasBeenPlayed(l)) continue;
+    if (seasonYear != null) {
+      const d = new Date(l.game_date + 'T12:00:00');
+      if (computeCurrentSeasonStartYear(d) !== seasonYear) continue;
+    }
+    const d = l.data || {};
+    const slotIds = d.slots ? Object.values(d.slots).filter(Boolean) : [];
+    const subIds = Array.isArray(d.subs) ? d.subs.filter(Boolean) : [];
+    const wasStart = slotIds.includes(playerId);
+    const wasBench = subIds.includes(playerId);
+    if (wasStart) stats.starts++;
+    if (wasBench) stats.bench++;
+    if (wasStart || wasBench) {
+      stats.apps++;
+      const us = l.our_score_ft, them = l.opp_score_ft;
+      if (us != null && them != null) {
+        if (us > them) stats.wins++;
+        else if (us < them) stats.losses++;
+        else stats.draws++;
+      }
+    }
+    const g = (d.goalscorers || []).find(x => x && x.player_id === playerId);
+    if (g) stats.goals += parseInt(g.count, 10) || 0;
+    const m = (d.motm || []).find(x => x && x.player_id === playerId);
+    if (m) stats.motm++;
+  }
+  return stats;
+}
+
+// Return the set of season start years that have at least one played match
+// in the given lineups, sorted newest-first. Used by the season arrows on
+// the card.
+function availableSeasonsFromLineups(lineups) {
+  if (!Array.isArray(lineups)) return [];
+  const years = new Set();
+  for (const l of lineups) {
+    if (!l || !l.game_date) continue;
+    if (!matchHasBeenPlayed(l)) continue;
+    const d = new Date(l.game_date + 'T12:00:00');
+    years.add(computeCurrentSeasonStartYear(d));
+  }
+  return Array.from(years).sort((a, b) => b - a);
+}
+
+// "2025-26" label for a season start year.
+function seasonLabelForYear(year) {
+  if (year == null) return '';
+  const next = (year + 1) % 100;
+  return `${year}-${next.toString().padStart(2, '0')}`;
+}
+
 // ---------- Player access codes ----------
 // Personal code: <firstInitial><lastInitial><4 random digits>, e.g. JE1234
 // Family code:   5 random digits, shared by linked siblings
@@ -151,6 +213,7 @@ function currentRoute() {
   if (h.startsWith('team/')) return { name: 'team', teamId: h.slice(5) };
   if (h.startsWith('view/'))  return { name: 'view',  lineupId: h.slice(5),  mode: 'match' };
   if (h.startsWith('avail/')) return { name: 'view',  lineupId: h.slice(6),  mode: 'avail' };
+  if (h.startsWith('card/'))  return { name: 'card',  teamId:   h.slice(5) };
   return { name: 'home' };
 }
 window.addEventListener('hashchange', render);
@@ -185,6 +248,13 @@ async function render() {
     resetHeader();
     userBar.innerHTML = '';
     await renderParentView(preRoute.lineupId, { mode: preRoute.mode });
+    return;
+  }
+  // Public player card — no auth required
+  if (preRoute.name === 'card') {
+    resetHeader();
+    userBar.innerHTML = '';
+    await renderPlayerCardPage(preRoute.teamId);
     return;
   }
 
@@ -1132,6 +1202,283 @@ function openCreateTeamModal(user, onCreated) {
 
     close();
     if (onCreated) await onCreated(team);
+  };
+}
+
+// ---------- Public player card (#/card/{team_id}) ----------
+// FIFA-style season stats card unlocked via a child's access code (or a
+// family code, which may match multiple siblings). Unlocked player ids are
+// cached in localStorage so the kid/parent doesn't need to re-enter the code
+// on repeat visits. Stats are aggregated client-side from lineups the team
+// has set to 'availability' or 'published' — anon can read those under the
+// existing RLS policy, drafts stay private.
+let _cardState = {
+  teamId: null,
+  team: null,
+  players: [],          // unlocked player objects (name, number, position, photo_url)
+  lineups: [],          // all team lineups anon can read
+  selectedPlayerIdx: 0, // which sibling (for family codes)
+  seasonYear: null,     // currently-shown season start year (null = all-time)
+  seasonsAvailable: []
+};
+
+function _playerCardStorageKey(teamId) {
+  return `interpro:card_unlock:${teamId}`;
+}
+function _loadCardUnlocks(teamId) {
+  try {
+    const raw = localStorage.getItem(_playerCardStorageKey(teamId));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(id => typeof id === 'string') : [];
+  } catch (_) { return []; }
+}
+function _saveCardUnlocks(teamId, ids) {
+  try {
+    localStorage.setItem(_playerCardStorageKey(teamId), JSON.stringify(ids));
+  } catch (_) {}
+}
+function _clearCardUnlocks(teamId) {
+  try { localStorage.removeItem(_playerCardStorageKey(teamId)); } catch (_) {}
+}
+
+async function renderPlayerCardPage(teamId) {
+  if (!teamId) {
+    appEl.innerHTML = `<div class="card"><p class="error">Team id missing from URL.</p></div>`;
+    return;
+  }
+  _cardState.teamId = teamId;
+  appEl.innerHTML = `<p class="loading">Loading…</p>`;
+
+  // Fetch team + team's visible lineups (published/availability only, per the RLS policy).
+  // Run both reads in parallel; fall back to minimal columns if age_group isn't migrated yet.
+  const [teamRes, lineupRes] = await Promise.all([
+    (async () => {
+      let r = await supabase.from('teams').select('id,name,age_group,age_group_season_year,home_ground_name').eq('id', teamId).maybeSingle();
+      if (r.error && /age_group/i.test(r.error.message || '')) {
+        r = await supabase.from('teams').select('id,name,home_ground_name').eq('id', teamId).maybeSingle();
+      }
+      return r;
+    })(),
+    supabase.from('lineups').select('id,team_id,game_date,kickoff_time,opponent,home_away,lineup_status,published,our_score_ft,opp_score_ft,data').eq('team_id', teamId)
+  ]);
+
+  if (teamRes.error || !teamRes.data) {
+    appEl.innerHTML = `
+      <div class="player-card-wrap">
+        <div class="pc-locked card">
+          <h2>Card unavailable</h2>
+          <p class="muted">This team either doesn't exist or has no published matches yet.</p>
+        </div>
+      </div>`;
+    return;
+  }
+  _cardState.team = teamRes.data;
+  _cardState.lineups = lineupRes.data || [];
+  _cardState.seasonsAvailable = availableSeasonsFromLineups(_cardState.lineups);
+  // Default to the most recent season that has any played matches, else the
+  // current season. Null fallback is fine — the stats aggregator treats null
+  // as "all-time".
+  _cardState.seasonYear = _cardState.seasonsAvailable[0] ?? computeCurrentSeasonStartYear();
+
+  // Restore any cached unlocks from a previous visit on this device.
+  const cachedIds = _loadCardUnlocks(teamId);
+  if (cachedIds.length) {
+    // Re-hydrate the player rows so we can still show the card after code-free revisit.
+    // We can't fetch `players` directly (anon RLS excludes access_code/family_code,
+    // but name/number/position/photo are public when the team has a published
+    // lineup — same policy that lets the parent view render chips). Hit that path:
+    const { data: pubPlayers } = await supabase
+      .from('players')
+      .select('id,name,number,position,photo_url')
+      .eq('team_id', teamId)
+      .in('id', cachedIds);
+    if (pubPlayers && pubPlayers.length) {
+      _cardState.players = pubPlayers;
+      _cardState.selectedPlayerIdx = 0;
+    }
+  }
+
+  renderPlayerCardBody();
+}
+
+function renderPlayerCardBody() {
+  const { team, players, seasonsAvailable, seasonYear } = _cardState;
+  const hasUnlocked = players && players.length > 0;
+
+  if (!hasUnlocked) {
+    appEl.innerHTML = `
+      <div class="player-card-wrap">
+        <div class="pc-locked card">
+          <div class="pc-locked-head">
+            <img src="logo.png" alt="" class="pc-locked-logo" />
+            <div>
+              <h2 style="margin:0">${escapeHtml(team.name || 'Team')}${ageGroupLabel(team) ? ' · ' + ageGroupLabel(team) : ''}</h2>
+              <p class="muted" style="margin:0.25rem 0 0">Player card</p>
+            </div>
+          </div>
+          <p style="margin:1rem 0 0.5rem">Enter your child's access code to unlock their card.</p>
+          <div style="display:flex;gap:0.4rem">
+            <input type="text" id="pc-code" placeholder="e.g. JE1234" autocomplete="off"
+              style="flex:1;text-transform:uppercase;padding:0.55rem 0.65rem;border:1px solid var(--border);border-radius:6px;font-size:1rem" />
+            <button type="button" class="primary" id="pc-unlock">Unlock</button>
+          </div>
+          <p class="muted" style="font-size:0.75rem;margin:0.45rem 0 0">Family codes work too (5 digits — unlocks all siblings).</p>
+          <div id="pc-msg" class="error" style="min-height:1.1em;font-size:0.85rem;margin-top:0.5rem"></div>
+        </div>
+      </div>
+    `;
+    const codeEl = document.getElementById('pc-code');
+    const unlockBtn = document.getElementById('pc-unlock');
+    const msg = document.getElementById('pc-msg');
+    setTimeout(() => codeEl?.focus(), 30);
+    const doUnlock = async () => {
+      msg.textContent = '';
+      const code = (codeEl.value || '').trim();
+      if (!code) { msg.textContent = 'Enter a code.'; return; }
+      const { data, error } = await supabase.rpc('get_player_by_code', { p_team: _cardState.teamId, p_code: code });
+      if (error) { msg.textContent = 'Lookup failed: ' + error.message; return; }
+      const list = Array.isArray(data) ? data : [];
+      if (list.length === 0) { msg.textContent = 'No player matched that code.'; return; }
+      _cardState.players = list;
+      _cardState.selectedPlayerIdx = 0;
+      _saveCardUnlocks(_cardState.teamId, list.map(p => p.id));
+      renderPlayerCardBody();
+    };
+    unlockBtn.onclick = doUnlock;
+    codeEl.onkeydown = (e) => { if (e.key === 'Enter') doUnlock(); };
+    return;
+  }
+
+  // Unlocked — render the FIFA-style card for the selected sibling.
+  const idx = Math.min(_cardState.selectedPlayerIdx, players.length - 1);
+  const p = players[idx];
+  const stats = computePlayerStats(p.id, _cardState.lineups, seasonYear);
+  const seasonIdx = seasonsAvailable.indexOf(seasonYear);
+  const hasPrev = seasonIdx >= 0 && seasonIdx < seasonsAvailable.length - 1;
+  const hasNext = seasonIdx > 0;
+
+  // Family-code sibling switcher chips — only shown when >1 sibling unlocked.
+  const siblingsHtml = players.length > 1
+    ? `<div class="pc-siblings">
+         ${players.map((pl, i) => `
+           <button type="button" class="pc-sibling ${i === idx ? 'active' : ''}" data-sib-idx="${i}">
+             #${pl.number != null ? pl.number : '?'} ${escapeHtml(shortName(pl.name))}
+           </button>`).join('')}
+       </div>`
+    : '';
+
+  // Team-formation label (most-used formation across played matches, fallback "—")
+  const formationCount = {};
+  for (const l of _cardState.lineups) {
+    if (!matchHasBeenPlayed(l)) continue;
+    const f = l.data?.formation;
+    if (!f) continue;
+    formationCount[f] = (formationCount[f] || 0) + 1;
+  }
+  let mostUsedFormation = '';
+  let maxC = 0;
+  for (const [f, c] of Object.entries(formationCount)) {
+    if (c > maxC) { maxC = c; mostUsedFormation = f; }
+  }
+
+  const pos = p.position || '—';
+  const num = p.number != null ? p.number : '—';
+  const photoStyle = p.photo_url
+    ? `background-image:url('${escapeHtml(p.photo_url)}');`
+    : '';
+
+  const ss = escapeHtml(String(num));
+  const seasonText = seasonYear != null
+    ? seasonLabelForYear(seasonYear)
+    : 'All-time';
+  const ageTag = ageGroupLabel(team);
+
+  appEl.innerHTML = `
+    <div class="player-card-wrap">
+      <div class="pc-topline">
+        <img src="logo.png" alt="" class="pc-topline-logo" />
+        <div class="pc-topline-txt">
+          <div class="pc-topline-team">${escapeHtml(team.name || 'Team')}${ageTag ? ' · ' + ageTag : ''}</div>
+          <div class="pc-topline-sub muted">Season stats</div>
+        </div>
+        <button type="button" class="btn-secondary pc-forget" id="pc-forget" title="Forget this device">Forget</button>
+      </div>
+
+      ${siblingsHtml}
+
+      <div class="pc-season-row">
+        <button type="button" class="pc-arrow" id="pc-prev-season" ${hasPrev ? '' : 'disabled'} aria-label="Previous season">‹</button>
+        <div class="pc-season-label">${seasonText}${ageTag ? ' · ' + ageTag : ''}</div>
+        <button type="button" class="pc-arrow" id="pc-next-season" ${hasNext ? '' : 'disabled'} aria-label="Next season">›</button>
+      </div>
+
+      <div class="pc-card">
+        <div class="pc-shine" aria-hidden="true"></div>
+        <div class="pc-top">
+          <div class="pc-num-col">
+            <div class="pc-num">${ss}</div>
+            <div class="pc-pos">${escapeHtml(pos)}</div>
+            ${mostUsedFormation ? `<div class="pc-formation" title="Team formation">${escapeHtml(mostUsedFormation)}</div>` : ''}
+            <div class="pc-crest" aria-hidden="true">
+              <img src="logo.png" alt="" />
+            </div>
+          </div>
+          <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
+            ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
+          </div>
+        </div>
+        <div class="pc-name">${escapeHtml(p.name || '—')}</div>
+        <div class="pc-stats-grid">
+          <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">GLS</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOM</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">STR</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">SUB</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">APP</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
+        </div>
+      </div>
+
+      ${seasonsAvailable.length === 0
+        ? '<p class="muted" style="text-align:center;margin-top:0.75rem">No played matches yet this season.</p>'
+        : ''}
+    </div>
+  `;
+
+  // Season arrows
+  const prevBtn = document.getElementById('pc-prev-season');
+  const nextBtn = document.getElementById('pc-next-season');
+  if (prevBtn) prevBtn.onclick = () => {
+    const i = _cardState.seasonsAvailable.indexOf(_cardState.seasonYear);
+    if (i < _cardState.seasonsAvailable.length - 1) {
+      _cardState.seasonYear = _cardState.seasonsAvailable[i + 1];
+      renderPlayerCardBody();
+    }
+  };
+  if (nextBtn) nextBtn.onclick = () => {
+    const i = _cardState.seasonsAvailable.indexOf(_cardState.seasonYear);
+    if (i > 0) {
+      _cardState.seasonYear = _cardState.seasonsAvailable[i - 1];
+      renderPlayerCardBody();
+    }
+  };
+
+  // Sibling switcher
+  document.querySelectorAll('[data-sib-idx]').forEach(btn => {
+    btn.onclick = () => {
+      _cardState.selectedPlayerIdx = parseInt(btn.dataset.sibIdx, 10) || 0;
+      renderPlayerCardBody();
+    };
+  });
+
+  // Forget this device
+  const forgetBtn = document.getElementById('pc-forget');
+  if (forgetBtn) forgetBtn.onclick = () => {
+    if (!confirm('Forget the unlocked players on this device? Next time you visit, you\'ll need to enter the access code again.')) return;
+    _clearCardUnlocks(_cardState.teamId);
+    _cardState.players = [];
+    _cardState.selectedPlayerIdx = 0;
+    renderPlayerCardBody();
   };
 }
 
@@ -2815,9 +3162,10 @@ function renderSquadTab(team, canEdit, players) {
         <div style="display:flex;gap:0.35rem;margin-top:0.5rem;flex-wrap:wrap">
           <button type="button" class="btn-secondary" data-link-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">${p.family_code ? 'Manage siblings…' : '🔗 Link sibling…'}</button>
           ${p.family_code ? `<button type="button" class="btn-secondary" data-unlink-sibling style="font-size:0.8rem;padding:0.35rem 0.6rem">Unlink</button>` : ''}
+          <button type="button" class="btn-secondary" data-share-card-whatsapp style="font-size:0.8rem;padding:0.35rem 0.6rem">🎴 Share stats card (WhatsApp)</button>
         </div>
       ` : ''}
-      <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player.</div>
+      <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player, or on the stats-card link to unlock the season-stats card.</div>
     </div>
     ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
   `;
@@ -2882,6 +3230,30 @@ function renderSquadTab(team, canEdit, players) {
     };
     const linkBtn = root.querySelector('[data-link-sibling]');
     if (linkBtn) linkBtn.onclick = () => openLinkSiblingModal(team, players, pid, () => { if (onChange) onChange(); renderSquadTab(team, canEdit, players); });
+    // 🎴 Share stats card — opens WhatsApp with a pre-filled message containing
+    // the player's short name, the public card URL, and their access code (or
+    // family code if linked). Parents/kids open the link, enter the code once,
+    // and see the FIFA-style season stats card.
+    const shareCardBtn = root.querySelector('[data-share-card-whatsapp]');
+    if (shareCardBtn) shareCardBtn.onclick = () => {
+      const player = players.find(q => q.id === pid);
+      if (!player) return;
+      const base = location.origin + location.pathname;
+      const cardUrl = `${base}#/card/${team.id}`;
+      const code = player.family_code || player.access_code || '—';
+      const lines = [
+        `Hi — here's ${shortName(player.name)}'s stats card for ${team.name}${ageGroupLabel(team) ? ' (' + ageGroupLabel(team) + ')' : ''}:`,
+        '',
+        cardUrl,
+        '',
+        `Access code: ${code}`,
+        '',
+        'Save the link — it updates automatically every game.'
+      ];
+      const text = lines.join('\n');
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(waUrl, '_blank', 'noopener');
+    };
     const unlinkBtn = root.querySelector('[data-unlink-sibling]');
     if (unlinkBtn) unlinkBtn.onclick = async () => {
       const player = players.find(p => p.id === pid);
@@ -9393,9 +9765,28 @@ async function renderMembersTab(currentUser) {
     `;
   })() : '';
 
+  // Share the team's public player-card link. The URL is team-wide — parents
+  // / kids enter each child's personal access code (or family code) to unlock
+  // their specific card. Convenient place for admins to grab + share on the
+  // group chat.
+  const cardShareHtml = isAdmin ? `
+    <div class="card">
+      <h3 style="margin:0 0 0.5rem">Share the team's stats-card link</h3>
+      <p class="muted" style="margin:0 0 0.6rem;font-size:0.85rem">One public link per team. Each player unlocks their own card with their personal access code (or family code for siblings). Grab codes from the Squad tab.</p>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
+        <input type="text" readonly id="am-card-url" value="${escapeHtml(location.origin + location.pathname + '#/card/' + team.id)}"
+          style="flex:1;min-width:200px;padding:0.4rem 0.55rem;border:1px solid var(--border);border-radius:6px;font-size:0.85rem;font-family:ui-monospace,Menlo,Consolas,monospace" />
+        <button type="button" class="btn-secondary" id="am-card-copy" style="padding:0.4rem 0.75rem">📋 Copy</button>
+        <button type="button" class="btn-secondary" id="am-card-open" style="padding:0.4rem 0.75rem">Open ↗</button>
+      </div>
+      <div id="am-card-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
+    </div>
+  ` : '';
+
   tabEl.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;max-width:900px">
       ${switcherHtml}
+      ${cardShareHtml}
       <div class="card">
         <h3 style="margin:0 0 0.5rem">Invite someone <span class="muted" style="font-weight:400;font-size:0.82rem">to ${escapeHtml(team.name)}</span></h3>
         <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">They'll get an email with a magic link. When they sign in, they're automatically added to this team.</p>
@@ -9496,6 +9887,24 @@ function wireMembersEvents(currentUser) {
       // Refresh the Admin tab so the new team appears in the strip (doesn't auto-switch).
       renderMembersTab(currentUser);
     });
+
+    // Team-wide stats-card link — copy / open helpers.
+    const cardUrlInput = tabEl.querySelector('#am-card-url');
+    const cardCopyBtn = tabEl.querySelector('#am-card-copy');
+    const cardOpenBtn = tabEl.querySelector('#am-card-open');
+    const cardMsg = tabEl.querySelector('#am-card-msg');
+    if (cardCopyBtn && cardUrlInput) cardCopyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(cardUrlInput.value);
+        if (cardMsg) { cardMsg.textContent = '✓ Link copied — paste into WhatsApp with each child\'s access code.'; cardMsg.className = 'ok'; setTimeout(() => { cardMsg.textContent = ''; cardMsg.className = 'muted'; }, 3500); }
+      } catch (_) {
+        cardUrlInput.select(); document.execCommand('copy');
+        if (cardMsg) { cardMsg.textContent = '✓ Copied'; cardMsg.className = 'ok'; setTimeout(() => { cardMsg.textContent = ''; cardMsg.className = 'muted'; }, 2500); }
+      }
+    };
+    if (cardOpenBtn && cardUrlInput) cardOpenBtn.onclick = () => {
+      window.open(cardUrlInput.value, '_blank', 'noopener');
+    };
   }
 
   // Show / hide player picker based on role
