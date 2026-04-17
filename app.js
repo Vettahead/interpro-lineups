@@ -4188,7 +4188,10 @@ function matchAwardsCardHtml(current, teamId) {
     byPlayer.get(b.player_id).push(b);
   }
 
-  const rowsHtml = Array.from(byPlayer.entries()).map(([pid, items]) => {
+  // Render one inline "awardee unit" per player: name + their badge chips. Units
+  // flow horizontally and wrap naturally so 3–4 short ones fit on a single line.
+  // Separator dots between units so it reads as a comma-style list, not a column.
+  const unitsHtml = Array.from(byPlayer.entries()).map(([pid, items]) => {
     const p = playersById[pid];
     const name = p ? shortName(p.name || '') : '—';
     const chipsHtml = items.map(b => {
@@ -4200,28 +4203,31 @@ function matchAwardsCardHtml(current, teamId) {
                 <span class="maw-chip-name">${escapeHtml(nm)}</span>
               </span>`;
     }).join('');
-    const notesHtml = items
+    return `<span class="maw-unit">
+              <span class="maw-player">${escapeHtml(name)}</span>
+              <span class="maw-chips">${chipsHtml}</span>
+            </span>`;
+  }).join('<span class="maw-sep" aria-hidden="true">·</span>');
+
+  // Notes still collected separately so the coach's "why?" narrative is readable
+  // without hover — one italic line per badge that has a note, grouped by player.
+  const notesHtml = Array.from(byPlayer.entries()).flatMap(([pid, items]) => {
+    const p = playersById[pid];
+    const name = p ? shortName(p.name || '') : '—';
+    return items
       .filter(b => (b.note || '').trim())
       .map(b => {
         const e = badgeEntry(b.badge_key);
         const nm = e ? e.name : b.badge_key;
-        return `<div class="maw-note muted">${escapeHtml(nm)} — ${escapeHtml(b.note)}</div>`;
-      })
-      .join('');
-    return `
-      <div class="maw-row">
-        <div class="maw-row-head">
-          <span class="maw-player">${escapeHtml(name)}</span>
-          <span class="maw-chips">${chipsHtml}</span>
-        </div>
-        ${notesHtml}
-      </div>`;
+        return `<div class="maw-note muted">${escapeHtml(name)} · ${escapeHtml(nm)} — ${escapeHtml(b.note)}</div>`;
+      });
   }).join('');
 
   return `
     <div class="match-awards-card" style="background:#fafafa;border:1px solid #e5e5e5;border-left:4px solid #d6a82b;border-radius:6px;padding:0.5rem 0.65rem;margin-bottom:0.4rem">
       <div style="font-size:0.72rem;font-weight:700;color:#8a6a00;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.3rem">🏅 Awards given this match</div>
-      ${rowsHtml}
+      <div class="maw-flow">${unitsHtml}</div>
+      ${notesHtml}
     </div>
   `;
 }
