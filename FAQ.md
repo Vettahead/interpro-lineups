@@ -456,6 +456,31 @@ Anyone with the team URL + a valid access code can view. Without a code you just
 
 ---
 
+## Badges & achievements
+
+### What are badges?
+FIFA Ultimate Team-style achievements pinned to a player's public stats card. Each badge has an emoji icon, a name, and a short description (e.g. 🥾 **Hat-Trick Hero — 3+ goals in one match**). Kids collect them across the season.
+
+### Who awards them?
+Coaches and admins. Open **Squad details → Squad** → tap a player's card → the **🏅 Badges** section shows everything already earned, plus a **+ Award badge…** button. Pick from the grouped list (Attacking, Skill, Defending, Attitude, Teamwork, Fun, Milestone), type an optional "why?" note, Save. The note is **visible to parents/kids on the public card**, so write it like you'd want them to read it.
+
+### Manual vs. auto badges
+Right now all badges are awarded manually by the coach. In a future update some will become **auto-derived** from match data — Hat-Trick Hero, Top Scorer, Ever-Present, 10 games, 25 goals, etc. Those entries already exist in the catalog but are hidden from the Award menu until the auto-rollout lands.
+
+### Where do badges appear?
+On the **public player card**: a row of up to 9 icons sits beneath the stats grid. If the player has more than 9, an **All** button opens the full grid. Tapping a badge opens a detail sheet with name, description, date awarded, and the coach's note.
+
+### Can I remove a badge?
+Yes — each earned-badge chip in the Squad player modal has a small ✕. Tap it to remove. There's no "edit": to refresh a date, remove and re-award.
+
+### Can I share a just-earned badge?
+Yes. Immediately after saving an award, a popup offers **💬 Share to WhatsApp** — it pre-fills a message with the badge name, your note, the card link, and the player's access code. Great for the team group chat when a kid's had a big game.
+
+### Why isn't my player getting auto-badges yet?
+Auto badges ship in a later update (Slice 9b). Until then, coaches pick them manually. The auto list currently includes: On Fire, Goal Machine, Hat-Trick Hero, Brace, Opening Night, Top Scorer, Super Sub, Brick Wall, Iron Defence, Golden Glove, Consistency King, Ever-Present, Monthly Golden Boot, Lucky Charm, Debut, and all milestones (games/goals/MOTM/clean sheets counters).
+
+---
+
 ## Tips & troubleshooting
 
 ### My changes aren't saving

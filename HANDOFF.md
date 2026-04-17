@@ -1,5 +1,129 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-17)
 
+## 🔖 Where we left off on 2026-04-17 (session 8 — read this first)
+
+**Slice 9a — Manual badges shipped.** FIFA UT-style achievement layer over the stats card. Full `BADGE_CATALOG` seeded (manual + auto stubs); 9a renders manual awards only. Auto-derived badges are Slice 9b.
+
+### Shipped this session (session 8)
+
+1. **`BADGE_CATALOG` single source of truth** (`app.js` just after `logAudit`). Keyed by slug; each entry has `{ name, description, emoji, category, flavour: 'manual' | 'auto' }`. Categories are `attacking · skill · defending · attitude · teamwork · fun · milestone`. Seeded with ~85 entries: manual badges are live in the award picker; auto entries (e.g. `hat_trick_hero`, `top_scorer`, `ever_present`, every milestone counter) are listed so 9b can wire criteria without a catalog rewrite.
+
+2. **`player_badges` table + RLS.** New table storing one row per awarded badge (manual only for now). Indexed on `player_id` and `team_id`. Four RLS policies: public/anon SELECT via `team_has_published_lineup(team_id)`; authenticated member SELECT for coach/admin previews before the first publish; coach/admin INSERT + DELETE (no updates — re-award to refresh). Full SQL block at the bottom of this entry.
+
+3. **Badge cache + DB helpers** (`app.js`). Module-scope `_teamBadges = { [teamId]: [...rows] }` cache. `fetchTeamBadges(teamId)` hydrates it (errors swallowed so a missing migration doesn't crash the squad/card). `awardManualBadge({ teamId, playerId, badgeKey, note, lineupId })` inserts + prepends to cache + fires `logAudit`. `removeBadge(id, teamId)` deletes + evicts. `badgesForPlayer(teamId, playerId, seasonYear)` filters to one player (null = all-time, otherwise matches `season_start_year`).
+
+4. **Earned-badges row on the public card** (`renderPlayerCardBody`). Beneath the FIFA stats grid: up to `CARD_BADGES_MAX = 9` gold-ringed emoji chips, with an overflow **All** button when there are more. Tapping a chip opens `openBadgeDetailSheet(badge)` — bottom-sheet with emoji, name, description, date, and the coach's note in an indigo-left-border block. **All** opens `openBadgesGridModal(badges, player)` — auto-fill grid of every earned badge, each tile re-opens the detail sheet. De-dup by `badge_key` so re-awards don't double-display. Season filter uses `season_start_year` (falls back to deriving from `awarded_at` for legacy rows).
+
+5. **Squad-tab player modal → 🏅 Badges section.** New `badgesSectionHtml(p)` rendered inside `detailsHtml(p)` (below the Access-codes box). Shows earned-badge chips with a small ✕ remove button (coach/admin only) and a `+ Award badge…` button.
+
+6. **Award-badge modal** (`openAwardBadgeModal`). Searchable picker of **manual-flavour** catalog entries, grouped by category with emoji + name + description on each row. Type-to-filter narrows both name and description. Tap a row → it's selected + a `Why? (optional — shown on the public card)` note input appears. Save → inserts with `awarded_by = auth.uid()` + `season_start_year = computeCurrentSeasonStartYear()`. On save, modal closes and the player modal's badges row is re-rendered in place (no Squad-tab full refresh — keeps the scroll position).
+
+7. **Post-award WhatsApp share prompt** (`openBadgeShareConfirm`). Fires straight after a successful award. Pre-fills `🎉 {Name} just earned a badge: {emoji} {Badge}! / "{note}" / See the full card: {URL} / Access code: {code}`. Not now dismisses. Existing "🎴 Share stats card" button on the same modal is unchanged.
+
+8. **CSS** (`styles.css`). New blocks for `.pc-badges-row` / `.pc-badge-chip` / `.pc-badge-more` (gold-ringed circular 42px chips on the card), `.pc-badge-sheet-*` (bottom-sheet detail), `.pc-badge-grid-*` (All modal), `.pb-chip` (small rounded pill in the coach-side player modal with its ✕), `.ba-*` (award picker — grouped two-column on ≥520px, one column on phone). Re-uses the existing `.picker-overlay` / `.picker-modal` / `.picker-header` shell.
+
+9. **Parallel badge fetch in `renderTeamDashboard` + `renderPlayerCardPage`.** Both top-level loaders now include `fetchTeamBadges(teamId)` in their `Promise.all` so the cache is populated before any UI reads it. Failure is non-fatal (empty list fallback).
+
+10. **FAQ + in-app Help updates.** New `badges` HELP section (visible to all roles, not coach-only — kids/parents should find it too). FAQ.md gains a new `## Badges & achievements` block between the stats card and tips sections, covering what/who/manual-vs-auto/where/remove/share/why-no-auto-yet.
+
+### SQL to run in Supabase (session 8)
+
+```sql
+-- Slice 9a — player_badges table + RLS.
+-- Manual-only writes for now; auto-derived badges (Slice 9b) will use the same
+-- table but populate badge_key + season_start_year + lineup_id from match data.
+CREATE TABLE IF NOT EXISTS player_badges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id   uuid NOT NULL REFERENCES teams(id)   ON DELETE CASCADE,
+  badge_key text NOT NULL,
+  awarded_at timestamptz NOT NULL DEFAULT now(),
+  awarded_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  lineup_id  uuid REFERENCES lineups(id)    ON DELETE SET NULL,
+  season_start_year int,
+  note text
+);
+CREATE INDEX IF NOT EXISTS player_badges_player_idx ON player_badges(player_id);
+CREATE INDEX IF NOT EXISTS player_badges_team_idx   ON player_badges(team_id);
+
+ALTER TABLE player_badges ENABLE ROW LEVEL SECURITY;
+
+-- Public/anon read: same gate as players — team must have at least one
+-- published lineup. Uses the existing team_has_published_lineup() helper
+-- so there's no recursion.
+CREATE POLICY "player_badges_public_read"
+  ON player_badges FOR SELECT
+  TO anon, authenticated
+  USING ( team_has_published_lineup(team_id) );
+
+-- Authenticated team-member read: coaches/admins see their team's badges
+-- even before the first publish (so the Squad modal isn't empty on day 1).
+CREATE POLICY "player_badges_member_read"
+  ON player_badges FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM team_members
+      WHERE team_id = player_badges.team_id
+        AND user_id = auth.uid()
+    )
+  );
+
+-- Coach/admin INSERT + DELETE (no UPDATE — re-award to refresh).
+CREATE POLICY "player_badges_coach_insert"
+  ON player_badges FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    awarded_by = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM team_members
+      WHERE team_id = player_badges.team_id
+        AND user_id = auth.uid()
+        AND role IN ('coach','admin')
+    )
+  );
+
+CREATE POLICY "player_badges_coach_delete"
+  ON player_badges FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM team_members
+      WHERE team_id = player_badges.team_id
+        AND user_id = auth.uid()
+        AND role IN ('coach','admin')
+    )
+  );
+```
+
+Run the whole block in the Supabase SQL editor before (or immediately after) pushing the code — the UI will still load without it but nothing badge-related will persist.
+
+### Files touched (session 8)
+- `web/app.js` — `BADGE_CATALOG` + `BADGE_CATEGORY_LABELS` + `BADGE_CATEGORY_ORDER` + `CARD_BADGES_MAX` constants; helpers `badgeEntry` / `badgeEmoji` / `badgeName` / `formatBadgeDate`; cache `_teamBadges` + `fetchTeamBadges` / `getCachedTeamBadges` / `badgesForPlayer` / `awardManualBadge` / `removeBadge`; `renderPlayerCardPage` parallel fetch extended; `renderPlayerCardBody` badges-row render + wiring; new functions `openBadgeDetailSheet` / `openBadgesGridModal` / `openAwardBadgeModal` / `openBadgeShareConfirm`; `renderTeamDashboard` parallel fetch extended; `renderSquadTab` gains `badgesSectionHtml(p)` + `detailsHtml` wiring in the modal; `wirePlayerDetails` adds `rerenderBadges` + `wireBadgeHandlers`; new `HELP_SECTIONS` entry `badges` (non-admin, inserted after `stats-card`).
+- `web/styles.css` — badge CSS block appended just before `.me-avail-bar`: `.pc-badges-row`, `.pc-badge-chip`, `.pc-badge-more`, `.pc-badge-emoji`, `.pc-badge-sheet-*`, `.pc-badge-grid*`, `.pc-badge-note*`, `.pb-section`, `.pb-chip*`, `.badge-award-modal`, `.ba-*`.
+- `web/FAQ.md` — new `## Badges & achievements` section between the stats card section and tips.
+- `web/HANDOFF.md` — this entry.
+
+### Sanity-check script (session 8)
+
+1. **DB migration** — paste the SQL block above into Supabase and run it. Verify `player_badges` exists with 2 indexes + 4 policies (`public_read`, `member_read`, `coach_insert`, `coach_delete`).
+2. **Squad-tab modal, no badges yet** — open Squad → tap a player → scroll to the new 🏅 Badges card. It should read "No badges yet." and show a `+ Award badge…` button.
+3. **Award a manual badge** — tap `+ Award badge…` → modal opens, focus lands in the search box. Type "hat" → only `Clinical Finisher` shows (manual) — `Hat-Trick Hero` does NOT appear (it's auto, deferred to 9b). Clear search → scroll Attacking group → select `Clinical Finisher` → it highlights indigo. Note field appears. Type `"Great first-time finish"`. Save → modal closes, player modal's badge chip row now shows `🎯 Clinical Finisher` with an ✕. Share-to-WhatsApp confirm popup appears — tap Not now.
+4. **Public card display** — open `/#/card/{team_id}` in a new tab, unlock with the player's code. Beneath the stats grid a gold-ringed row shows the `🎯` chip. Tap it → bottom-sheet with name, description, date, and the coach's note ("Great first-time finish") in an indigo-left-border block. Dismiss.
+5. **Award 9+** — back in the Squad modal, award 9 more manual badges to the same player (any from the picker). Return to the public card → 9 chips + `All` button. Tap `All` → grid modal lists every badge; tap any → its detail sheet.
+6. **Remove** — Squad player modal → tap ✕ on any chip → confirm → chip disappears immediately (no Squad-tab full rerender). Refresh the public card → badge is gone.
+7. **Season filter** — on the public card, tap ← to go to a previous season. Badges earned this season should vanish; the row is empty (or populated if you awarded any in that year — unlikely on day 1). Tap → to return.
+8. **Share-to-WhatsApp from award popup** — award another badge → Share popup → tap 💬 Share to WhatsApp → new tab opens with `wa.me/?text=…` containing `🎉 {Name} just earned…`, the note, card URL and access code.
+9. **Non-admin view** — log in as a parent/coach-viewer (no `canEdit`) → open a player's card on the Squad tab → badges section renders read-only (no ✕ on chips, no Award button).
+10. **Help + FAQ** — Help tab → scroll to `Badges & achievements` entry. FAQ page renders the new section between stats card and tips.
+
+### Start-here on the new machine (session 8)
+Push `web/app.js`, `web/styles.css`, `web/FAQ.md`, `web/HANDOFF.md`. **Run the session-8 SQL block** on Supabase before testing writes — reads will fall back gracefully but inserts will fail until the table + RLS exist.
+
+**Next up** — **Slice 9b: auto-derived badges.** All criteria live as pure JS functions against existing lineup data; no DB changes beyond optionally persisting derived awards into `player_badges` (so the coach can see them in the modal too). Good first wins: `debut_match`, `brace`, `hat_trick_hero`, `games_10` / `games_25`, `opening_night`, `super_sub`. Full list in the 9a brief in session 7's entry.
+
+---
+
 ## 🔖 Where we left off on 2026-04-17 (session 7 — read this first)
 
 Huge session. Admin/team UX overhaul, age-group field, **public player card page** (FIFA-style), plus a queue of polish fixes. Roadmap: next up is the **badges & achievements system** (full brief at the bottom).

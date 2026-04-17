@@ -207,6 +207,224 @@ async function logAudit(teamId, entityType, entityId, action, changes) {
   });
 }
 
+// ---------- Badges (Slice 9a: manual awards; auto entries stubbed for 9b) ----------
+// BADGE_CATALOG is the single source of truth for names, emoji icons, categories,
+// descriptions, and flavour (manual vs auto). Both the public FIFA card and the
+// Squad → player modal read from this catalog when rendering and when awarding.
+// All icons are emoji per Chris's 2026-04-17 call — no SVG / icon font needed.
+// Each entry: { name, description, emoji, category, flavour, criteria? }
+//   flavour = 'manual' (coach awards it explicitly) | 'auto' (derived — 9b)
+//   category = 'attacking' | 'skill' | 'defending' | 'attitude' | 'teamwork'
+//              | 'fun' | 'milestone'
+// Auto-flavour entries are kept in the catalog so 9b can wire criteria without
+// needing a catalog rewrite. They are not shown in the 9a award modal.
+const BADGE_CATALOG = {
+  // 🔥 Attacking & Scoring
+  on_fire:            { name: 'On Fire',          emoji: '🔥', category: 'attacking', flavour: 'auto',   description: 'Scored in 3 matches in a row.' },
+  goal_machine:       { name: 'Goal Machine',     emoji: '⚽', category: 'attacking', flavour: 'auto',   description: '5 goals this season.' },
+  hat_trick_hero:     { name: 'Hat-Trick Hero',   emoji: '🎩', category: 'attacking', flavour: 'auto',   description: '3+ goals in one match.' },
+  brace:              { name: 'Brace',            emoji: '✌️', category: 'attacking', flavour: 'auto',   description: '2 goals in one match.' },
+  opening_night:      { name: 'Opening Night',    emoji: '🌟', category: 'attacking', flavour: 'auto',   description: 'First goal of the season.' },
+  clinical_finisher:  { name: 'Clinical Finisher',emoji: '🎯', category: 'attacking', flavour: 'manual', description: 'Cool as ice in front of goal — a first-time finisher.' },
+  poacher:            { name: 'Poacher',          emoji: '🦊', category: 'attacking', flavour: 'manual', description: 'Always in the right place for rebounds and tap-ins.' },
+  long_shot_legend:   { name: 'Long-Shot Legend', emoji: '🚀', category: 'attacking', flavour: 'manual', description: 'Scored a screamer from outside the box.' },
+  weaker_foot_hero:   { name: 'Weaker-Foot Hero', emoji: '🦶', category: 'attacking', flavour: 'manual', description: 'Scored with their less-favoured foot.' },
+  ice_cold:           { name: 'Ice Cold',         emoji: '🧊', category: 'attacking', flavour: 'manual', description: 'Scored under pressure — a penalty or late equaliser.' },
+  solo_star:          { name: 'Solo Star',        emoji: '💫', category: 'attacking', flavour: 'manual', description: 'Beat two or more players before scoring.' },
+  top_scorer:         { name: 'Top Scorer',       emoji: '👑', category: 'attacking', flavour: 'auto',   description: 'Top goalscorer this season.' },
+  super_sub:          { name: 'Super Sub',        emoji: '🔁', category: 'attacking', flavour: 'auto',   description: 'Came off the bench and scored.' },
+
+  // ⚡ Speed, Skill & Physical
+  speedster:          { name: 'Speedster',        emoji: '⚡', category: 'skill',     flavour: 'manual', description: 'Lightning quick — burned the defender.' },
+  engine:             { name: 'The Engine',       emoji: '🛞', category: 'skill',     flavour: 'manual', description: 'Ran, and ran, and ran — a box-to-box motor.' },
+  dribble_king:       { name: 'Dribble King',     emoji: '🕺', category: 'skill',     flavour: 'manual', description: 'Weaves through challenges with the ball glued to their feet.' },
+  two_footed:         { name: 'Two-Footed',       emoji: '🦵', category: 'skill',     flavour: 'manual', description: 'Comfortable on either foot.' },
+  balance_master:     { name: 'Balance Master',   emoji: '⚖️', category: 'skill',     flavour: 'manual', description: 'Impossible to knock off the ball.' },
+  agility_ace:        { name: 'Agility Ace',      emoji: '🤸', category: 'skill',     flavour: 'manual', description: 'Turned on a sixpence.' },
+  shield_wall:        { name: 'Shield Wall',      emoji: '🛡️', category: 'skill',     flavour: 'manual', description: 'Shielded the ball brilliantly under pressure.' },
+  wingman:            { name: 'Wingman',          emoji: '🪁', category: 'skill',     flavour: 'manual', description: 'Owned the wing all match.' },
+  tireless:           { name: 'Tireless',         emoji: '🫁', category: 'skill',     flavour: 'manual', description: 'Played the full 90 without dropping a yard.' },
+
+  // 🧱 Defending & Goalkeeper
+  brick_wall:         { name: 'Brick Wall',       emoji: '🧱', category: 'defending', flavour: 'auto',   description: '3 clean sheets in a row.' },
+  iron_defence:       { name: 'Iron Defence',     emoji: '⚔️', category: 'defending', flavour: 'auto',   description: '5 clean sheets this season.' },
+  golden_glove:       { name: 'Golden Glove',     emoji: '🧤', category: 'defending', flavour: 'auto',   description: 'Fewest goals conceded this season.' },
+  safe_hands:         { name: 'Safe Hands',       emoji: '🙌', category: 'defending', flavour: 'manual', description: 'A save that kept the team in the game.' },
+  shot_stopper:       { name: 'Shot-Stopper',     emoji: '🧤', category: 'defending', flavour: 'manual', description: 'Big save at a crucial moment.' },
+  sweeper_keeper:     { name: 'Sweeper Keeper',   emoji: '🧹', category: 'defending', flavour: 'manual', description: 'Came out to clean up behind the defence.' },
+  last_line_hero:     { name: 'Last-Line Hero',   emoji: '🦸', category: 'defending', flavour: 'manual', description: 'Hero moment when the team needed it most.' },
+  tackle_master:      { name: 'Tackle Master',    emoji: '🦿', category: 'defending', flavour: 'manual', description: 'Timing and strength on the tackle.' },
+  interceptor:        { name: 'Interceptor',      emoji: '🎣', category: 'defending', flavour: 'manual', description: 'Read the game and nicked the ball before it arrived.' },
+  no_nonsense:        { name: 'No-Nonsense',      emoji: '💥', category: 'defending', flavour: 'manual', description: 'Cleared the danger without a second thought.' },
+  captain_back_line:  { name: 'Captain of the Back Line', emoji: '🎖️', category: 'defending', flavour: 'manual', description: 'Organised the defence and led from the back.' },
+  fearless:           { name: 'Fearless',         emoji: '🦁', category: 'defending', flavour: 'manual', description: 'Put their body on the line.' },
+  goal_line_hero:     { name: 'Goal-Line Hero',   emoji: '🚧', category: 'defending', flavour: 'manual', description: 'Heroic goal-line clearance.' },
+  last_ditch_hero:    { name: 'Last-Ditch Hero',  emoji: '🎬', category: 'defending', flavour: 'manual', description: 'Last-second challenge that saved the day.' },
+
+  // 🧠 Effort, Attitude & Coach's Choice
+  never_give_up:      { name: 'Never Give Up',    emoji: '💪', category: 'attitude',  flavour: 'manual', description: 'Kept running and battling to the final whistle.' },
+  training_star:      { name: 'Training Star',    emoji: '🌟', category: 'attitude',  flavour: 'manual', description: 'Standout attitude and effort in training.' },
+  coaches_choice:     { name: "Coach's Choice",   emoji: '🏅', category: 'attitude',  flavour: 'manual', description: "Coach's pick of the week." },
+  comeback_kid:       { name: 'Comeback Kid',     emoji: '🔄', category: 'attitude',  flavour: 'manual', description: 'Bounced back after a setback.' },
+  focus_pro:          { name: 'Focus Pro',        emoji: '🎯', category: 'attitude',  flavour: 'manual', description: 'Locked-in focus all match.' },
+  resilience:         { name: 'Resilience',       emoji: '🪨', category: 'attitude',  flavour: 'manual', description: 'Took the knocks and kept going.' },
+  calm_head:          { name: 'Calm Head',        emoji: '🧘', category: 'attitude',  flavour: 'manual', description: 'Kept their head when others lost theirs.' },
+  growth_mindset:     { name: 'Growth Mindset',   emoji: '🌱', category: 'attitude',  flavour: 'manual', description: 'Took coaching on board and visibly improved.' },
+  consistency_king:   { name: 'Consistency King', emoji: '📊', category: 'attitude',  flavour: 'auto',   description: 'Reliable every week — shows up and contributes.' },
+  ever_present:       { name: 'Ever-Present',     emoji: '📅', category: 'attitude',  flavour: 'auto',   description: 'Played every match this season.' },
+  bounce_back:        { name: 'Bounce Back',      emoji: '🎾', category: 'attitude',  flavour: 'manual', description: 'Best improvement after a tough game.' },
+  training_gem:       { name: 'Training-Ground Gem', emoji: '💎', category: 'attitude', flavour: 'manual', description: 'A real gem in training this week.' },
+
+  // 🤝 Teamwork & Sportsmanship
+  team_player:        { name: 'Team Player',      emoji: '🤝', category: 'teamwork',  flavour: 'manual', description: 'Put the team first all match.' },
+  helper:             { name: 'Helper',           emoji: '🙋', category: 'teamwork',  flavour: 'manual', description: 'Helped a teammate up / out / through it.' },
+  fair_play:          { name: 'Fair Play',        emoji: '🕊️', category: 'teamwork',  flavour: 'manual', description: 'Played the game the right way.' },
+  leader:             { name: 'Leader',           emoji: '🧭', category: 'teamwork',  flavour: 'manual', description: 'Led by example on and off the pitch.' },
+  communicator:       { name: 'Communicator',     emoji: '📣', category: 'teamwork',  flavour: 'manual', description: 'Talked non-stop — organised the team.' },
+  unsung_hero:        { name: 'Unsung Hero',      emoji: '🫶', category: 'teamwork',  flavour: 'manual', description: 'Did the dirty work that no-one noticed but everyone benefited from.' },
+  high_five_hero:     { name: 'High-Five Hero',   emoji: '🖐️', category: 'teamwork',  flavour: 'manual', description: 'Lifted everyone around them.' },
+  respect_badge:      { name: 'Respect',          emoji: '🤲', category: 'teamwork',  flavour: 'manual', description: 'Respectful to teammates, opponents, and officials.' },
+  buddy_badge:        { name: 'Buddy Badge',      emoji: '👯', category: 'teamwork',  flavour: 'manual', description: 'A great teammate to a younger or newer player.' },
+  handshake_hero:     { name: 'Handshake Hero',   emoji: '🤝', category: 'teamwork',  flavour: 'manual', description: 'First to shake hands, first to say well-played.' },
+  squad_boost:        { name: 'Squad Boost',      emoji: '📈', category: 'teamwork',  flavour: 'manual', description: 'Lifted the mood of the whole squad.' },
+
+  // 🎉 Fun & Seasonal
+  nutmeg_king:        { name: 'Nutmeg King',      emoji: '🥜', category: 'fun',       flavour: 'manual', description: 'Slipped one through an opponent\'s legs.' },
+  celebration_star:   { name: 'Celebration Star', emoji: '🎉', category: 'fun',       flavour: 'manual', description: 'Best celebration of the week.' },
+  rainbow_rocket:     { name: 'Rainbow Rocket',   emoji: '🌈', category: 'fun',       flavour: 'manual', description: 'Pulled off a rainbow flick.' },
+  thunder_boot:       { name: 'Thunder Boot',     emoji: '⚡', category: 'fun',       flavour: 'manual', description: 'An absolute thunderbolt of a shot.' },
+  rain_warrior:       { name: 'Rain Warrior',     emoji: '🌧️', category: 'fun',       flavour: 'manual', description: 'Played brilliantly in terrible weather.' },
+  smile_maker:        { name: 'Smile Maker',      emoji: '😄', category: 'fun',       flavour: 'manual', description: 'Made the whole squad smile.' },
+  boot_collector:     { name: 'Boot Collector',   emoji: '👟', category: 'fun',       flavour: 'manual', description: 'New boots, new form.' },
+  hair_of_match:      { name: 'Hair of the Match',emoji: '💇', category: 'fun',       flavour: 'manual', description: 'Best hair on the pitch today.' },
+  golden_boot_mini:   { name: 'Monthly Golden Boot', emoji: '🥾', category: 'fun',    flavour: 'auto',   description: 'Top scorer in the calendar month.' },
+  early_bird:         { name: 'Early Bird',       emoji: '🐦', category: 'fun',       flavour: 'manual', description: 'Always first to arrive.' },
+  lucky_charm:        { name: 'Lucky Charm',      emoji: '🍀', category: 'fun',       flavour: 'auto',   description: 'Team is unbeaten when this player plays.' },
+  birthday_kid:       { name: 'Birthday Kid',     emoji: '🎂', category: 'fun',       flavour: 'manual', description: 'Played a match on their birthday.' },
+
+  // 🏆 Milestones (all auto — 9b)
+  debut_match:        { name: 'Debut Match',      emoji: '🎬', category: 'milestone', flavour: 'auto',   description: 'Played their first match for the team.' },
+  games_10:           { name: '10 Games',         emoji: '🔟', category: 'milestone', flavour: 'auto',   description: 'Played 10 matches for the team.' },
+  games_25:           { name: '25 Games',         emoji: '🎖️', category: 'milestone', flavour: 'auto',   description: 'Played 25 matches for the team.' },
+  games_50:           { name: '50 Games',         emoji: '🏅', category: 'milestone', flavour: 'auto',   description: 'Played 50 matches for the team.' },
+  games_100:          { name: '100 Games',        emoji: '💯', category: 'milestone', flavour: 'auto',   description: '100 matches! A true club legend.' },
+  goals_1:            { name: 'First Goal',       emoji: '🥅', category: 'milestone', flavour: 'auto',   description: 'Scored their first goal for the team.' },
+  goals_10:           { name: '10 Goals',         emoji: '⚽', category: 'milestone', flavour: 'auto',   description: '10 career goals.' },
+  goals_25:           { name: '25 Goals',         emoji: '🎯', category: 'milestone', flavour: 'auto',   description: '25 career goals.' },
+  goals_50:           { name: '50 Goals',         emoji: '👑', category: 'milestone', flavour: 'auto',   description: '50 career goals.' },
+  motm_1:             { name: 'First MOTM',       emoji: '🏆', category: 'milestone', flavour: 'auto',   description: 'First Man of the Match award.' },
+  motm_5:             { name: '5× MOTM',          emoji: '🌟', category: 'milestone', flavour: 'auto',   description: '5 Man-of-the-Match awards.' },
+  motm_10:            { name: '10× MOTM',         emoji: '✨', category: 'milestone', flavour: 'auto',   description: '10 Man-of-the-Match awards.' },
+  clean_sheets_1:     { name: 'First Clean Sheet',emoji: '🧼', category: 'milestone', flavour: 'auto',   description: 'First clean sheet for the team.' },
+  clean_sheets_5:     { name: '5 Clean Sheets',   emoji: '🧱', category: 'milestone', flavour: 'auto',   description: '5 career clean sheets.' },
+  clean_sheets_10:    { name: '10 Clean Sheets',  emoji: '🏛️', category: 'milestone', flavour: 'auto',   description: '10 career clean sheets.' },
+};
+
+const BADGE_CATEGORY_LABELS = {
+  attacking: '🔥 Attacking',
+  skill:     '⚡ Skill',
+  defending: '🛡️ Defending',
+  attitude:  '🧠 Attitude',
+  teamwork:  '🤝 Teamwork',
+  fun:       '🎉 Fun',
+  milestone: '🏆 Milestone',
+};
+
+// All-time order for categories in the award modal + card display.
+const BADGE_CATEGORY_ORDER = ['attacking','skill','defending','attitude','teamwork','fun','milestone'];
+
+// Max badge chips shown inline on the public card before overflow into "See all".
+const CARD_BADGES_MAX = 9;
+
+function badgeEntry(key) { return BADGE_CATALOG[key] || null; }
+function badgeEmoji(key) { return badgeEntry(key)?.emoji || '🏅'; }
+function badgeName(key)  { return badgeEntry(key)?.name  || key; }
+
+// Format an ISO timestamp as "5 Apr 2026" for the badge detail sheet.
+function formatBadgeDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Module-scope cache of badges per team. We read all team badges at once because
+// a player modal may be opened any time, and the public card will want every
+// unlocked sibling's badges available without a second round-trip.
+// Shape: { [teamId]: Array<{id, player_id, team_id, badge_key, awarded_at, awarded_by, lineup_id, season_start_year, note}> }
+let _teamBadges = {};
+
+// Fetch all badges for a team and cache them. Returns the array (possibly empty).
+// Swallows errors silently so a badge-table migration lag doesn't break the
+// public card or Squad modal — callers fall back to an empty list.
+async function fetchTeamBadges(teamId) {
+  if (!teamId) return [];
+  const { data, error } = await supabase
+    .from('player_badges')
+    .select('id,player_id,team_id,badge_key,awarded_at,awarded_by,lineup_id,season_start_year,note')
+    .eq('team_id', teamId)
+    .order('awarded_at', { ascending: false });
+  if (error) {
+    console.warn('fetchTeamBadges error', error.message || error);
+    _teamBadges[teamId] = [];
+    return [];
+  }
+  _teamBadges[teamId] = data || [];
+  return _teamBadges[teamId];
+}
+
+function getCachedTeamBadges(teamId) {
+  return _teamBadges[teamId] || [];
+}
+
+// Filter the cache to a single player, newest first. `seasonYear` null = all-time.
+function badgesForPlayer(teamId, playerId, seasonYear) {
+  const all = getCachedTeamBadges(teamId);
+  const filtered = all.filter(b => b.player_id === playerId);
+  if (seasonYear == null) return filtered;
+  return filtered.filter(b => {
+    if (b.season_start_year != null) return b.season_start_year === seasonYear;
+    // Older rows without season_start_year — derive from awarded_at as a fallback.
+    const d = b.awarded_at ? new Date(b.awarded_at) : null;
+    if (!d || isNaN(d.getTime())) return false;
+    return computeCurrentSeasonStartYear(d) === seasonYear;
+  });
+}
+
+// Insert a manual badge. Auto-fills awarded_by + season_start_year. Returns
+// the inserted row, or throws on error so callers can surface the message.
+async function awardManualBadge({ teamId, playerId, badgeKey, note, lineupId }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  const entry = badgeEntry(badgeKey);
+  if (!entry) throw new Error('Unknown badge.');
+  const row = {
+    team_id: teamId,
+    player_id: playerId,
+    badge_key: badgeKey,
+    awarded_by: user.id,
+    note: (note && note.trim()) ? note.trim() : null,
+    season_start_year: computeCurrentSeasonStartYear(),
+  };
+  if (lineupId) row.lineup_id = lineupId;
+  const { data, error } = await supabase.from('player_badges').insert(row).select().single();
+  if (error) throw error;
+  // Keep cache in sync so UI redraws without a refetch.
+  if (!_teamBadges[teamId]) _teamBadges[teamId] = [];
+  _teamBadges[teamId].unshift(data);
+  try { await logAudit(teamId, 'player_badge', data.id, 'create', { badge_key: badgeKey, player_id: playerId, note: row.note }); } catch {}
+  return data;
+}
+
+async function removeBadge(badgeId, teamId) {
+  const { error } = await supabase.from('player_badges').delete().eq('id', badgeId);
+  if (error) throw error;
+  if (_teamBadges[teamId]) {
+    _teamBadges[teamId] = _teamBadges[teamId].filter(b => b.id !== badgeId);
+  }
+  try { await logAudit(teamId, 'player_badge', badgeId, 'delete', {}); } catch {}
+}
+
 // ---------- Router ----------
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -1259,8 +1477,10 @@ async function renderPlayerCardPage(teamId) {
   document.body.classList.add('public-card-view');
   appEl.innerHTML = `<p class="loading">Loading…</p>`;
 
-  // Fetch team + team's visible lineups (published/availability only, per the RLS policy).
-  // Run both reads in parallel; fall back to minimal columns if age_group isn't migrated yet.
+  // Fetch team + team's visible lineups (published/availability only, per the RLS policy)
+  // + team badges. Run reads in parallel; team fetch falls back to minimal columns
+  // if age_group isn't migrated yet. Badge fetch swallows errors silently (table
+  // may not be migrated yet).
   const [teamRes, lineupRes] = await Promise.all([
     (async () => {
       let r = await supabase.from('teams').select('id,name,age_group,age_group_season_year,home_ground_name').eq('id', teamId).maybeSingle();
@@ -1269,7 +1489,8 @@ async function renderPlayerCardPage(teamId) {
       }
       return r;
     })(),
-    supabase.from('lineups').select('id,team_id,game_date,kickoff_time,opponent,home_away,lineup_status,published,our_score_ft,opp_score_ft,data').eq('team_id', teamId)
+    supabase.from('lineups').select('id,team_id,game_date,kickoff_time,opponent,home_away,lineup_status,published,our_score_ft,opp_score_ft,data').eq('team_id', teamId),
+    fetchTeamBadges(teamId)
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -1389,6 +1610,37 @@ function renderPlayerCardBody() {
     : 'All-time';
   const ageTag = ageGroupLabel(team);
 
+  // Earned badges for this sibling, filtered to the selected season. Falls
+  // back to an empty list if the player_badges migration hasn't been run yet.
+  // We de-duplicate by badge_key so a badge awarded twice in the same season
+  // only shows once on the card (coach re-awards to refresh date — we show
+  // the most recent awarded_at since the cache is sorted DESC already).
+  const allPlayerBadges = badgesForPlayer(team.id, p.id, seasonYear);
+  const seenKeys = new Set();
+  const uniquePlayerBadges = [];
+  for (const b of allPlayerBadges) {
+    if (seenKeys.has(b.badge_key)) continue;
+    seenKeys.add(b.badge_key);
+    uniquePlayerBadges.push(b);
+  }
+  const badgesToShow = uniquePlayerBadges.slice(0, CARD_BADGES_MAX);
+  const overflowCount = Math.max(0, uniquePlayerBadges.length - CARD_BADGES_MAX);
+  const badgesRowHtml = uniquePlayerBadges.length === 0
+    ? ''
+    : `
+      <div class="pc-badges-row" aria-label="Earned badges">
+        ${badgesToShow.map(b => {
+          const e = badgeEntry(b.badge_key);
+          const label = e ? e.name : b.badge_key;
+          return `<button type="button" class="pc-badge-chip" data-badge-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="pc-badge-emoji">${badgeEmoji(b.badge_key)}</span></button>`;
+        }).join('')}
+        ${overflowCount > 0
+          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges">+${overflowCount}</button>`
+          : (uniquePlayerBadges.length > 4
+              ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges">All</button>`
+              : '')}
+      </div>`;
+
   appEl.innerHTML = `
     <div class="player-card-wrap">
       <div class="pc-topline">
@@ -1432,6 +1684,8 @@ function renderPlayerCardBody() {
         </div>
       </div>
 
+      ${badgesRowHtml}
+
       ${seasonsAvailable.length === 0
         ? '<p class="muted" style="text-align:center;margin-top:0.75rem">No played matches yet this season.</p>'
         : ''}
@@ -1472,6 +1726,261 @@ function renderPlayerCardBody() {
     _cardState.players = [];
     _cardState.selectedPlayerIdx = 0;
     renderPlayerCardBody();
+  };
+
+  // Badge chip tap → bottom-sheet detail. "See all" → full grid. Both are
+  // read-only views — no admin controls on the public card (parents/kids only).
+  document.querySelectorAll('.pc-badge-chip[data-badge-id]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.badgeId;
+      const b = getCachedTeamBadges(team.id).find(x => x.id === id);
+      if (b) openBadgeDetailSheet(b);
+    };
+  });
+  const seeAllBtn = document.querySelector('[data-badges-see-all]');
+  if (seeAllBtn) seeAllBtn.onclick = () => openBadgesGridModal(uniquePlayerBadges, p);
+}
+
+// ---------- Badge view modals (public card — read-only) ----------
+// Bottom-sheet detail for a single earned badge. Shows emoji + name + description
+// + optional coach note (public per Chris's 2026-04-17 call) + awarded date.
+function openBadgeDetailSheet(badge) {
+  const entry = badgeEntry(badge.badge_key);
+  const name = entry?.name || badge.badge_key;
+  const desc = entry?.description || '';
+  const emoji = entry?.emoji || '🏅';
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay pc-badge-sheet-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal pc-badge-sheet" role="dialog" aria-label="${escapeHtml(name)}">
+      <div class="pc-badge-sheet-head">
+        <div class="pc-badge-sheet-emoji" aria-hidden="true">${emoji}</div>
+        <div class="pc-badge-sheet-title">
+          <h3 style="margin:0 0 0.15rem">${escapeHtml(name)}</h3>
+          <div class="muted" style="font-size:0.78rem">${escapeHtml(formatBadgeDate(badge.awarded_at))}</div>
+        </div>
+        <button class="btn-secondary" data-close type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="pc-badge-sheet-body">
+        ${desc ? `<p style="margin:0.4rem 0 0.5rem">${escapeHtml(desc)}</p>` : ''}
+        ${badge.note ? `<div class="pc-badge-note"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(badge.note)}</p></div>` : ''}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+}
+
+// Full-grid modal of every badge this player has earned in the current season
+// scope. Tapping a chip opens the detail sheet.
+function openBadgesGridModal(badges, player) {
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay pc-badge-grid-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal pc-badge-grid-modal" role="dialog" aria-label="All badges">
+      <div class="picker-header">
+        <strong>${escapeHtml(shortName(player?.name || ''))}'s badges</strong>
+        <button class="btn-secondary" data-close type="button">✕</button>
+      </div>
+      <div class="picker-body" style="padding:0.6rem 0.8rem 1rem">
+        ${badges.length === 0
+          ? '<p class="muted">No badges yet.</p>'
+          : `<div class="pc-badge-grid">
+               ${badges.map(b => {
+                 const e = badgeEntry(b.badge_key);
+                 const nm = e ? e.name : b.badge_key;
+                 return `<button type="button" class="pc-badge-grid-cell" data-bg-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(nm)}">
+                           <span class="pc-badge-grid-emoji">${badgeEmoji(b.badge_key)}</span>
+                           <span class="pc-badge-grid-name">${escapeHtml(nm)}</span>
+                         </button>`;
+               }).join('')}
+             </div>`}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelectorAll('[data-bg-id]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.bgId;
+      const b = badges.find(x => x.id === id);
+      if (b) openBadgeDetailSheet(b);
+    };
+  });
+}
+
+// ---------- Badge award modal (coach-facing) ----------
+// Searchable picker of manual-flavour badges, grouped by category. Tap a badge
+// to select it, (optional) type a public-visible note, then Save to insert.
+// Calls `onAwarded(newBadge)` once the row is persisted — the caller rerenders
+// and optionally opens the WhatsApp share confirm prompt.
+function openAwardBadgeModal({ team, player, onAwarded }) {
+  const existing = document.querySelector('.badge-award-overlay');
+  if (existing) existing.remove();
+
+  // 9a shows MANUAL badges only. Auto badges appear in 9b once criteria run.
+  // Group by category in the fixed order so the modal scrolls consistently.
+  const manualByCat = {};
+  for (const key of Object.keys(BADGE_CATALOG)) {
+    const e = BADGE_CATALOG[key];
+    if (e.flavour !== 'manual') continue;
+    (manualByCat[e.category] = manualByCat[e.category] || []).push({ key, ...e });
+  }
+
+  let selectedKey = null;
+  let searchText = '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay badge-award-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal badge-award-modal" role="dialog" aria-label="Award a badge">
+      <div class="picker-header">
+        <strong>Award a badge — ${escapeHtml(shortName(player.name || ''))}</strong>
+        <button class="btn-secondary" data-close type="button">✕</button>
+      </div>
+      <div class="picker-body" style="padding:0.6rem 0.8rem 0.8rem">
+        <input type="text" id="ba-search" placeholder="Search badges…" autocomplete="off"
+          style="width:100%;padding:0.5rem 0.6rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem" />
+        <div id="ba-list" class="ba-list" style="margin-top:0.5rem;max-height:50vh;overflow-y:auto"></div>
+        <div id="ba-selected-wrap" style="margin-top:0.6rem" hidden>
+          <div id="ba-selected-head" style="font-size:0.85rem;margin-bottom:0.3rem"></div>
+          <label style="font-size:0.78rem;color:#555">Why? (optional — shown on the public card)</label>
+          <input type="text" id="ba-note" maxlength="140" placeholder="e.g. Screamer from 30 yards"
+            style="width:100%;padding:0.45rem 0.55rem;border:1px solid var(--border);border-radius:6px;font-size:0.88rem" />
+        </div>
+        <div id="ba-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em;font-size:0.8rem"></div>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.6rem">
+          <button class="btn-secondary" data-close type="button">Cancel</button>
+          <button class="primary" id="ba-save" disabled>Award badge</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const listEl = overlay.querySelector('#ba-list');
+  const searchEl = overlay.querySelector('#ba-search');
+  const selectedWrap = overlay.querySelector('#ba-selected-wrap');
+  const selectedHead = overlay.querySelector('#ba-selected-head');
+  const noteEl = overlay.querySelector('#ba-note');
+  const saveBtn = overlay.querySelector('#ba-save');
+  const msg = overlay.querySelector('#ba-msg');
+
+  const renderList = () => {
+    const q = searchText.trim().toLowerCase();
+    const groupsHtml = BADGE_CATEGORY_ORDER
+      .map(cat => {
+        const items = (manualByCat[cat] || []).filter(b =>
+          !q || b.name.toLowerCase().includes(q) || b.description.toLowerCase().includes(q)
+        );
+        if (!items.length) return '';
+        return `
+          <div class="ba-group">
+            <div class="ba-group-title">${BADGE_CATEGORY_LABELS[cat] || cat}</div>
+            <div class="ba-group-body">
+              ${items.map(b => `
+                <button type="button" class="ba-item ${selectedKey === b.key ? 'selected' : ''}" data-badge-key="${escapeHtml(b.key)}">
+                  <span class="ba-item-emoji">${b.emoji}</span>
+                  <span class="ba-item-txt">
+                    <span class="ba-item-name">${escapeHtml(b.name)}</span>
+                    <span class="ba-item-desc muted">${escapeHtml(b.description)}</span>
+                  </span>
+                </button>
+              `).join('')}
+            </div>
+          </div>`;
+      })
+      .join('');
+    listEl.innerHTML = groupsHtml || '<p class="muted">No badges match that search.</p>';
+    listEl.querySelectorAll('[data-badge-key]').forEach(btn => {
+      btn.onclick = () => {
+        selectedKey = btn.dataset.badgeKey;
+        const e = badgeEntry(selectedKey);
+        selectedHead.innerHTML = `Selected: <strong>${e.emoji} ${escapeHtml(e.name)}</strong> <span class="muted">— ${escapeHtml(e.description)}</span>`;
+        selectedWrap.hidden = false;
+        saveBtn.disabled = false;
+        renderList();
+      };
+    });
+  };
+
+  renderList();
+  setTimeout(() => searchEl.focus(), 30);
+
+  searchEl.addEventListener('input', () => { searchText = searchEl.value; renderList(); });
+
+  overlay.querySelectorAll('[data-close]').forEach(b => b.onclick = () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  saveBtn.onclick = async () => {
+    if (!selectedKey) return;
+    msg.textContent = 'Saving…'; msg.className = 'muted';
+    saveBtn.disabled = true;
+    try {
+      const newBadge = await awardManualBadge({
+        teamId: team.id,
+        playerId: player.id,
+        badgeKey: selectedKey,
+        note: noteEl.value,
+      });
+      overlay.remove();
+      if (onAwarded) onAwarded(newBadge);
+    } catch (e) {
+      msg.textContent = 'Save failed: ' + (e.message || e);
+      msg.className = 'error';
+      saveBtn.disabled = false;
+    }
+  };
+}
+
+// ---------- Post-award share confirm (WhatsApp) ----------
+// Opens after a coach awards a new badge. Lets them send the "just earned X"
+// message straight to the team chat with the card link + access code pre-filled.
+// Declining just closes the dialog — the badge is already saved.
+function openBadgeShareConfirm(team, player, badge) {
+  const entry = badgeEntry(badge.badge_key);
+  const emoji = entry?.emoji || '🏅';
+  const name  = entry?.name  || badge.badge_key;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay badge-share-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal" role="dialog" aria-label="Share new badge">
+      <div class="picker-header">
+        <strong>🎉 ${escapeHtml(shortName(player.name || ''))} earned ${emoji} ${escapeHtml(name)}</strong>
+      </div>
+      <div class="picker-body" style="padding:0.8rem">
+        <p style="margin:0 0 0.75rem">Share this with the parents' WhatsApp?</p>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+          <button class="btn-secondary" data-close type="button">Not now</button>
+          <button class="primary" id="bsc-share" type="button">💬 Share to WhatsApp</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#bsc-share').onclick = () => {
+    const base = location.origin + location.pathname;
+    const cardUrl = `${base}#/card/${team.id}`;
+    const code = player.family_code || player.access_code || '—';
+    const lines = [
+      `🎉 ${shortName(player.name)} just earned a badge: ${emoji} ${name}!`,
+      badge.note ? `"${badge.note}"` : '',
+      '',
+      `See the full card: ${cardUrl}`,
+      `Access code: ${code}`,
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank', 'noopener');
+    close();
   };
 }
 
@@ -2177,7 +2686,10 @@ async function renderTeamDashboard(user, teamId) {
     supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }),
     supabase.from('plays').select('*').eq('team_id', teamId).order('created_at', { ascending: false }),
-    supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true })
+    supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true }),
+    // Badge fetch — swallows errors internally; cache populated for synchronous
+    // reads in renderSquadTab's player modal. Safe when the migration is pending.
+    fetchTeamBadges(teamId)
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -2599,6 +3111,23 @@ const HELP_SECTIONS = [
       <p>Yes — the arrows above the card cycle through every season with played matches. Seasons run 1 September → 7 June.</p>
       <h4>Forgetting a device</h4>
       <p>If the device is being handed off, the <strong>Forget</strong> button clears the saved unlocks. Next visit they'll need to enter the access code again.</p>
+    `
+  },
+  {
+    id: 'badges', title: 'Badges & achievements', adminOnly: false,
+    body: `
+      <h4>What are badges?</h4>
+      <p>FIFA Ultimate Team-style achievements that appear on a player's public stats card. Each one has an emoji icon, a name and a short description — kids collect them across the season.</p>
+      <h4>Who awards them?</h4>
+      <p>Coaches and admins. Open the <strong>Squad</strong> tab → tap a player's card → the <strong>🏅 Badges</strong> section shows everything they've already earned, plus a <strong>+ Award badge…</strong> button. Pick one from the grouped list (Attacking, Skill, Defending, Attitude, Teamwork, Fun, Milestone), type an optional "why?" note, and save. The note is <strong>shown on the public card</strong>, so parents/kids see exactly why a badge was awarded.</p>
+      <h4>Manual vs. auto badges</h4>
+      <p>Right now all badges are awarded manually. In a future update, some will be <strong>auto-derived</strong> from match data — Hat-Trick Hero, Top Scorer, Ever-Present, milestones like 10 games / 25 goals, and so on. The catalog already lists them; coaches simply won't see the auto ones in the Award menu until that rollout.</p>
+      <h4>Where do badges show up?</h4>
+      <p>On the <strong>public stats card</strong>: a row of up to 9 icons sits beneath the stats grid, with an "All" button for overflow. Tapping any badge opens a detail sheet with its name, description, date awarded and the coach's note.</p>
+      <h4>Removing a badge</h4>
+      <p>In the player modal, each earned-badge chip has a small ✕ — tap it to remove. (Coach/admin only.) There's no "edit" — to refresh a badge's date, remove it and re-award.</p>
+      <h4>Sharing a just-earned badge</h4>
+      <p>Straight after awarding, a popup offers <strong>💬 Share to WhatsApp</strong> — it pre-fills a message with the new badge name, your note, the card link and the player's access code. Great for the team group chat.</p>
     `
   },
   {
@@ -3181,8 +3710,38 @@ function renderSquadTab(team, canEdit, players) {
       ` : ''}
       <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player, or on the stats-card link to unlock the season-stats card.</div>
     </div>
+    ${badgesSectionHtml(p)}
     ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
   `;
+
+  // Badges section inside the player modal. Shows earned badges (all-time) with
+  // an X to remove when canEdit, plus an "Award badge" button that opens the
+  // picker modal. The section is rendered even for non-editors (read-only).
+  const badgesSectionHtml = (p) => {
+    const earned = badgesForPlayer(team.id, p.id, null); // all-time
+    const chipsHtml = earned.length === 0
+      ? `<p class="muted" style="margin:0.25rem 0 0;font-size:0.8rem">No badges yet.</p>`
+      : `<div class="pb-chip-row">
+           ${earned.map(b => {
+             const e = badgeEntry(b.badge_key);
+             const nm = e ? e.name : b.badge_key;
+             return `<span class="pb-chip" title="${escapeHtml(nm)}${b.note ? ' — ' + escapeHtml(b.note) : ''}">
+                       <span class="pb-chip-emoji">${badgeEmoji(b.badge_key)}</span>
+                       <span class="pb-chip-name">${escapeHtml(nm)}</span>
+                       ${canEdit ? `<button type="button" class="pb-chip-x" data-badge-remove="${escapeHtml(b.id)}" aria-label="Remove ${escapeHtml(nm)}">✕</button>` : ''}
+                     </span>`;
+           }).join('')}
+         </div>`;
+    return `
+      <div class="pb-section" style="margin-top:0.8rem;padding:0.6rem;background:#fff;border:1px solid #e3e7ee;border-radius:6px">
+        <div style="display:flex;align-items:center;gap:0.4rem;justify-content:space-between">
+          <strong style="font-size:0.85rem">🏅 Badges</strong>
+          ${canEdit ? `<button type="button" class="btn-secondary" data-award-badge style="font-size:0.78rem;padding:0.3rem 0.55rem">+ Award badge…</button>` : ''}
+        </div>
+        ${chipsHtml}
+      </div>
+    `;
+  };
 
   const openPlayerModal = (pid) => {
     const p = players.find(x => x.id === pid);
@@ -3333,6 +3892,55 @@ function renderSquadTab(team, canEdit, players) {
         photoRemoveBtn.disabled = false;
       }
     };
+
+    // ---------- Badges (Slice 9a) — award + remove inside player modal ----------
+    // Re-render only the .pb-section element so we don't lose the scroll position
+    // in the modal or rebuild the whole Squad tab for a badge change. Wires the
+    // fresh Award + remove buttons after every re-render.
+    const rerenderBadges = () => {
+      const section = root.querySelector('.pb-section');
+      const player = players.find(x => x.id === pid);
+      if (!section || !player) return;
+      // badgesSectionHtml returns a div wrapper — strip it and inject the inner HTML.
+      const tmp = document.createElement('div');
+      tmp.innerHTML = badgesSectionHtml(player);
+      const fresh = tmp.firstElementChild;
+      if (fresh) section.replaceWith(fresh);
+      wireBadgeHandlers();
+    };
+
+    const wireBadgeHandlers = () => {
+      const awardBtn = root.querySelector('[data-award-badge]');
+      if (awardBtn) awardBtn.onclick = () => {
+        const player = players.find(x => x.id === pid);
+        if (!player) return;
+        openAwardBadgeModal({
+          team, player,
+          onAwarded: async (newBadge) => {
+            rerenderBadges();
+            // Optional share-to-WhatsApp prompt immediately after awarding so
+            // the coach can pass the news straight to the parent group chat.
+            openBadgeShareConfirm(team, player, newBadge);
+          }
+        });
+      };
+      root.querySelectorAll('[data-badge-remove]').forEach(btn => {
+        btn.onclick = async () => {
+          const badgeId = btn.dataset.badgeRemove;
+          const b = getCachedTeamBadges(team.id).find(x => x.id === badgeId);
+          const label = b ? (badgeEntry(b.badge_key)?.name || b.badge_key) : 'this badge';
+          if (!confirm(`Remove ${label}?`)) return;
+          try {
+            await removeBadge(badgeId, team.id);
+          } catch (e) {
+            alert('Remove failed: ' + (e.message || e));
+            return;
+          }
+          rerenderBadges();
+        };
+      });
+    };
+    wireBadgeHandlers();
   };
 
   tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
