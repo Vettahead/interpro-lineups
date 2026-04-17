@@ -2657,15 +2657,26 @@ function compactMatchResultCardHtml(current) {
   const htSet = current.our_score_ht != null && current.opp_score_ht != null;
   const showHtDetail = ftSet && htSet;
 
+  // Inline "Edit" pencil button — only rendered for editors. Shares the
+  // #me-enter-result id with the full-width amber button (only one or the
+  // other is on-screen at a time) so the existing wire-up just works.
+  const canEditResult = !!(editor?.canEdit) && !!current.id;
+  const editBtnHtml = canEditResult
+    ? `<button type="button" id="me-enter-result" aria-label="Edit result" title="Edit result"
+         style="box-sizing:border-box;flex:0 0 auto;padding:0.3rem 0.55rem;background:#2a7;color:#fff;border:none;border-radius:4px;font-size:0.75rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:0.3rem;line-height:1">
+         <span aria-hidden="true">✎</span><span>Edit</span>
+       </button>`
+    : '';
+
   return `
     <div class="me-result-card" style="background:#fafafa;border:1px solid #e5e5e5;border-left:4px solid ${color};border-radius:6px;padding:0.5rem 0.65rem;margin-bottom:0.4rem">
-      ${badge ? `
-        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-          <span style="background:${color};color:#fff;font-weight:700;font-size:0.78rem;padding:0.15rem 0.5rem;border-radius:3px;letter-spacing:0.02em">${escapeHtml(badge.text)}</span>
-          ${showHtDetail ? `<span class="muted" style="font-size:0.72rem">HT ${current.our_score_ht}-${current.opp_score_ht}</span>` : ''}
-        </div>
-      ` : ''}
-      ${scorerLine ? `<div style="font-size:0.78rem;margin-top:${badge ? '0.3rem' : '0'};color:#333">⚽ ${scorerLine}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+        ${badge ? `<span style="background:${color};color:#fff;font-weight:700;font-size:0.78rem;padding:0.15rem 0.5rem;border-radius:3px;letter-spacing:0.02em">${escapeHtml(badge.text)}</span>` : ''}
+        ${showHtDetail ? `<span class="muted" style="font-size:0.72rem">HT ${current.our_score_ht}-${current.opp_score_ht}</span>` : ''}
+        <span style="flex:1 1 auto"></span>
+        ${editBtnHtml}
+      </div>
+      ${scorerLine ? `<div style="font-size:0.78rem;margin-top:0.3rem;color:#333">⚽ ${scorerLine}</div>` : ''}
       ${motmLine ? `<div style="font-size:0.78rem;margin-top:0.15rem;color:#333">🏆 ${motmLine}</div>` : ''}
     </div>
   `;
@@ -3693,6 +3704,16 @@ function openResultWizard() {
       close();
       try { if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished(); } catch (_) {}
       renderLineupsTab();
+      // After rerender, scroll back to the top of the panel/tab content so the
+      // sub-tab strip is visible on phone (otherwise the result card + any
+      // availability bar can push it below the fold, making it look like the
+      // tabs have disappeared).
+      try {
+        const tc = document.getElementById('tab-content');
+        if (tc && typeof tc.scrollTo === 'function') tc.scrollTo({ top: 0, behavior: 'auto' });
+        else if (tc) tc.scrollTop = 0;
+        if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo({ top: 0, behavior: 'auto' });
+      } catch (_) {}
     };
   };
 
@@ -4209,16 +4230,22 @@ function renderLineupsTab() {
     `
     : '';
 
-  // Prominent "Enter result" button — visible only once kickoff has passed.
-  // Primary entry point for the 4-step result wizard. Label flips to "Edit result"
-  // once a result has been recorded so the coach knows where to return for tweaks.
-  const showEnterResult = canEdit && current?.id && matchHasBeenPlayed(current);
-  const enterResultBtnHtml = showEnterResult
+  // "Enter result" button — visible only once kickoff has passed.
+  // Two flavours:
+  //   • No result yet (amber) — full-width prominent call-to-action, pushing
+  //     the coach to record the score asap.
+  //   • Result already recorded (green, compact) — a small inline "Edit"
+  //     button docked to the top-right of the compact result card so the
+  //     big button doesn't keep eating vertical space after the entry is done.
+  // The compact version is rendered INSIDE compactMatchResultCardHtml below;
+  // here we only render the big amber version when there's no result yet.
+  const showEnterResultFull = canEdit && current?.id && matchHasBeenPlayed(current) && !matchHasResult(current);
+  const enterResultBtnHtml = showEnterResultFull
     ? `
       <button type="button" class="me-enter-result-btn" id="me-enter-result"
-        style="width:100%;margin:0.4rem 0;padding:0.75rem 1rem;background:${matchHasResult(current) ? '#2a7' : '#b88800'};color:#fff;border:none;border-radius:6px;font-weight:700;font-size:0.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:0.5rem;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+        style="box-sizing:border-box;width:100%;margin:0.4rem 0;padding:0.7rem 0.9rem;background:#b88800;color:#fff;border:none;border-radius:6px;font-weight:700;font-size:0.92rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:0.45rem;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
         <span aria-hidden="true">⚽</span>
-        <span>${matchHasResult(current) ? 'Edit result' : 'Enter result'}</span>
+        <span>Enter result</span>
       </button>
     `
     : '';
