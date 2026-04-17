@@ -2142,35 +2142,34 @@ body.public-card-view #app { padding-top: 0; }
   object-fit: contain;
 }
 
-/* Photo — fills the upper-right zone on the PNG. No visible frame. Bottom
-   fades into the gold body so it reads like a real FIFA portrait. Height
-   stops JUST above the PNG's horizontal divider (48%) so it never leaks
-   into the name-bar area. */
+/* Photo — now a clean circle inside the upper-right zone. Square
+   aspect-ratio + border-radius:50% guarantees it never protrudes past the
+   PNG's curved top notch or the horizontal divider at 48%. A soft gold ring
+   makes it read as a portrait medallion rather than a pasted-in thumbnail. */
 .pc-photo {
   position: absolute;
-  top: 11%;                   /* starts below the PNG's top notch/curve */
-  right: 10%;
-  width: 55%;
-  height: 37%;                /* bottom lands at 48% — right on the divider */
-  background-color: transparent;
+  top: 10%;
+  right: 13%;
+  width: 42%;
+  aspect-ratio: 1 / 1;
+  background-color: #fcefc2;
   background-size: cover;
-  background-position: center 20%;  /* face sits slightly above centre */
+  background-position: center 25%;  /* face slightly above centre */
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1;
   filter: saturate(0.98) contrast(1.02);
-  /* Subtle bottom fade masks the hard cut-off into the divider / name band.
-     No border/shadow — photo reads as part of the card. */
-  -webkit-mask-image: linear-gradient(to bottom,
-    black 0%, black 82%, transparent 100%);
-          mask-image: linear-gradient(to bottom,
-    black 0%, black 82%, transparent 100%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px rgba(138,88,0,0.45),    /* outer gold ring */
+    0 0 0 4px rgba(255,255,255,0.55), /* thin light lift */
+    0 3px 8px rgba(0,0,0,0.18);
 }
 .pc-photo-letter {
-  font-size: 4.25rem;
+  font-size: 3.5rem;
   font-weight: 900;
-  color: rgba(35,28,8,0.32);
+  color: rgba(35,28,8,0.35);
   font-family: inherit;
   letter-spacing: -0.03em;
 }
