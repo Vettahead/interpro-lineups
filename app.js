@@ -698,14 +698,14 @@ function renderNavDrawer(user, teamId, team, role, canEdit, memberships) {
   // which shows the fixtures-as-cards list. The separate fixtures page is retired.
   const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
-    { id: 'lineups',    label: 'Matches',    icon: '🌐' },
-    { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Tactics',    icon: '📋' },
-    { id: 'formations', label: 'Formations', icon: '▦' },
-    { id: 'help',       label: 'Help / FAQ', icon: '❓' },
+    { id: 'lineups',    label: 'Matches',       icon: '🌐' },
+    { id: 'squad',      label: 'Squad details', icon: '👥' },
+    { id: 'plays',      label: 'Tactics',       icon: '📋' },
+    { id: 'formations', label: 'Formations',    icon: '▦' },
+    { id: 'help',       label: 'Help / FAQ',    icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
     ...(showSwitch ? [{ id: '__switchteam', label: 'Switch team', icon: '↻' }] : []),
-    { id: '__signout',  label: 'Sign out',   icon: '⏻' },
+    { id: '__signout',  label: 'Sign out',      icon: '⏻' },
   ];
 
   const drawerAgLabel = ageGroupLabel(team);
@@ -824,11 +824,11 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit, memberships) {
   // sub-tab which shows the fixtures-as-cards list.
   const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
-    { id: 'lineups',    label: 'Matches',    icon: '🌐' },
-    { id: 'squad',      label: 'Squad',      icon: '👥' },
-    { id: 'plays',      label: 'Tactics',    icon: '📋' },
-    { id: 'formations', label: 'Formations', icon: '▦' },
-    { id: 'help',       label: 'Help / FAQ', icon: '❓' },
+    { id: 'lineups',    label: 'Matches',       icon: '🌐' },
+    { id: 'squad',      label: 'Squad details', icon: '👥' },
+    { id: 'plays',      label: 'Tactics',       icon: '📋' },
+    { id: 'formations', label: 'Formations',    icon: '▦' },
+    { id: 'help',       label: 'Help / FAQ',    icon: '❓' },
     ...(canEdit ? [{ id: 'members', label: 'Admin', icon: '⚙' }] : []),
     ...(showSwitch ? [{ id: '__switchteam', label: 'Switch team', icon: '↻' }] : []),
   ];
@@ -936,6 +936,11 @@ async function renderTeamsHome(user, opts = {}) {
     return;
   }
 
+  // Render the persistent desktop sidebar on the picker page too, so the user
+  // has a visible sign-out button and the site feels coherent. The sidebar is
+  // simpler here (no team-scoped tabs) but mirrors the style of the team pages.
+  renderTeamsHomeSidebar(user);
+
   // Card grid — same visual language as match / tactic cards.
   const teamCardsHtml = memberships.length
     ? memberships.map(m => {
@@ -969,15 +974,13 @@ async function renderTeamsHome(user, opts = {}) {
   `;
 
   const emptyStateHtml = memberships.length
-    ? ''
-    : `<p class="muted" style="margin:0 0 0.5rem">You're not on any teams yet — create one below to get started.</p>`;
+    ? `<p class="muted" style="margin:0 0 1rem">Pick a team to open, or create a new one.</p>`
+    : `<p class="muted" style="margin:0 0 1rem">You're not on any teams yet — create one below to get started.</p>`;
 
+  // No wrapper <h1> here — the app's main header already shows the product
+  // title, and the sidebar's "Your teams" head is the section label.
   appEl.innerHTML = `
     <div class="teams-home">
-      <header class="th-header">
-        <h1 style="margin:0">Your teams</h1>
-        <p class="muted" style="margin:0.25rem 0 0">Pick a team to open, or create a new one.</p>
-      </header>
       ${emptyStateHtml}
       <div class="me-matches-grid th-grid">
         ${teamCardsHtml}
@@ -997,6 +1000,45 @@ async function renderTeamsHome(user, opts = {}) {
     // After creating, just refresh this page (new team joins the list, doesn't auto-switch)
     await renderTeamsHome(user, { force: true });
   });
+}
+
+// Lightweight desktop sidebar for the team-picker page — re-uses the .desktop-sidebar
+// shell (logo head + user badge + sign out) but with no team-scoped tabs. Keeps
+// visual continuity with the rest of the app so the picker doesn't feel like a
+// separate stuck page.
+function renderTeamsHomeSidebar(user) {
+  const sidebar = document.getElementById('desktop-sidebar');
+  if (!sidebar) return;
+
+  const rawName = user?.user_metadata?.full_name || (user?.email ? user.email.split('@')[0] : '');
+  const displayName = rawName || 'Account';
+  const avatarChar = (displayName[0] || '?').toUpperCase();
+
+  // Ensure the body class is set so CSS reveals the sidebar at ≥900px.
+  document.body.classList.add('has-desktop-sidebar');
+
+  sidebar.innerHTML = `
+    <div class="ds-head">
+      <span class="ds-logo" aria-hidden="true">⚽</span>
+      <div class="ds-team">
+        <div class="ds-team-name">Your teams</div>
+        <div class="ds-team-sub">Pick a team to open</div>
+      </div>
+    </div>
+    <nav class="ds-tabs" aria-label="Primary" style="flex:1"></nav>
+    <div class="ds-user">
+      <span class="ds-user-avatar" aria-hidden="true">${escapeHtml(avatarChar)}</span>
+      <div class="ds-user-text">
+        <div class="ds-user-name">${escapeHtml(displayName)}</div>
+      </div>
+      <button type="button" class="ds-user-signout" id="th-signout" title="Sign out">Sign out</button>
+    </div>
+  `;
+
+  const signoutBtn = document.getElementById('th-signout');
+  if (signoutBtn) signoutBtn.onclick = async () => {
+    try { await supabase.auth.signOut(); } catch (_) {}
+  };
 }
 
 // Create-team modal — shared between the team-picker page and the Admin tab.
@@ -1701,6 +1743,10 @@ let activeTab = 'squad';
 let _pendingLineupLoad = null; // play payload to apply next time the Lineups tab renders
 let _pendingLineupIdToOpen = null; // wizard-saved lineup id; Lineups tab should load it fully
 let currentFilter = 'All';
+// Squad details page sub-tab — 'teaminfo' (team info + home ground) or
+// 'squad' (players). Preserved across re-renders so the coach doesn't
+// get bounced back to Team info when they change a filter.
+let _squadSubTab = 'squad';
 const expandedPlayers = new Set(); // player ids with expanded detail panel
 
 // In-memory editor state for lineups tab
@@ -1815,7 +1861,7 @@ async function renderTeamDashboard(user, teamId) {
   if (tabsEl) {
     tabsEl.innerHTML = `
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
-      <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad</button>
+      <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad details</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches</button>
       <button class="h-tab ${activeTab === 'plays' ? 'active' : ''}" data-tab="plays">Tactics</button>
       ${canEdit ? `<button class="h-tab ${activeTab === 'members' ? 'active' : ''}" data-tab="members">Members</button>` : ''}
@@ -2507,20 +2553,57 @@ function renderSquadTab(team, canEdit, players) {
     grid = `<div class="sc-grid">${visible.map(cardHtml).join('')}</div>`;
   }
 
+  // Sub-tab strip — Team info (team info + home ground) vs Squad (player grid).
+  // _squadSubTab persists across re-renders (e.g. when the filter changes) so
+  // the coach doesn't get bounced back to Team info each time.
+  const subTab = _squadSubTab || 'squad';
+
   tabEl.innerHTML = `
-    <div class="squad-layout">
-      <div class="squad-main">
-        ${teamInfoCard}
-        ${homeGroundCard}
-        ${addForm}
-        <div class="card">
-          <h3 style="margin-top:0">Squad ${currentFilter !== 'All' ? '— ' + currentFilter : ''}</h3>
-          ${grid}
+    <div class="squad-details-layout" data-squad-tab="${subTab}">
+      <nav class="lineup-phone-tabs sd-subtabs" role="tablist" aria-label="Squad details sections">
+        <button class="lineup-phone-tab ${subTab === 'teaminfo' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'teaminfo' ? 'true' : 'false'}" data-squad-subtab="teaminfo">Team info</button>
+        <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"    data-squad-subtab="squad">Squad</button>
+      </nav>
+
+      <div data-squad-group="teaminfo" class="sd-panel">
+        <div class="squad-layout">
+          <div class="squad-main">
+            ${teamInfoCard}
+            ${homeGroundCard}
+          </div>
         </div>
       </div>
-      <div class="squad-side">${filterHtml}</div>
+
+      <div data-squad-group="squad" class="sd-panel">
+        <div class="squad-layout">
+          <div class="squad-main">
+            ${addForm}
+            <div class="card">
+              <h3 style="margin-top:0">Squad ${currentFilter !== 'All' ? '— ' + currentFilter : ''}</h3>
+              ${grid}
+            </div>
+          </div>
+          <div class="squad-side">${filterHtml}</div>
+        </div>
+      </div>
     </div>
   `;
+
+  // Sub-tab switcher. Persists the choice on _squadSubTab.
+  const layoutEl = tabEl.querySelector('.squad-details-layout');
+  tabEl.querySelectorAll('[data-squad-subtab]').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.squadSubtab;
+      if (!key) return;
+      _squadSubTab = key;
+      if (layoutEl) layoutEl.setAttribute('data-squad-tab', key);
+      tabEl.querySelectorAll('[data-squad-subtab]').forEach(b => {
+        const on = b.dataset.squadSubtab === key;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    };
+  });
 
   tabEl.querySelectorAll('.filter-btn').forEach(b => {
     b.onclick = () => { currentFilter = b.dataset.filter; renderSquadTab(team, canEdit, players); };

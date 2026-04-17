@@ -1909,6 +1909,11 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .lineup-layout[data-phone-tab="moves"]     [data-phone-group]:not([data-phone-group="moves"])     { display: none !important; }
 .lineup-layout[data-phone-tab="edit"]      [data-phone-group]:not([data-phone-group="edit"])      { display: none !important; }
 
+/* Squad details page sub-tabs (2026-04-17) — Team info vs Squad. */
+.squad-details-layout[data-squad-tab="teaminfo"] [data-squad-group]:not([data-squad-group="teaminfo"]) { display: none !important; }
+.squad-details-layout[data-squad-tab="squad"]    [data-squad-group]:not([data-squad-group="squad"])    { display: none !important; }
+.sd-subtabs { margin: 0.5rem 0 0.75rem; }
+
 /* Availability bar — always visible above the editor sub-tabs when a match is open. */
 .me-avail-bar {
   background: #fff;
