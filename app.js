@@ -2426,20 +2426,24 @@ const HELP_SECTIONS = [
   {
     id: 'teams', title: 'Teams', adminOnly: false,
     body: `
+      <h4>What happens after I sign in?</h4>
+      <p>Coach with exactly one team → you're dropped straight into it, no picker. Anyone else (admins, or users on multiple teams) sees the <strong>Your teams</strong> card grid.</p>
       <h4>Switching between teams</h4>
-      <p>Click <strong>← Your teams</strong> in the top-left to go back to the team list.</p>
+      <p>Three ways: the <strong>↻ Switch team</strong> shortcut in the sidebar/drawer (only shown when it'd be useful), the team-switcher strip at the top of the <strong>Admin</strong> tab, or <strong>← Your teams</strong> in the header.</p>
+      <h4>Age group</h4>
+      <p>Each team has an age group (U7 → U18). Set it on <strong>Squad details → Team info</strong>. It auto-bumps by one on <strong>7 June</strong> every year — a week after the season ends — so you don't have to remember.</p>
       <h4>Who can see my team?</h4>
-      <p>Only people you invite as members. The exception is <strong>published lineups</strong>, which can be shared with anyone via a public link.</p>
+      <p>Only people you invite. Exceptions: <strong>published lineups</strong> (parent view) and <strong>player stats cards</strong>, both of which can be shared by public link + access code.</p>
     `
   },
   {
     id: 'create-team', title: 'Creating a team', adminOnly: true,
     body: `
-      <p>On the <strong>Your teams</strong> page, scroll to <strong>Create a team</strong>, type a name and click <strong>Create</strong>. You'll become the team's admin automatically.</p>
+      <p>From the <strong>Your teams</strong> picker, or inside a team on the <strong>Admin</strong> tab. Only admins can create new teams — coaches can't (ask your admin to add you to the new team). A create modal asks for the name + age group.</p>
     `
   },
   {
-    id: 'squad', title: 'Squad — players & home ground', adminOnly: false,
+    id: 'squad', title: 'Squad details — team settings & players', adminOnly: false,
     body: `
       <h4>Adding a player <em>(coach/admin only)</em></h4>
       <p>Open <strong>Squad</strong> and click <strong>+ Add player</strong>. Fill in name, shirt number, preferred positions and notes. Save.</p>
@@ -2579,6 +2583,25 @@ const HELP_SECTIONS = [
     `
   },
   {
+    id: 'stats-card', title: 'Player stats card (FIFA-style)', adminOnly: true,
+    body: `
+      <h4>What is it?</h4>
+      <p>A FIFA Ultimate Team-style card at <code>/#/card/{team_id}</code> showing a player's season stats — Goals, MOTM, Starts, Subs, Apps, and W-D-L. One public URL per team; each player unlocks their own card using their personal access code (or family code for siblings). Season selector via ← / → arrows.</p>
+      <h4>Sharing the link</h4>
+      <p>Two ways:</p>
+      <ul>
+        <li><strong>Per player</strong> — Squad tab → open a player's modal → tap <strong>🎴 Share stats card (WhatsApp)</strong>. Pre-fills a message with the kid's first name, the card URL, and their access code.</li>
+        <li><strong>Team-wide</strong> — Admin tab → <strong>Share the team's stats-card link</strong> card at the top → Copy or Open. Paste into the team WhatsApp along with each child's code.</li>
+      </ul>
+      <h4>What do the stats mean?</h4>
+      <p>All derived live from the match data — <strong>Goals</strong> from the goalscorers list, <strong>MOTM</strong> from the MOTM picker, <strong>Starts</strong> = matches started in the XI, <strong>Subs</strong> = matches on the bench (may or may not have come on), <strong>Apps</strong> = Starts + Subs, <strong>W-D-L</strong> = the team's record in matches the player featured in. Editing a match result updates everyone's cards automatically.</p>
+      <h4>Does it show older seasons?</h4>
+      <p>Yes — the arrows above the card cycle through every season with played matches. Seasons run 1 September → 7 June.</p>
+      <h4>Forgetting a device</h4>
+      <p>If the device is being handed off, the <strong>Forget</strong> button clears the saved unlocks. Next visit they'll need to enter the access code again.</p>
+    `
+  },
+  {
     id: 'formations', title: 'Formations tab', adminOnly: true,
     body: `
       <h4>What's the Formations tab for?</h4>
@@ -2708,12 +2731,10 @@ const HELP_SECTIONS = [
     id: 'roadmap', title: 'Roadmap (coming soon)', adminOnly: true,
     body: `
       <ul>
-        <li>Admin panel for managing all members in one place</li>
+        <li><strong>Badges & achievements</strong> — FIFA-style collectible badges per player. Some auto-awarded (Hat Trick Hero, On Fire, 10 games, Ever-Present, Supersub…) and some coach-awarded (Coach's Choice, Training Star, Fair Play, Nutmeg King, Celebration Star…). Shown under the stats on the player card and in the Squad tab. Full brief in the handoff.</li>
         <li>Email notifications when lineups are published or updated</li>
         <li>Audit log UI to see who changed what</li>
-        <li><strong>Parent season page</strong> — one bookmarkable URL per team, gated by a child's access code, showing every match the player featured in plus goals and MOTM totals for the season</li>
         <li>Team-wide public page so parents can bookmark one URL for the season</li>
-        <li>Per-player season tally of goals and Man of the Match awards</li>
         <li>A holistic look-and-feel polish pass</li>
       </ul>
     `

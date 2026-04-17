@@ -23,22 +23,35 @@ Click **Log out** in the top-right of the header (on phone it's tucked inside th
 ## Teams
 
 ### How do I create a team?
-On the **Your teams** page, scroll to the **Create a team** section, type a name and click **Create**. You'll become the team's admin automatically and be taken to the team dashboard.
+Two places:
+- **Your teams** (the picker page) — tap the dashed **+ Create new team** card. A modal asks for the team name + age group, then you're done.
+- **Admin tab** (inside a team) — tap **+ Create new team** at the end of the team switcher strip. Doesn't auto-switch; the new team joins your list.
+
+Only **admins** (or brand-new users with zero teams) can create teams. Coaches can't — ask the admin to add you to the new team.
+
+### How do I set or change the team's age group?
+Open **Squad details → Team info** and pick from the dropdown (U7s through U18s). The stored value auto-bumps by one each **7 June** — a week after 31 May, the end of the season — so you don't have to remember to roll it forward. If you set a new value at any point, it resets the bump clock to that season.
 
 ### How do I switch between teams?
-Click **← Your teams** in the top-left of the header to go back to the team list, then click any team to open it.
+Three options:
+- **↻ Switch team** in the sidebar / drawer — appears for anyone with >1 team OR any admin role. Takes you back to the picker.
+- **Admin tab** → click any team card in the top strip. Switches in place.
+- **← Your teams** breadcrumb in the header.
 
 ### Who can see my team?
-Only people you invite as members. Each team is private by default. The exception is **published lineups**, which can be shared with anyone via a public link (see Parent view below).
+Only people you invite as members. Each team is private by default. The exceptions are **published lineups** and **player stats cards**, which can be shared with anyone via public links (see Parent view + Player stats card below).
 
 ---
 
 ## The team dashboard — layout
 
 ### Desktop / tablet / phone layouts
-- **Desktop (≥900px)** — a persistent left sidebar lists the tabs: **Matches**, **Squad**, **Tactics**, **Formations**, **Help** and (coach/admin only) **Admin**. Your user badge and **Log out** sit at the bottom of the sidebar.
+- **Desktop (≥900px)** — a persistent left sidebar lists the tabs: **Matches**, **Squad details**, **Tactics**, **Formations**, **Help** and (coach/admin only) **Admin**. Your user badge and **Log out** sit at the bottom of the sidebar. If you're on >1 team (or admin anywhere) you also get a **↻ Switch team** shortcut just above the badge.
 - **Phone (≤640px)** — a ☰ hamburger in the header opens a slide-in drawer with the same tabs.
 - **Tablet (641–899px)** — a horizontal tab strip across the top of the page.
+
+### What happens after I sign in?
+If you're a coach with exactly one team, the app takes you straight into it — no team picker. If you have more than one team, or you're an admin in any team, you'll see the **Your teams** card grid so you can pick. Admins can also create a new team from there (coaches can't — only admins can start fresh teams, see below).
 
 ### What's the orange **+** button in the sidebar / header?
 That's the **global quick-create menu**. Click it from anywhere and pick one of:
@@ -77,10 +90,17 @@ Two other entry points open the same wizard: the desktop match-editor header has
 
 ---
 
-## Squad tab — players and home ground
+## Squad details tab — team settings and players
+
+### What's in the Squad details tab?
+Two sub-tabs:
+- **Team info** — edit team name, pick / change age group, set or fine-tune the team's home ground (name + postcode + map pin).
+- **Squad** — add / edit / remove players, upload photos, manage access codes and siblings, filter by position.
+
+The sub-tab you're on persists, so changing a filter on the Squad tab doesn't bounce you back to Team info.
 
 ### How do I add a player?
-Open the **Squad** tab and click **+ Add player**. Fill in name, shirt number, preferred positions and any notes. Click **Save**.
+Open **Squad details → Squad** and click **+ Add player**. Fill in name, shirt number, preferred positions and any notes. Click **Save**.
 
 ### What does the position field do?
 A player's preferred positions help colour-code them on the lineup picker. They're suggestions, not restrictions — you can put any player anywhere on the pitch.
@@ -401,6 +421,41 @@ They're treated as private but they're not high-security secrets — they're Wha
 
 ---
 
+## Player stats card (public link)
+
+### What is it?
+A FIFA Ultimate Team-style card that kids and parents can open to see season stats for their player — goals, MOTM awards, starts, sub appearances, total appearances, and W-D-L record in matches they played. Lives at `/#/card/{team_id}` — one link per team. Each player unlocks their own card using their access code (or family code if siblings are linked).
+
+### How do I share the link with parents?
+Two places:
+- **Squad details → Squad** → open a player's card → tap **🎴 Share stats card (WhatsApp)**. Opens WhatsApp with a pre-filled message including the child's first name, the card URL, and their access code. Just pick the recipient and send.
+- **Admin tab** → **Share the team's stats-card link** card at the top → tap **📋 Copy** to copy the URL to the clipboard, or **Open ↗** to preview it yourself. Paste into a WhatsApp group along with each child's code (codes are on the Squad tab).
+
+### What does the parent / kid do?
+Open the link, type in the child's personal access code (e.g. `JE1234`) or family code (5 digits) into the Unlock box, done. The device remembers them — next visit opens straight onto the card. If they've got siblings linked by family code, small chips at the top let them switch between cards.
+
+### What stats are on the card?
+Six:
+- **Goals** — total goals scored in played matches this season
+- **MOTM** — number of times awarded Man of the Match
+- **Starts** — matches started in the XI
+- **Subs** — matches on the bench (may or may not have come on)
+- **Apps** — total appearances (Starts + Subs)
+- **W-D-L** — team record in matches the player featured in
+
+All numbers update automatically when you edit a result — nothing's cached, everything's derived from the match data.
+
+### Does the card show older seasons too?
+Yes. The **← / →** arrows above the card cycle through every season the team has played matches in. Seasons run 1 September → 7 June (the bump date matches the age-group rollover).
+
+### Can a parent sign out / forget the player on their device?
+Yes — **Forget** button in the top-right of the card removes all saved unlocks for that team on that device.
+
+### Are the stats cards public to anyone?
+Anyone with the team URL + a valid access code can view. Without a code you just see the unlock form. Access codes are the same ones used for availability.
+
+---
+
 ## Tips & troubleshooting
 
 ### My changes aren't saving
@@ -447,10 +502,8 @@ A typical week:
 
 ## Roadmap (coming soon)
 
-- Admin panel for managing all members in one place
+- **Badges & achievements** — FIFA-style collectible badges for every player. Some **auto-awarded** (Hat Trick Hero, On Fire, 10 games played, Ever-Present, Supersub, etc.) and some **coach-awarded** (Coach's Choice, Training Star, Fair Play, Nutmeg King, Celebration Star, …). Shown under the stats on the player card and in the Squad tab. Full brief in the handoff.
 - Email notifications when lineups are published or updated
 - Audit log UI to see who changed what
-- **Parent season page** — one bookmarkable URL per team, gated by a child's access code, showing every match the player featured in, plus goals and MOTM totals for the season
 - Team-wide public page so parents can bookmark one URL for the season
-- Per-player season tally of goals and Man of the Match awards
 - A holistic look-and-feel polish pass

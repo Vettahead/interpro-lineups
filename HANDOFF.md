@@ -1,5 +1,232 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-17)
 
+## 🔖 Where we left off on 2026-04-17 (session 7 — read this first)
+
+Huge session. Admin/team UX overhaul, age-group field, **public player card page** (FIFA-style), plus a queue of polish fixes. Roadmap: next up is the **badges & achievements system** (full brief at the bottom).
+
+### Shipped this session (session 7)
+
+1. **Team-picker page rebuilt** (`renderTeamsHome`). Card grid using the same `.me-match-card` skeleton as matches; each card shows team name + role + age group chip. Dashed **+ Create new team** card at the end. Renders the desktop sidebar (via new `renderTeamsHomeSidebar`) with a user badge + Sign out at the bottom — no more "trapped, 2 headers" experience.
+
+2. **Single-team coach auto-load.** On sign-in, if the user has exactly 1 team AND their role there isn't `admin`, we hash-redirect straight into that team. Admins and multi-team users still see the picker. `opts.force` bypasses this so the Switch team button doesn't bounce back. Logic lives at the top of `renderTeamsHome`.
+
+3. **Switch team in sidebar + drawer** (`__switchteam` pseudo-tab). Visible only when the user has >1 team OR is admin anywhere (`userCanSwitchTeams(memberships)`). Clicks clear the hash, returning to the picker.
+
+4. **Admin panel expanded — Option A.** Horizontal card grid at the top showing every team the user is admin of (current team tinted indigo + "(current)" tag), click any to switch. `+ Create new team` dashed card at the end. Below: a **stats-card share** box (copy link / open ↗) only visible to admins, then the existing invite + member management UI.
+
+5. **Age group field on teams + auto-bump.** New columns `teams.age_group` (INT 7..18) + `teams.age_group_season_year` (INT). Helper pair: `computeCurrentSeasonStartYear(date)` returns the current season's start year (flips on 7 June), and `effectiveAgeGroup(team, date)` adds `(currentSeasonStart - storedSeasonStartYear)` to the stored age so the display auto-bumps after the season ends. `ageGroupLabel` returns "U13s" format. Displayed in: team picker cards, sidebar subtitle (desktop), drawer head (phone), Squad details → Team info, team-create modal. All DB reads/writes fall back gracefully to name-only when the columns aren't migrated yet.
+
+6. **Squad page → Squad details** with sub-tabs. Sidebar/drawer label renamed. Two sub-tabs (Team info / Squad) backed by `_squadSubTab` module var + CSS filter rules `.squad-details-layout[data-squad-tab="..."]`. Team info tab holds team-name + age-group dropdown + Home-ground card. Squad tab holds add-player form + filter + player grid. Sub-tab choice persists across re-renders so changing a filter doesn't bounce you back.
+
+7. **Mobile match-editor reorder.** On ≤899px the match editor's body (`.match-editor-body`) goes from grid to flex column with source order: top-strip (result card + availability bar + phone status row + Enter result button) → pitch → sub-tabs. Desktop layout unchanged (new `grid-template-rows: auto 1fr` with pitch spanning both rows in column 1). Mobile padding tightened on all top-strip children. Photo "vanished on mobile" follow-up: added `align-items: stretch` (overriding the desktop `start`) and explicit `width: 100%` on the three direct children so they fill the flex column width.
+
+8. **Team-creation permission model — client + server.** Client-side (`renderTeamsHome`, admin panel): `+ Create new team` only visible when user has zero teams OR admin role in any team. Coaches and parents with 1+ teams see a copy explaining "Only admins can create new teams". Server-side: new RLS policy `teams_insert_admin_or_new` replaces the previous permissive one — `WITH CHECK (created_by = auth.uid() AND (EXISTS admin role somewhere OR NOT EXISTS any team_members row))`. SQL captured in session 7 summary below.
+
+9. **Public player card page** (`#/card/{team_id}`). FIFA Ultimate Team style, using `web/GOLD_FIFA_22.png` as the card background. Unlocked by access code (personal or family) via new SECURITY DEFINER RPC `get_player_by_code(team_id, code)` (returns jsonb array so family codes unlock all siblings at once). LocalStorage persists the unlock keyed by team id; ✕ Forget button clears it. Family codes show a sibling switcher chip row. Season selector via ← / → arrow buttons; defaults to the most recent season with any played matches. Stats aggregated client-side from lineups (matches with `lineup_status IN ('availability','published')` — existing RLS allows anon). Stats: **Goals · MOTM · Starts · Subs · Apps · W-D-L**. W-D-L uses the team's FT result on matches where the player featured. On the card route, body class `.public-card-view` hides the app header / sidebar / drawer so it's a clean public page.
+
+10. **FIFA card styling iterations.** Full `GOLD_FIFA_22.png` swap from CSS-drawn trim. Arial Black stack at weight 900 throughout (no Georgia serif). Shirt number column pushed inward (`left: 16%`) to clear the PNG's top notch. Player photo now a **circle** (`width: 42%; aspect-ratio: 1/1; border-radius: 50%`) with gold medallion ring (outer box-shadow: 3px gold + 1px white lift + drop shadow), positioned at `top: 10%; right: 13%` — guarantees it never protrudes past the notch or the horizontal divider. Name at top 52%, stats grid at 62%→88% with 14% left/right padding for breathing room. 2×3 stat grid, each cell: value (1.55rem) + short label (1.05rem, uppercase).
+
+11. **Stats-card share buttons.** Per-player in Squad tab's player modal → "🎴 Share stats card (WhatsApp)" opens WhatsApp with name + card URL + access code pre-filled. Team-wide in Admin → readonly URL input + 📋 Copy + Open ↗ buttons.
+
+12. **FAQ + in-app Help updates.** FAQ expanded with team-picker changes, Squad details split, age group behaviour, team creation rules, public card page + share flow. HELP_SECTIONS mirror this.
+
+### SQL to run in Supabase (session 7)
+
+```sql
+-- (a) Age group columns on teams (if not already done in session 6).
+ALTER TABLE teams
+  ADD COLUMN IF NOT EXISTS age_group INT,
+  ADD COLUMN IF NOT EXISTS age_group_season_year INT;
+ALTER TABLE teams
+  ADD CONSTRAINT teams_age_group_chk
+  CHECK (age_group IS NULL OR (age_group BETWEEN 7 AND 18));
+-- Backfill Blues team to U13 for 2025-26:
+UPDATE teams SET age_group = 13, age_group_season_year = 2025 WHERE age_group IS NULL;
+
+-- (b) Team-creation permission (replaces whatever permissive policy was there).
+-- Run first: SELECT policyname FROM pg_policies WHERE tablename='teams' AND cmd='INSERT';
+-- Then DROP the matching policy by name, then:
+CREATE POLICY "teams_insert_admin_or_new"
+  ON teams
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    created_by = auth.uid()
+    AND (
+      EXISTS (SELECT 1 FROM team_members WHERE user_id = auth.uid() AND role = 'admin')
+      OR NOT EXISTS (SELECT 1 FROM team_members WHERE user_id = auth.uid())
+    )
+  );
+
+-- (c) Public player card unlock RPC.
+CREATE OR REPLACE FUNCTION public.get_player_by_code(
+  p_team uuid,
+  p_code text
+) RETURNS jsonb
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  WITH norm AS (
+    SELECT upper(regexp_replace(coalesce(p_code, ''), '\s', '', 'g')) AS c
+  )
+  SELECT COALESCE(jsonb_agg(
+    jsonb_build_object(
+      'id', p.id, 'name', p.name, 'number', p.number,
+      'position', p.position, 'photo_url', p.photo_url
+    )
+    ORDER BY p.number NULLS LAST, p.name
+  ), '[]'::jsonb)
+  FROM players p, norm
+  WHERE p.team_id = p_team
+    AND norm.c <> ''
+    AND (upper(p.access_code) = norm.c OR p.family_code = norm.c);
+$$;
+GRANT EXECUTE ON FUNCTION public.get_player_by_code(uuid, text) TO anon, authenticated;
+```
+
+All three are **already run** on the Supabase instance — included here for the next machine's record.
+
+### Files touched (session 7)
+- `web/app.js` — massive rewrite across `renderTeamsHome` / `renderTeamsHomeSidebar` / `renderDesktopSidebar` / `renderNavDrawer` / `renderMembersTab` / Squad rebuild / card page (`renderPlayerCardPage`, `renderPlayerCardBody`, `_cardState`, `_loadCardUnlocks` / `_saveCardUnlocks` / `_clearCardUnlocks`) / stats helpers (`computePlayerStats`, `availableSeasonsFromLineups`, `seasonLabelForYear`) / age-group helpers (`computeCurrentSeasonStartYear`, `effectiveAgeGroup`, `ageGroupLabel`, `AGE_GROUP_OPTIONS`) / `openCreateTeamModal` / `getUserTeams` cache / `userCanSwitchTeams` / squad sub-tab state (`_squadSubTab`) / mobile body reorder HTML / share-card buttons / `renderUserBar` is unchanged / route `#/card/{team_id}` wired in `currentRoute()` + `render()`.
+- `web/styles.css` — team-picker (`.teams-home`, `.th-*`), admin team cards (`.am-*`), public card chrome (`.player-card-wrap`, `.pc-*`), FIFA card using `GOLD_FIFA_22.png` as background, `.public-card-view` chrome hide, Squad details sub-tab filter rules, mobile match-editor flex column override.
+- `web/FAQ.md` — new sections for team picker / Squad details / age group / stats card; coach workflow updated.
+- `web/HANDOFF.md` — this entry.
+- `web/GOLD_FIFA_22.png` — FIFA 22 gold card template added to `web/` (Chris dropped it in).
+
+### Sanity-check script (session 7)
+1. **Team picker:** sign out and back in as Chris → picker shows Blues card with "U13s · Admin" + dashed create card. Sidebar on desktop shows logo head + user badge + Sign out.
+2. **Auto-load:** if a coach-only account with 1 team signs in, they should skip the picker and land directly on that team.
+3. **Switch team:** admin with 1 team — Switch team shortcut visible in sidebar. Tap → back at picker. Pick Blues → back in.
+4. **Age group:** Squad details → Team info → change U13 to U14 → save → header subtitle reflects. On 7 June 2026 the displayed group auto-bumps to U14 even if age_group is still 13 stored.
+5. **Team-creation gate:** sign in as a non-admin coach with 1 team → picker doesn't show the + Create new team card. Open a SQL console, attempt an INSERT into teams as them → rejected.
+6. **Match editor on phone:** open a match → availability bar / status / Enter result sit ABOVE the pitch, pitch, then sub-tabs below. No jank, pitch shows.
+7. **Public card:** open `/#/card/{team_id}` on your phone → cream background, no app header. Enter JE1234 → card renders with the GOLD_FIFA_22.png background, circular photo in upper-right, number + Interpro crest in upper-left column, name on the divider, 6 stats at the bottom. Left/right arrows cycle seasons.
+8. **Share flow:** Squad → open Orin's modal → tap 🎴 Share stats card → WhatsApp draft opens with the URL + OE's access code. Paste-able.
+9. **Admin team-wide share:** Admin tab → Share the team's stats-card link card → 📋 Copy works, Open ↗ opens a new tab.
+
+### Start-here on the new machine (session 7)
+Push `web/app.js`, `web/styles.css`, `web/FAQ.md`, `web/HANDOFF.md`, `web/GOLD_FIFA_22.png`. The 3 blocks of SQL above have already been run on Supabase — no migration pending.
+
+**Next up** — **Badges & achievements system (Slice 9).** Full brief immediately below.
+
+---
+
+## 🔖 NEXT UP: Slice 9 — Badges & achievements
+
+Chris wants a FIFA Ultimate Team-style badge layer over the player stats so kids can collect achievements across the season — some auto-awarded from match data, some coach-awarded for effort / attitude / fun. Brief captured 2026-04-17.
+
+### Two flavours
+
+- **Auto badges** — derived on the fly from lineup data. No storage, always stays accurate when a match's result is edited. Criteria run against the player's stats helpers. Examples: Goal Machine, Hat Trick Hero, On Fire, Debut, 10 games, Ever-Present, Supersub.
+- **Manual badges** — coach picks for things data can't see. Examples: Coach's Choice, Training Star, Fair Play, Nutmeg King, Best Celebration, Leader, Buddy Badge.
+
+### Schema (manual)
+
+```sql
+CREATE TABLE player_badges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id uuid NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  badge_key text NOT NULL,
+  awarded_at timestamptz NOT NULL DEFAULT now(),
+  awarded_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  lineup_id uuid REFERENCES lineups(id) ON DELETE SET NULL,
+  season_start_year int,
+  note text
+);
+CREATE INDEX player_badges_player_idx ON player_badges(player_id);
+CREATE INDEX player_badges_team_idx   ON player_badges(team_id);
+-- RLS: anon read when team has published lineups; coaches/admins insert/delete
+-- on their team; no one updates (re-award to refresh).
+```
+
+### Central catalog (client)
+
+One `BADGE_CATALOG` object in `app.js` keyed by slug. Each entry: `{ name, description, emoji/icon, category, flavour: 'auto'|'manual', criteria?: fn }`. Categories: `attacking` · `skill` · `defending` · `attitude` · `teamwork` · `fun` · `milestone`. Both the card (public) and the Squad badge-award modal read from this single source.
+
+### Full starter catalog (auto = derivable from existing data NOW, unless otherwise noted)
+
+**🔥 Attacking & Scoring**
+- `on_fire` — Scored in 3 matches in a row (auto)
+- `goal_machine` — 5 goals this season (auto)
+- `hat_trick_hero` — 3+ goals in one match (auto)
+- `brace` — 2 goals in one match (auto)
+- `opening_night` — First goal of the season (auto)
+- `clinical_finisher` — 3 goals from first-time shots (manual — no shot-type data)
+- `poacher` — Scores from rebounds / tap-ins (manual)
+- `long_shot_legend` — Goal from outside the box (manual)
+- `weaker_foot_hero` — Goal with weaker foot (manual)
+- `first_blood` — Scores match's opening goal (NEEDS goal-order data — manual for now)
+- `ice_cold` — Scores under pressure (pen / late equaliser) (manual)
+- `playmaker` — 3 assists in 3 matches (NEEDS assists data — Phase 9c)
+- `assist_king` — 5 assists total (same)
+- `solo_star` — Beats 2+ players before scoring (manual)
+- `top_scorer` — Season top scorer (auto, season end)
+- `winning_goal` — Scored the match-winning goal (NEEDS goal-order — manual)
+
+**⚡ Speed, Skill & Physical**
+- `speedster` / `lightning_bolt` / `engine` / `dribble_king` / `two_footed` / `balance_master` / `agility_ace` / `shield_wall` — all manual (no GPS / event tracking)
+- `wingman` — consistent performer on the wing (manual)
+- `tireless` — played 90+ mins multiple matches (manual)
+
+**🧱 Defending & Goalkeeper**
+- `brick_wall` — 3 clean sheets in a row (auto, GK or defender — needs derived "clean sheet" = played + opp_score_ft == 0)
+- `iron_defence` — 5+ clean sheets in a season (auto)
+- `golden_glove` — fewest goals conceded (auto, season end, GK only)
+- `safe_hands` / `shot_stopper` / `sweeper_keeper` / `last_line_hero` / `tackle_master` / `interceptor` / `no_nonsense` / `captain_of_the_back_line` / `fearless` — all manual
+- `goal_line_hero` / `last_ditch_hero` — manual
+
+**🧠 Effort, Attitude & Coach's Choice**
+- `never_give_up` / `training_star` / `coaches_choice` / `comeback_kid` / `focus_pro` / `resilience` / `calm_head` / `growth_mindset` — all manual
+- `consistency_king` — reliable every week (auto: plays in ≥ 90% of matches, scores in ≥ 30%, etc. — defined numerically)
+- `ever_present` — played every match of the season (auto)
+- `bounce_back` — best improvement after a bad game (manual)
+- `training_ground_gem` — manual
+
+**🤝 Teamwork & Sportsmanship**
+- All manual: `team_player` / `helper` / `fair_play` / `leader` / `communicator` / `unsung_hero` / `high_five_hero` / `respect_badge` / `buddy_badge` / `handshake_hero` / `squad_boost`
+
+**🎉 Fun & Seasonal**
+- `nutmeg_king` / `celebration_star` / `rainbow_rocket` / `thunder_boot` / `rain_warrior` / `smile_maker` / `boot_collector` / `hair_of_the_match` — manual
+- `golden_boot_mini` — monthly top scorer (auto — bucket by calendar month)
+- `super_sub` — scored after coming off the bench in same match (auto — player in `subs` but has a goalscorer entry)
+- `early_bird` — always on time (manual)
+- `lucky_charm` — team unbeaten when this player plays (auto)
+- `birthday_boy` / `birthday_girl` — match on their birthday (NEEDS player DOB — manual for now)
+- `debut_day` — first match for the team (auto — earliest-dated appearance)
+
+**🏆 Milestones** (all auto)
+- `debut_match` — played first match (same as `debut_day`; canonical)
+- `games_10` / `games_25` / `games_50` / `games_100`
+- `goals_1` / `goals_10` / `goals_25` / `goals_50`
+- `motm_1` / `motm_5` / `motm_10`
+- `clean_sheets_1` / `clean_sheets_5` / `clean_sheets_10` (GK/def)
+
+### UI surfaces
+
+1. **Public card** — new row of up to 6 earned badge icons under the stats grid. Tap icon → bottom sheet with name + description + date awarded (or "auto" for derived). "See all" expands a scrollable modal grid. Season selector applies (badges earned in that season only, with an "all-time" toggle).
+2. **Squad tab player modal** — new "Badges" card: earned badges at top (icons + names) + an "Award badge…" button that opens a searchable modal of manual badges grouped by category. Admin/coach can also remove a manual badge from the list.
+3. **Result wizard** — extend to 5 steps: HT · FT · Goalscorers · MOTM · **Badges**. Step 5 auto-detects badges earned this match (Hat Trick Hero, Supersub, etc.) + shows quick-pick chips for common manual ones (Coach's Choice, Fair Play, Never Give Up). Tap to award, they land in `player_badges` with `lineup_id` set.
+4. **Admin / season summary** (Slice 10?) — badge leaderboard per team.
+
+### Rollout phases
+
+- **9a — Manual badges only** (2-3 hours). SQL + catalog + award modal + display on card + squad modal + share-to-WhatsApp with new badge. Ship fast so kids get the experience immediately.
+- **9b — Auto-derived badges** (pure computation, ~2 hours). Milestones + match-pattern detection layered in.
+- **9c — Assists tracking.** Add step 3.5 to result wizard: "Assists" picker same pattern as Goalscorers. Unlocks Playmaker + Assist King.
+- **9d — Freshness signals.** "NEW!" chip on just-earned badges (within N days). Push-style "You earned [Badge Name]!" banner when a kid opens their card and has a new one.
+- **9e — Seasonal resets + awards.** End-of-season badges auto-finalise (Golden Boot, Golden Glove, Top Scorer, Player of the Season — the last one is coach-voted).
+
+### Decisions needed from Chris before building 9a
+
+- Icon set — emoji (🔥⚡🧱🧠🤝🎉🏆) vs custom SVG set vs a royalty-free icon font (e.g., Font Awesome).
+- Maximum badges shown on card at once (I'd say 6 with overflow).
+- Should manual badges have an optional "reason" note visible on the card, or is it admin-only?
+
+---
+
 ## 🔖 Where we left off on 2026-04-17 (session 6 — read this first)
 
 Big session. Matches list hygiene, Plays retired as a concept and rebuilt as **Tactics** with a full inline editor, Formations got its own top-level page, and a player-placements-with-formation feature shipped with a visual indicator. FAQ + in-app Help brought fully in sync.
