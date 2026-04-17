@@ -9400,7 +9400,6 @@ function wireMembersEvents(currentUser) {
       renderMembersTab(currentUser);
     });
   }
-  const tabEl = document.getElementById('tab-content');
 
   // Show / hide player picker based on role
   const roleEl = tabEl.querySelector('#inv-role');
