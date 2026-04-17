@@ -451,7 +451,7 @@ function renderUserBar(user) {
 
 // ---------- Global "+" quick-create menu ----------
 // Renders a compact "+" button in the header with a popover for:
-//   New match · New player · New play · New formation
+//   New match · New player · New tactic · New formation
 // Gated to coaches/admins (canEdit). Hidden on auth/teams-home via resetHeader().
 function renderGlobalPlus(user, teamId, canEdit) {
   // Populate EVERY .global-plus slot on the page. The header has one (#global-plus)
@@ -1876,19 +1876,28 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'lineups', title: 'Match editor (Lineups)', adminOnly: true,
+    id: 'lineups', title: 'Match editor (Matches)', adminOnly: true,
     body: `
-      <h4>Opening a match</h4>
-      <p>On the <strong>Matches</strong> tab, tap any match card to open it in the editor.</p>
+      <h4>What match do I land on?</h4>
+      <p>Opening <strong>Matches</strong> auto-selects the closest match — the next upcoming fixture, or the most recently played match if kick-off was within the last 24 hours (so you stay on a just-played match long enough to enter the result). After 24h, it rolls forward automatically.</p>
       <h4>The sub-tabs</h4>
       <p>Below the match header, a strip of sub-tabs switches what you see:</p>
       <ul>
-        <li><strong>Matches</strong> — the card list of fixtures (plus the + New match card).</li>
+        <li><strong>Matches</strong> — card list split into Upcoming / Past. Cards flip from Upcoming to Past the moment kick-off passes.</li>
         <li><strong>Squad</strong> — the <strong>Available players</strong> palette to drag onto the pitch.</li>
         <li><strong>Subs</strong> — the substitutes row (max 5).</li>
-        <li><strong>Formation</strong> — preset/custom formations and edit-positions tools.</li>
+        <li><strong>Formation</strong> — preset/custom formations. Read-only (pick one to apply). Edit or save formations on the <strong>Formations</strong> top-level tab.</li>
         <li><strong>Info</strong> — match summary, map/directions, share button, Add to calendar, result chip.</li>
       </ul>
+      <h4>Card outline colours</h4>
+      <ul>
+        <li><strong>Orange</strong> — the match you're currently in.</li>
+        <li><strong>Green</strong> — played match with a result entered. Done.</li>
+        <li><strong>Red + "⚠ Needs score" chip</strong> — played match with no result yet.</li>
+        <li><strong>Neutral</strong> — future match.</li>
+      </ul>
+      <h4>Starting a new match</h4>
+      <p>Global <strong>+</strong> → <strong>+ New match</strong>, or the <strong>+ New</strong> button in the desktop editor header (next to Share). Both open the same wizard.</p>
       <h4>The status pill and the Status change modal</h4>
       <p>The pill in the match header shows the current state — <strong>Draft</strong>, <strong>Availability</strong> or <strong>Published</strong>. On phones it sits in a dedicated row above the sub-tabs. Tap it to open the <strong>Status change</strong> modal, which has one card per state with a description. Picking Availability auto-opens the share prompt.</p>
       <h4>Setting match details</h4>
@@ -1896,30 +1905,28 @@ const HELP_SECTIONS = [
       <h4>Adding players to the pitch</h4>
       <p>Drag a player from <strong>Available players</strong> onto a position slot. Drag one onto another to swap. Drag back to the list to remove.</p>
       <h4>Changing formation</h4>
-      <p>Open the <strong>Formation</strong> card and pick a preset (4-3-3, 4-4-2, etc.) or a custom one.</p>
-      <h4>Custom formations</h4>
-      <p>In the Formation card click <strong>+ Build custom</strong>, or on any lineup click <strong>✎ Edit positions</strong>. Drag the dots to move players, and <strong>double-click a position label</strong> (GK, CB, ST etc.) to open a dropdown of common roles — or type a custom label up to 4 characters.</p>
-      <h4>Saving formation changes</h4>
-      <p>While in edit mode you'll see two save buttons:</p>
-      <ul>
-        <li><strong>💾 Save formation</strong> — if you're already on a custom formation, this overwrites it in place (with a confirm). Preset formations like 4-3-3 can't be overwritten, so this falls back to Save as new.</li>
-        <li><strong>➕ Save as new formation…</strong> — prompts for a name and saves a brand-new custom formation. Name clashes with an existing custom prompt to overwrite.</li>
-      </ul>
-      <p>Label or position changes are also persisted to the current lineup itself, so a reload keeps your tweaks without needing to save the formation.</p>
+      <p>Open the <strong>Formation</strong> sub-tab and pick a preset (4-3-3, 4-4-2, etc.) or a custom one. Some custom formations show a <strong>👥N</strong> badge — that formation was saved with N pre-placed players. Clicking it on an empty pitch loads them in; on a pitch that already has players you're asked before replacing.</p>
+      <h4>Custom formations — where are they edited?</h4>
+      <p>On the <strong>Formations</strong> top-level tab. The match editor's Formation sub-tab is a pure picker — no Edit / Save buttons. This keeps formation templates separate from individual match lineups.</p>
       <h4>Subs</h4>
       <p>Drag players to the <strong>Substitutes</strong> strip on the Subs sub-tab (max 5).</p>
-      <h4>Tactics</h4>
-      <p>Press/Defensive lines (toggle and drag), arrows (click-drag, click to bend), and a movable ball. Use Clear to reset.</p>
+      <h4>Tactics (arrows, ball, zones)</h4>
+      <p>Press/Defensive lines (toggle and drag), arrows (click-drag, click to bend), and a movable ball. Use Clear to reset. Note: these draw on the lineup for this match. To build a reusable set-piece template, use the <strong>Tactics</strong> tab.</p>
       <h4>Saving</h4>
-      <p>Wizard-created lineups <strong>autosave continuously</strong> — every pitch change, tactics tweak and result edit persists within about a second. The <strong>Save lineup</strong> button in the match-details popup still handles the initial save for legacy (non-wizard) lineups.</p>
+      <p>Wizard-created lineups <strong>autosave continuously</strong> — every pitch change, tactics tweak and result edit persists within about a second. Dragging a player now does a <em>targeted</em> refresh (only pitch + palette), so whatever sub-tab you were looking at on the right stays put — no more jarring re-align.</p>
       <h4>Loading or deleting saved lineups</h4>
       <p>Tap any match card on the <strong>Matches</strong> sub-tab to load. Hover/tap a card and click <strong>×</strong> to delete.</p>
       <h4>Add to calendar</h4>
       <p>On the <strong>Info</strong> sub-tab click <strong>📅 Add to calendar</strong>. A chooser offers <strong>Google Calendar</strong> (pre-filled event page in a new tab), <strong>Apple Calendar</strong> (native Add-to-Calendar prompt on iOS/macOS) or <strong>Outlook / Download .ics</strong> (for any other calendar app).</p>
-      <h4>Recording the result after the game</h4>
-      <p>Once kick-off has passed, an <strong>⚽ Result</strong> section appears at the bottom of <strong>✎ Edit match</strong>. Enter the half-time and full-time scores, and use the <strong>+ / −</strong> buttons next to each player to log who scored for our team (opposition is just a total). The picker shows the matchday squad if one was picked, or the whole squad if you skipped that step. The result then appears as a coloured chip on the match card list (green W, red L, grey D), at the top of the Info card, and as a compact summary card above the availability responses.</p>
-      <h4>Man of the Match</h4>
-      <p>In the same Result section, tap the <strong>☆</strong> next to any player to nominate them as Man of the Match. You can pick more than one (joint MOTM is fine). A <strong>Why?</strong> text box appears under the name once the star is filled — write a sentence about what stood out, or leave it blank. MOTMs show up in the Info card as a 🏆 line under the score.</p>
+      <h4>Recording the result — the 4-step wizard</h4>
+      <p>Once kick-off has passed, a big amber <strong>⚽ Enter result</strong> button appears above the sub-tabs. Tap it to open a 4-step wizard:</p>
+      <ol>
+        <li><strong>Half-time score</strong> — Us and Opponent. Leave blank if you didn't track HT.</li>
+        <li><strong>Full-time score</strong> — same layout, with a "HT was X-Y" hint if you entered HT.</li>
+        <li><strong>Goalscorers</strong> — tap <strong>+ Add goalscorer</strong>, pick a player, they're added with count 1. Tap again to add more or re-pick the same player to increment. Live total-vs-FT check warns if numbers don't match.</li>
+        <li><strong>Man of the Match</strong> — tap <strong>+ Add Man of the Match</strong>, pick a player, optionally write a "Why?" reason. Joint MOTM supported — already-selected players are disabled in the picker.</li>
+      </ol>
+      <p>Save persists everything in one go. After saving, the big button collapses into a small green <strong>✎ Edit</strong> pill on the result card — tap that to re-open the wizard. The original Result section inside ✎ Edit match still exists as a single-screen fallback.</p>
       <h4>What do the icons on player chips mean?</h4>
       <p>Four corners carry different signals:</p>
       <ul>
@@ -1927,7 +1934,7 @@ const HELP_SECTIONS = [
         <li><strong>Top-left gold ★</strong> — Man of the Match for this game</li>
         <li><strong>Top-right white circle with a number</strong> — goals scored in this game</li>
       </ul>
-      <p>The same icons show on the parent view pitch once the lineup is published. Older lineups may still show ring-style availability indicators (gold/red/yellow) which use the same colour logic.</p>
+      <p>The same icons show on the parent view pitch once the lineup is published.</p>
     `
   },
   {
@@ -1957,14 +1964,47 @@ const HELP_SECTIONS = [
     `
   },
   {
-    id: 'plays', title: 'Tactics', adminOnly: true,
+    id: 'formations', title: 'Formations tab', adminOnly: true,
+    body: `
+      <h4>What's the Formations tab for?</h4>
+      <p>The dedicated page for creating, editing and saving <strong>formation templates</strong> — the pitch shapes you pick inside a match. Same layout as the match editor (pitch left, sub-tabs right), trimmed to two sub-tabs:</p>
+      <ul>
+        <li><strong>Formation</strong> — list of presets + your custom formations. Always-visible buttons: <strong>✎ Edit formation</strong> (enters drag-handle edit mode), <strong>💾 Save formation</strong>, <strong>➕ Save as new formation…</strong>.</li>
+        <li><strong>Squad</strong> — player palette so you can drag players onto positions and preview / optionally save them with the formation.</li>
+      </ul>
+      <h4>Editing a formation</h4>
+      <p>Pick one from the list, tap <strong>✎ Edit formation</strong>. Drag the position handles to move players. Double-click a position label (GK, CB, ST, etc.) for a dropdown of common roles — or type a custom label up to 4 characters. Tap <strong>✓ Done editing</strong>, then save. Presets (4-3-3 etc.) can't be overwritten — Save on one falls back to Save as new.</p>
+      <h4>Saving players with a formation</h4>
+      <p>When you tap Save formation or Save as new, if there are players on the pitch you get a prompt: <strong>OK</strong> saves the player placements with the formation; <strong>Cancel</strong> saves shape only. Formations that include players get a <strong>👥N</strong> badge on their button.</p>
+      <h4>What does 👥N do in a match?</h4>
+      <p>Clicking a formation with stored players, on an empty pitch, loads them in automatically. On a pitch that already has players you're asked first — OK replaces, Cancel keeps your current players and only changes formation shape.</p>
+      <h4>Deleting a custom formation</h4>
+      <p>On the Formations page, tap the <strong>×</strong> on the right side of the formation button. Presets have no ×.</p>
+    `
+  },
+  {
+    id: 'plays', title: 'Tactics tab', adminOnly: true,
     body: `
       <h4>What's a tactic?</h4>
-      <p>A reusable formation + tactics template with no players assigned. Useful for set pieces or attacking patterns. Each one is marked In possession or Out of possession.</p>
-      <h4>Saving a tactic</h4>
-      <p>Set up the formation, players and tactics on a lineup, then click <strong>Save as tactic</strong>. Give it a name and choose In or Out of possession.</p>
-      <h4>Using a saved tactic</h4>
-      <p>Open the <strong>Tactics</strong> tab. Each saved tactic is a card showing its name, formation and possession chip. Click one to preview or load it onto a match lineup.</p>
+      <p>A reusable set-piece or pattern template: a formation, optional players, arrows for player movement, a ball start position, and press/defensive zone lines. Each tactic is labelled <strong>In possession</strong> or <strong>Out of possession</strong>. Use them for corners, free kicks, high-press triggers, build-up patterns.</p>
+      <h4>The Tactics page layout</h4>
+      <p>Same pitch + sub-tabs skeleton as the match editor. Four sub-tabs:</p>
+      <ul>
+        <li><strong>Tactics</strong> — card grid of saved tactics (name, formation, In/Out chip). Filter (All / In / Out) + <strong>+ New tactic</strong> button.</li>
+        <li><strong>Squad</strong> — player palette for dragging onto the pitch.</li>
+        <li><strong>Moves</strong> — pitch-layout and drawing tools: <strong>✎ Edit positions</strong> (nudge dots for this tactic), <strong>Move / Click / Drag</strong> arrow modes, <strong>⚽ Ball</strong> toggle, press/def zone sliders, Clear arrows / Clear all.</li>
+        <li><strong>Tactic details</strong> — Name, In/Out possession radio, Description, formation picker, Save / Save as new / Delete.</li>
+      </ul>
+      <h4>Creating a tactic</h4>
+      <p>Tap <strong>+ New tactic</strong> (or the global <strong>+</strong> → <strong>+ New tactic</strong>). You land on Tactic details with a blank editor, name field focused. Fill in name + possession + pick a formation, add players via Squad, draw arrows / zones / ball on Moves, tap <strong>💾 Save tactic</strong>.</p>
+      <h4>Editing a tactic</h4>
+      <p>Click any card → the tactic loads into the editor and flips to Tactic details. Make changes → <strong>💾 Save</strong> writes back in place, or <strong>➕ Save as new…</strong> duplicates under a fresh name.</p>
+      <h4>Editing positions for one tactic only</h4>
+      <p>Open <strong>Moves</strong>, tap <strong>✎ Edit positions</strong>, drag handles, <strong>✓ Done editing</strong>. Those positions ride with the tactic only — the underlying formation template isn't changed.</p>
+      <h4>Saving a tactic from inside a match</h4>
+      <p>In the match editor's Formation sub-tab, tap <strong>★ Save as tactic…</strong>. A modal asks for name, In/Out radio, and description. Saves the current pitch as a new tactic.</p>
+      <h4>Who can delete a tactic?</h4>
+      <p>The tactic's creator, and any admin. The Delete button is hidden when you don't have permission.</p>
     `
   },
   {
@@ -2045,7 +2085,7 @@ const HELP_SECTIONS = [
         <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (coloured dots appear on pitch chips). Tweak the lineup. Add tactics arrows.</li>
         <li><strong>Friday</strong> — Tap the status pill → <strong>Published</strong>. Same parent link now shows the pitch — no need to re-share.</li>
         <li><strong>Match day</strong> — If anyone drops out, edit the lineup; parent view picks up changes within ~6s.</li>
-        <li><strong>Post-match</strong> — Open the match, hit <strong>✎ Edit match</strong>, enter scores, goalscorers and MOTM in the ⚽ Result section. Chips update everywhere.</li>
+        <li><strong>Post-match</strong> — Open Matches (the app auto-lands on today's just-played match while within 24h of KO). Tap the amber <strong>⚽ Enter result</strong> button above the sub-tabs → step through the 4-step wizard (HT → FT → Goalscorers → MOTM) → Save. The match card flips green with an <strong>FT 3-2 W</strong>-style chip. If you skip it, the card shows red with <strong>⚠ Needs score</strong> until you do.</li>
       </ol>
     `
   },
@@ -2056,6 +2096,7 @@ const HELP_SECTIONS = [
         <li>Admin panel for managing all members in one place</li>
         <li>Email notifications when lineups are published or updated</li>
         <li>Audit log UI to see who changed what</li>
+        <li><strong>Parent season page</strong> — one bookmarkable URL per team, gated by a child's access code, showing every match the player featured in plus goals and MOTM totals for the season</li>
         <li>Team-wide public page so parents can bookmark one URL for the season</li>
         <li>Per-player season tally of goals and Man of the Match awards</li>
         <li>A holistic look-and-feel polish pass</li>
@@ -6311,7 +6352,8 @@ function wireLineupEvents() {
     };
   });
 
-  // Save as play
+  // Save as tactic (formerly "Save as play" — opens the save-as-play modal
+  // which now labels itself "Save as tactic" with a possession radio).
   const sap = document.getElementById('save-as-play');
   if (sap) sap.onclick = () => saveAsPlay();
 

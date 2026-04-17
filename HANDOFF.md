@@ -1,6 +1,91 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-17)
 
-## 🔖 Where we left off on 2026-04-17 (session 5 — read this first)
+## 🔖 Where we left off on 2026-04-17 (session 6 — read this first)
+
+Big session. Matches list hygiene, Plays retired as a concept and rebuilt as **Tactics** with a full inline editor, Formations got its own top-level page, and a player-placements-with-formation feature shipped with a visual indicator. FAQ + in-app Help brought fully in sync.
+
+### Shipped this session (session 6)
+
+1. **Matches list — played games move to Past + colour-coded outlines.** Split now uses `matchHasBeenPlayed(l)` instead of `game_date < today`, so a match dated today flips to Past the moment its kickoff time passes (`renderLineupsTab`, the `_upcoming` / `_past` fork). Card outlines and badges:
+   - Green outline: played + result recorded
+   - Red outline + "⚠ Needs score" chip: played + no result yet
+   - Neutral / orange (active) otherwise
+   Chips/colour rules are both in `_matchCardHtml` (`app.js`) and CSS (`.me-match-card.done` / `.needs-score` in `styles.css`).
+
+2. **Plays → Tactics rename (sidebar + drawer + tablet strip + global +).** Internal route key still `plays` / table still `plays` — only visible labels + Help copy changed. Data-model rename is a future chore if wanted.
+
+3. **Match editor Formation sub-tab → read-only.** Removed ✎ Edit positions / 💾 Save formation / ➕ Save as new / ✕ Cancel buttons from `formationPanelHtml` inside `renderLineupsTab`. Kept the tactics collapsible card (arrows/ball/zones) there because those belong with the match, not the formation template. Short note added: "Pick a formation. To edit or save a new one, use the Formations tab."
+
+4. **Formations top-level page rebuilt from a bare placeholder into a full editor.** New `renderFormationsTab()` + `wireFormationsEvents()` (just above `renderLineupsTab`). Same pitch-left + sub-tabs-right skeleton as the match editor, trimmed to two sub-tabs:
+   - **Formation** — formation list, always-visible `✎ Edit formation` / `💾 Save formation` / `➕ Save as new formation…` buttons.
+   - **Squad** — player palette.
+   Extracted the old inline pos-edit handlers into a shared `wirePosEditingHandlers()` (sits just above `wirePositionEditing`) so the same toggle/done/cancel/save/save-as-new logic backs both pages via `_rerenderEditor()` mode dispatch. Save handlers fall back to the current formation's `pos`/`lbl` when not in edit-positions mode, so you can drop players + hit Save without needing to enter Edit mode first. New `newFormationState()` for `editor.current` when `editor.mode === 'formation'`. `renderSubsBar` null-guards missing `#subs-row` (no subs on Formations page).
+
+5. **Players-with-formation feature.** On Save formation / Save as new on the Formations page, if there are any players on the pitch the coach gets a prompt: "Remember the N player placements on the pitch with this formation? OK — save players too, Cancel — shape only." Accepted placements are stored as `formations.data.players = { slotIdx: playerId }`. `allFormations()` now exposes `_hasPlayers` + `_playerCount` so callers can paint a visual indicator. New CSS class `.f-players-badge` renders a small `👥N` indigo pill on the formation button; `.f-btn-has-players` tints the button's left border indigo.
+
+6. **Players-with-formation works on the match editor too.** The formation-click handler in `wireLineupEvents` now checks for stored players when the coach picks a formation:
+   - Empty pitch → load them silently.
+   - Pitch has players → confirm prompt before replacing (OK replaces, Cancel keeps current players + shape-only).
+   Badge shown in both places (Formations page + match editor's Formation sub-tab).
+
+7. **Formation buttons switched from floats to flex.** `.f-btns-col .f-btn` now `display: flex; gap: 0.55rem`; formation name wrapped in `<span class="f-label">` (flex 1, ellipsis); badge + delete X sit at the right. Fixes the issue where `float:right` on the badge was competing with `float:right` on the delete button, putting the badge next to the name instead of on the right.
+
+8. **Tactics top-level page rebuilt from 2-column sidebar-and-preview into pitch + 4-sub-tab editor.** New `renderPlaysTab()` (~200 lines) + `wireTacticsPageEvents()` + `saveTactic(asNew)` replace the old `renderPlayPreview` / `wirePlayEvents` / `pv-*` preview pitch scaffolding (all removed). Four sub-tabs:
+   - **Tactics** — card grid, filter (All / In / Out), + New tactic button. Cards show name, formation, In/Out chip. Click → load into editor + jump to Tactic details.
+   - **Squad** — palette.
+   - **Moves** — the draw/layout tools: ✎ Edit positions at top (with its own separator), Move/Click/Drag/⚽ Ball, press/def sliders, Clear arrows / Clear all.
+   - **Tactic details** (internal key `edit`) — Name, In/Out possession radio, Description, formation picker, Save / Save as new / Delete, status msg.
+   Styling: new CSS classes `.me-match-status-in`, `.me-match-status-out`, `.mc-tactic-icon` (blue square with 📋), `.tac-label`, `.tac-input` plus data-phone-tab filter rules for `tactics`, `moves`, `edit`. `_playsUi` gained `subTab`. `_rerenderEditor()` extended to dispatch `'play'` → `renderPlaysTab()`. Global `+` → New tactic now lands directly on Tactic details with the name field focused.
+
+9. **Save-as-play modal → Save-as-tactic with a possession radio.** Swapped the possession `<select>` for a radio pair. Button labels say "Save tactic". No data-model change (already stores `data.possession`).
+
+10. **Drag/drop jank fix — `refreshAfterChipMove()`.** Every pitch drop used to trigger a full `renderLineupsTab()` which rebuilt the entire Matches/Info/Formation/Subs/etc. DOM; the right-hand panel visibly re-aligned on every drop. Now a targeted refresh: `renderPitch()`, `renderSubsBar()`, subs-count label update, `#palette` innerHTML rebuild, re-apply availability + MOTM/goal decorations, `scheduleAutosaveIfPublished()`. All 4 drop-related renderLineupsTab calls (handleDropToSlot, handleDropToSub, handleDropToPalette, player-picker remove) routed through the new helper. Zero touched DOM outside the pitch column + palette.
+
+11. **Auto-load closest match + 24h post-KO grace.** Opening the Matches tab no longer lands on a blank "+ New" state — it auto-selects the closest match via new helper `_findDefaultLineupId(lineups)`. Future matches are always eligible; past matches are eligible only if kickoff was ≤24h ago. Pick is by smallest `|dist-from-now|`. The hydration branch in `renderTeamDashboard` now expands `chosen` into a full `editor.current` and lands on the Squad sub-tab.
+
+12. **Enter result button + 4-step result wizard.** New `openResultWizard()` just above `openMatchDetailsModal`. Steps: HT → FT → Goalscorers (add-one-at-a-time, matchday squad picker, live mismatch warning) → MOTM (add-one-at-a-time, optional Why? reason per row, joint-MOTM supported, already-selected disabled in picker). Wizard uses local state, commits to `editor.current` only on Save, then `scheduleAutosaveIfPublished`. Button: `#me-enter-result`, rendered above the sub-tab strip only when `matchHasBeenPlayed(current)`; collapses into a small green `✎ Edit` pill inside the compact result card once a result exists. Inline Result section inside `✎ Edit match` left in place as a fallback.
+
+13. **Availability bar flicker fix.** Bar used to render as an empty `<div id="availability-panel">` with `renderCoachAvailabilityPanel()` filling it ~100–500ms later via a Supabase fetch → visible layout shift. Now rendered synchronously from the in-memory `editor.availability` cache inside `renderLineupsTab` via `_availTallyBtnHtml()`. Async DB fetch still happens and replaces the same-sized button with fresh counts — no height change. Stale-cache handling: if `editor._availabilityFor !== current.id`, treat cache as empty so we don't briefly show the previous match's numbers. Click handler wired synchronously in `wireLineupEvents` so the button is active from frame one.
+
+14. **Wizard-save sub-tabs scroll-into-view.** After the result wizard saves, tab-content + window scroll to top so the sub-tab strip is immediately visible (was being pushed below the fold on phone by the newly-appearing result card).
+
+15. **Label margin fix on HT/FT wizard inputs.** Global `.map-modal-body label { margin-top: 0.5rem; }` was adding vertical offset to the second `<label>` in the grid (the `:first-child` override exempted the first). Second input sat lower than the first. Fixed by adding `margin:0` inline to the step-1/step-2 grid labels.
+
+16. **CSS overflow fix on Enter-result button.** Added `box-sizing: border-box` so the `width:100%` + padding combination no longer pushes content past its column edge.
+
+17. **FAQ + in-app Help (HELP_SECTIONS) fully refreshed** to cover all the above: new Formations help entry, rewritten Tactics entry, rewritten Match-editor entry (auto-load, card outlines, result wizard, formation read-only pointer), workflow step 6 now describes the wizard path, roadmap gained the parent season page.
+
+### SQL to run in Supabase before deploy
+**None.** All new features ride on existing columns:
+- `formations.data.players` is a new key in the existing JSONB — no column change.
+- Tactics / possession already stored in `plays.data.possession`.
+- Result fields (`our_score_ht/opp_score_ht/our_score_ft/opp_score_ft` + `data.goalscorers` + `data.motm`) all landed in session 3.
+
+### Files touched (session 6)
+- `web/app.js` — drag-drop refactor + result wizard + auto-load helper + sidebar rename + match editor Formation read-only + new `renderFormationsTab` / `wireFormationsEvents` / `wirePosEditingHandlers` / `newFormationState` / `_findDefaultLineupId` / `openResultWizard` / `saveTactic` / `_rerenderEditor` + rewrite of `renderPlaysTab` + save-as-tactic radio + Upcoming/Past split + card colour classes + availability flicker fix + players-with-formation logic + `allFormations` `_hasPlayers` + flex-layout formation buttons with `f-label` span + HELP_SECTIONS refresh.
+- `web/styles.css` — `.me-match-card.done` / `.needs-score` + Tactics sub-tab filter rules + `.me-match-status-in` / `-out` + `.mc-tactic-icon` / `.mc-tactic-emoji` + `.tac-label` / `.tac-input` + `.f-players-badge` / `.f-btn-has-players` + flex layout on `.f-btns-col .f-btn` + `.f-label` ellipsis rule.
+- `web/FAQ.md` — dashboard sidebar list, +menu item names, match-editor sub-tab descriptions, new "What match do I land on?" / "Card outline colours" / "Matches list + green/red" paragraphs, Result section rewritten around wizard, Plays section replaced with new Formations + Tactics sections, coach workflow step 6 rewritten, roadmap expanded.
+- `web/HANDOFF.md` — this entry.
+
+### Sanity-check script (session 6)
+1. **Auto-load + 24h grace**: navigate to Matches → lands inside the closest match, not on the card list. Change a match's game_date to yesterday with KO <24h ago → next visit still lands on it. Move it to 2 days ago → next visit skips it and picks the next upcoming. Card outline on a match that's been played is green (if result entered) or red with ⚠ Needs score (if not).
+2. **Enter result wizard**: on a match with KO passed, amber `⚽ Enter result` above sub-tabs. Tap → step through HT 1-0 / FT 3-2 / goalscorers (tap + Add goalscorer twice on same player to get count 2 + another) / MOTM with optional reason. Save → modal closes, page scrolls to top, match card outline flips green with `FT 3-2 W` chip, result card appears with compact `✎ Edit` pill. Tap that to re-open wizard with values preserved.
+3. **Drag-drop no-jank**: on Matches sub-tab, drag a player onto the pitch. The Matches card list on the right should NOT re-render or shift — pitch + palette update only. Same on Info / Formation sub-tabs.
+4. **Availability bar no-flicker**: open a published / availability lineup → bar shows the tally button immediately (no empty-div growing into a button after a delay). Tap it → Availability responses modal opens.
+5. **Formations page**: open Formations → pitch + Formation/Squad sub-tabs visible. Pick 4-3-3 → drag 6 players from Squad tab onto pitch → Save formation → OK to the "remember players?" prompt → formation list shows `👥6` next to 4-3-3's entry (or the custom one you were on). Click another formation then click back → pitch auto-populates with the 6 players.
+6. **👥N in the match editor**: open a match, Formation sub-tab, click the formation that has the 👥N badge → if pitch was empty, players load silently; if pitch had players, prompted first.
+7. **Tactics page**: Tactics sidebar tab → 4 sub-tabs visible (Tactics / Squad / Moves / Tactic details). + New tactic → lands on Tactic details with name focused. Fill in name, pick In possession, pick 4-3-3, swap to Squad → drag 11 players on → swap to Moves → click ✎ Edit positions → drag a CB forward → ✓ Done editing. Click a drag mode → draw an arrow → add the ball. Swap to Tactic details → Save tactic. Tactic appears as a card on the Tactics sub-tab with `In` chip. Click card → loads everything back. ✕ Delete → card disappears.
+8. **Save as tactic from a match**: Matches → open any match → Formation sub-tab → ★ Save as tactic… → modal with name + possession radio + description. Save → new tactic appears on the Tactics page's card list.
+9. **Tabs disappearing after wizard save**: on phone, save the result wizard → tabs should be visible at the top straight away, not below the fold.
+
+### Start-here on the new machine (session 6)
+Push `web/app.js` + `web/styles.css` + `web/FAQ.md` + `web/HANDOFF.md`. No migration.
+
+**Next up:** Admin panel is still the biggest remaining Slice 5 piece. Then email notifications on publish, then audit-log UI, then the holistic design pass. Parent season page (Slice 6) remains the next big feature once Slice 5's functional items are closed.
+
+---
+
+## 🔖 Where we left off on 2026-04-17 (session 5)
 
 Matches sub-tab / match-editor UX tightened up, and the post-match result entry was pulled out into a dedicated wizard.
 
