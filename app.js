@@ -4212,9 +4212,29 @@ function renderLineupsTab() {
   `;
 
   // Availability bar — always visible above the editor sub-tabs when a match is open.
+  // Render the tally button synchronously using the in-memory cache (editor.availability)
+  // so there's no layout shift when the async DB fetch in renderCoachAvailabilityPanel
+  // returns. The async call replaces the same-sized button with fresh numbers — no
+  // empty-div-grows-into-button flicker (was a jarring ~30px height jump before).
+  // Stale cache is handled: if _availabilityFor doesn't match the current lineup id,
+  // we treat the cache as empty so we don't briefly show last match's numbers.
+  const _availTallyBtnHtml = () => {
+    const cacheHitsThisLineup = editor && editor._availabilityFor === current?.id;
+    const byPlayer = cacheHitsThisLineup ? (editor.availability || {}) : {};
+    const plist = editor?.players || [];
+    const tally = { available: 0, maybe: 0, unavailable: 0, none: 0 };
+    plist.forEach(p => {
+      const s = byPlayer[p.id];
+      if (s === 'available' || s === 'maybe' || s === 'unavailable') tally[s]++;
+      else tally.none++;
+    });
+    return `<button type="button" class="btn-full" id="availability-panel-open" style="text-align:left;padding:0.5rem 0.6rem;font-size:0.85rem;margin-bottom:0">
+      📋 Availability responses — ✅ ${tally.available} · 🤔 ${tally.maybe} · ❌ ${tally.unavailable} · — ${tally.none}
+    </button>`;
+  };
   const availBarHtml = current?.id
     ? (availableOnThisMatch
-        ? `<div class="me-avail-bar" id="availability-panel"></div>`
+        ? `<div class="me-avail-bar" id="availability-panel">${_availTallyBtnHtml()}</div>`
         : `<div class="me-avail-bar"><p class="muted" style="font-size:0.85rem;margin:0">No availability responses yet — open availability from <em>Edit match</em> (Info tab).</p></div>`)
     : '';
 
@@ -5885,6 +5905,15 @@ function wireLineupEvents() {
   // when the match has kicked off (matchHasBeenPlayed).
   const enterResultBtn = tabEl.querySelector('#me-enter-result');
   if (enterResultBtn) enterResultBtn.onclick = () => openResultWizard();
+
+  // Availability tally button — wired synchronously so the button works from the
+  // instant it renders, even before renderCoachAvailabilityPanel's async DB fetch
+  // replaces its innerHTML. renderCoachAvailabilityPanel re-attaches its own
+  // handler after replacement, so both paths work.
+  const availOpenBtn = tabEl.querySelector('#availability-panel-open');
+  if (availOpenBtn && editor?.current?.id) {
+    availOpenBtn.onclick = () => openAvailabilityModal(editor.current.id);
+  }
 
   // Open match details modal
   const openMdBtn = document.getElementById('open-match-details');
