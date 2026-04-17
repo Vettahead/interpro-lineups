@@ -212,14 +212,15 @@ On the **Info** sub-tab click **📅 Add to calendar**. A chooser opens with thr
 All three use the game date, kick-off, arrival, venue, postcode and your notes.
 
 ### How do I record the result after the game has been played?
-Once kick-off has passed, a big amber **⚽ Enter result** button appears above the sub-tab strip. Tap it to open the 4-step **Result wizard**:
+Once kick-off has passed, a big amber **⚽ Enter result** button appears above the sub-tab strip. Tap it to open the 5-step **Result wizard**:
 
 1. **Half-time score** — Us and Opponent number inputs. Leave blank if you didn't track HT.
 2. **Full-time score** — same layout, with a small "HT was X-Y" hint if you entered HT.
 3. **Goalscorers** — tap **+ Add goalscorer**, pick a player from the matchday squad, they're added with count 1. Tap **+ Add goalscorer** again and pick the same player to increment, or a different player. Use the +/− buttons on an entry to adjust the count, or the ✕ to remove. If the scorer total doesn't match FT, a red warning shows underneath so you can spot double-counts or forgotten goals. Opposition scorers aren't tracked individually.
 4. **Man of the Match** — tap **+ Add Man of the Match**, pick a player, optionally type a "Why?" reason. Repeat for joint MOTM; already-selected players are disabled in the picker.
+5. **Badges (optional)** — every matchday player gets a row with a **+ Award badge** button. Tap it to open the badge picker (same as the Squad tab) and give recognition for a hat-trick, a screamer, great attitude — anything. Chips already earned for this match show next to the player's name with a ✕ to remove. This step is completely optional: on step 4 you can tap **Save & skip badges** to finish without touching it, or **Next → Badges** to step in.
 
-Tap **✓ Save result** on step 4 and everything is persisted in one go. The wizard uses local state — Cancel / ✕ / tapping outside all bail without writing anything.
+Tap **✓ Save result** on step 5 (or **Save & skip badges** on step 4) and the score/scorers/MOTM are persisted in one go. Badges save the instant you confirm them in the picker, so anything you awarded sticks even if you Cancel the wizard afterwards.
 
 Once a result is saved, the amber button collapses into a small green **✎ Edit** pill tucked top-right of the compact result card. Tap that to re-open the wizard if you need to tweak anything.
 

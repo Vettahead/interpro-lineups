@@ -1632,12 +1632,16 @@ function renderPlayerCardBody() {
         ${badgesToShow.map(b => {
           const e = badgeEntry(b.badge_key);
           const label = e ? e.name : b.badge_key;
-          return `<button type="button" class="pc-badge-chip" data-badge-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="pc-badge-emoji">${badgeEmoji(b.badge_key)}</span></button>`;
+          // title shows name + optional coach note on hover (desktop) AND on long-press
+          // (mobile) — complements the click-to-open detail sheet. Kept compact so
+          // the native browser tooltip doesn't truncate weirdly.
+          const tip = b.note ? `${label} — ${b.note}` : label;
+          return `<button type="button" class="pc-badge-chip" data-badge-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(tip)}"><span class="pc-badge-emoji">${badgeEmoji(b.badge_key)}</span></button>`;
         }).join('')}
         ${overflowCount > 0
-          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges">+${overflowCount}</button>`
+          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all ${uniquePlayerBadges.length} badges">+${overflowCount}</button>`
           : (uniquePlayerBadges.length > 4
-              ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges">All</button>`
+              ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all badges">All</button>`
               : '')}
       </div>`;
 
@@ -1660,31 +1664,32 @@ function renderPlayerCardBody() {
         <button type="button" class="pc-arrow" id="pc-next-season" ${hasNext ? '' : 'disabled'} aria-label="Next season">›</button>
       </div>
 
-      <div class="pc-card">
-        <!-- Background is the GOLD_FIFA_22.png template; everything below is
-             absolutely-positioned overlay. -->
-        <div class="pc-num-col">
-          <div class="pc-num">${ss}</div>
-          <div class="pc-pos">${escapeHtml(pos)}</div>
-          <div class="pc-crest" aria-hidden="true">
-            <img src="logo.png" alt="" />
+      <div class="pc-card-shell">
+        <div class="pc-card">
+          <!-- Background is the GOLD_FIFA_22.png template; everything below is
+               absolutely-positioned overlay. -->
+          <div class="pc-num-col">
+            <div class="pc-num">${ss}</div>
+            <div class="pc-pos">${escapeHtml(pos)}</div>
+            <div class="pc-crest" aria-hidden="true">
+              <img src="logo.png" alt="" />
+            </div>
+          </div>
+          <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
+            ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
+          </div>
+          <div class="pc-name">${escapeHtml(p.name || '—')}</div>
+          <div class="pc-stats-grid">
+            <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
+            <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOTM</span></div>
+            <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
+            <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Subs</span></div>
+            <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Apps</span></div>
+            <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
           </div>
         </div>
-        <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
-          ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
-        </div>
-        <div class="pc-name">${escapeHtml(p.name || '—')}</div>
-        <div class="pc-stats-grid">
-          <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOTM</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Subs</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Apps</span></div>
-          <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
-        </div>
+        ${badgesRowHtml}
       </div>
-
-      ${badgesRowHtml}
 
       ${seasonsAvailable.length === 0
         ? '<p class="muted" style="text-align:center;margin-top:0.75rem">No played matches yet this season.</p>'
@@ -1818,7 +1823,10 @@ function openBadgesGridModal(badges, player) {
 // to select it, (optional) type a public-visible note, then Save to insert.
 // Calls `onAwarded(newBadge)` once the row is persisted — the caller rerenders
 // and optionally opens the WhatsApp share confirm prompt.
-function openAwardBadgeModal({ team, player, onAwarded }) {
+// lineupId (optional) attaches the award to a specific match — used by the
+// post-match result wizard so 9b auto-derivations and UI filters can link
+// awards to lineups.
+function openAwardBadgeModal({ team, player, onAwarded, lineupId }) {
   const existing = document.querySelector('.badge-award-overlay');
   if (existing) existing.remove();
 
@@ -1926,6 +1934,7 @@ function openAwardBadgeModal({ team, player, onAwarded }) {
         playerId: player.id,
         badgeKey: selectedKey,
         note: noteEl.value,
+        lineupId: lineupId || null,
       });
       overlay.remove();
       if (onAwarded) onAwarded(newBadge);
@@ -3049,15 +3058,16 @@ const HELP_SECTIONS = [
       <p>Tap any match card on the <strong>Matches</strong> sub-tab to load. Hover/tap a card and click <strong>×</strong> to delete.</p>
       <h4>Add to calendar</h4>
       <p>On the <strong>Info</strong> sub-tab click <strong>📅 Add to calendar</strong>. A chooser offers <strong>Google Calendar</strong> (pre-filled event page in a new tab), <strong>Apple Calendar</strong> (native Add-to-Calendar prompt on iOS/macOS) or <strong>Outlook / Download .ics</strong> (for any other calendar app).</p>
-      <h4>Recording the result — the 4-step wizard</h4>
-      <p>Once kick-off has passed, a big amber <strong>⚽ Enter result</strong> button appears above the sub-tabs. Tap it to open a 4-step wizard:</p>
+      <h4>Recording the result — the 5-step wizard</h4>
+      <p>Once kick-off has passed, a big amber <strong>⚽ Enter result</strong> button appears above the sub-tabs. Tap it to open a 5-step wizard:</p>
       <ol>
         <li><strong>Half-time score</strong> — Us and Opponent. Leave blank if you didn't track HT.</li>
         <li><strong>Full-time score</strong> — same layout, with a "HT was X-Y" hint if you entered HT.</li>
         <li><strong>Goalscorers</strong> — tap <strong>+ Add goalscorer</strong>, pick a player, they're added with count 1. Tap again to add more or re-pick the same player to increment. Live total-vs-FT check warns if numbers don't match.</li>
         <li><strong>Man of the Match</strong> — tap <strong>+ Add Man of the Match</strong>, pick a player, optionally write a "Why?" reason. Joint MOTM supported — already-selected players are disabled in the picker.</li>
+        <li><strong>Badges (optional)</strong> — every matchday player has a <strong>+ Award badge</strong> button. Tap to open the badge picker (same as the Squad tab) and give recognition — scored a screamer, great attitude, clean sheet moment. Skip this step entirely by tapping <strong>Save &amp; skip badges</strong> on step 4. Badges awarded here are tied to this match (so they're filterable later) and save immediately.</li>
       </ol>
-      <p>Save persists everything in one go. After saving, the big button collapses into a small green <strong>✎ Edit</strong> pill on the result card — tap that to re-open the wizard. The original Result section inside ✎ Edit match still exists as a single-screen fallback.</p>
+      <p>Tap ✓ Save result on step 5 (or Save &amp; skip badges on step 4) — the score / scorers / MOTM persist in one go. After saving, the big button collapses into a small green <strong>✎ Edit</strong> pill on the result card — tap that to re-open the wizard. The original Result section inside ✎ Edit match still exists as a single-screen fallback.</p>
       <h4>What do the icons on player chips mean?</h4>
       <p>Four corners carry different signals:</p>
       <ul>
@@ -3252,7 +3262,7 @@ const HELP_SECTIONS = [
         <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (coloured dots appear on pitch chips). Tweak the lineup. Add tactics arrows.</li>
         <li><strong>Friday</strong> — Tap the status pill → <strong>Published</strong>. Same parent link now shows the pitch — no need to re-share.</li>
         <li><strong>Match day</strong> — If anyone drops out, edit the lineup; parent view picks up changes within ~6s.</li>
-        <li><strong>Post-match</strong> — Open Matches (the app auto-lands on today's just-played match while within 24h of KO). Tap the amber <strong>⚽ Enter result</strong> button above the sub-tabs → step through the 4-step wizard (HT → FT → Goalscorers → MOTM) → Save. The match card flips green with an <strong>FT 3-2 W</strong>-style chip. If you skip it, the card shows red with <strong>⚠ Needs score</strong> until you do.</li>
+        <li><strong>Post-match</strong> — Open Matches (the app auto-lands on today's just-played match while within 24h of KO). Tap the amber <strong>⚽ Enter result</strong> button above the sub-tabs → step through the 5-step wizard (HT → FT → Goalscorers → MOTM → Badges [optional]) → Save. The match card flips green with an <strong>FT 3-2 W</strong>-style chip. If you skip it, the card shows red with <strong>⚠ Needs score</strong> until you do.</li>
       </ol>
     `
   },
@@ -4784,12 +4794,17 @@ function matchResultSectionHtml(current, canEdit) {
   `;
 }
 
-// 4-step post-match result wizard (added 2026-04-17).
+// 5-step post-match result wizard (added 2026-04-17; badges step 2026-04-17 rev).
 // Primary entry point for entering/updating a match result once KO has passed.
-// Steps: 1) Half-time score · 2) Full-time score · 3) Goalscorers · 4) Man of the Match.
+// Steps: 1) Half-time · 2) Full-time · 3) Goalscorers · 4) Man of the Match ·
+//        5) Badges (optional — skip or award per-player, writes to player_badges
+//                   with lineup_id set so awards are tied to the match).
 // Goalscorers and MOTM use an add-one-at-a-time flow: a list of added entries +
 // "+ Add…" button that reveals an in-panel player picker. Local wizard state is
-// only committed to editor.current on Save (autosave then persists).
+// only committed to editor.current on Save (autosave then persists). Badge
+// awards persist immediately on pick (consistent with Squad tab) — the wizard
+// is just a discovery shortcut, and the badge is already public the moment a
+// coach confirms it in the picker.
 function openResultWizard() {
   const { current, canEdit } = editor;
   if (!current || !current.id) {
@@ -4840,7 +4855,7 @@ function openResultWizard() {
         <button class="btn-secondary" id="rw-close" type="button" aria-label="Close">✕</button>
       </div>
       <div id="rw-steps" style="display:flex;gap:0.25rem;padding:0.5rem 0.9rem 0.25rem">
-        ${[1,2,3,4].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
+        ${[1,2,3,4,5].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
       </div>
       <div class="map-modal-body" id="rw-body" style="padding:0.9rem;overflow-y:auto;flex:1"></div>
       <div id="rw-footer" style="padding:0.6rem 0.9rem;border-top:1px solid #eee;display:flex;gap:0.5rem;justify-content:space-between;align-items:center"></div>
@@ -5000,6 +5015,59 @@ function openResultWizard() {
     `;
   };
 
+  // Step 5 — optional badges. Lists every matchday candidate with any badges
+  // they've already earned for THIS match (filtered by lineup_id). Each row
+  // has a "+ Award badge" button that opens the same picker as the Squad tab
+  // with lineup_id pre-filled. Awards persist immediately; this step is pure
+  // UI convenience and can be skipped entirely — nothing requires the coach
+  // to touch it.
+  const htmlStepBadges = () => {
+    const lineupId = current.id;
+    const teamId = editor.team?.id;
+    const allBadges = teamId ? getCachedTeamBadges(teamId) : [];
+    const thisMatchBadges = allBadges.filter(b => b.lineup_id === lineupId);
+    const byPlayer = {};
+    for (const b of thisMatchBadges) {
+      (byPlayer[b.player_id] = byPlayer[b.player_id] || []).push(b);
+    }
+
+    const rows = candidates.map(p => {
+      const numBadge = (p.number != null)
+        ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
+        : '<span style="display:inline-block;min-width:1.7em;margin-right:0.55em"></span>';
+      const mine = byPlayer[p.id] || [];
+      const chipsHtml = mine.length === 0
+        ? '<span class="muted" style="font-size:0.72rem">— no badges yet</span>'
+        : mine.map(b => {
+            const e = badgeEntry(b.badge_key);
+            const nm = e ? e.name : b.badge_key;
+            return `<span class="rw-bg-chip" data-rw-bg-id="${escapeHtml(b.id)}" title="${escapeHtml(nm)}${b.note ? ' — ' + escapeHtml(b.note) : ''}"
+                      style="display:inline-flex;align-items:center;gap:0.2rem;background:#fff8e1;border:1px solid #d6a82b;border-radius:999px;padding:0.1rem 0.45rem;font-size:0.72rem;margin-right:0.25rem;margin-bottom:0.2rem">
+                      <span>${badgeEmoji(b.badge_key)}</span>
+                      <span>${escapeHtml(nm)}</span>
+                      <button type="button" class="rw-bg-chip-x" aria-label="Remove badge"
+                        style="background:transparent;border:0;color:#8a6b00;cursor:pointer;font-size:0.85rem;padding:0 0 0 0.2rem">✕</button>
+                    </span>`;
+          }).join('');
+      return `
+        <div class="rw-badge-row" data-rw-player-id="${escapeHtml(p.id)}" style="padding:0.55rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.4rem;background:#fff">
+          <div style="display:flex;align-items:center;gap:0.4rem">
+            ${numBadge}
+            <span style="flex:1;font-size:0.9rem;font-weight:600">${escapeHtml(p.name || '—')}</span>
+            <button type="button" class="rw-bg-add btn-secondary" data-rw-award-pid="${escapeHtml(p.id)}"
+              style="font-size:0.78rem;padding:0.3rem 0.55rem">+ Award badge</button>
+          </div>
+          <div style="margin-top:0.35rem">${chipsHtml}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <p class="muted" style="margin:0 0 0.5rem;font-size:0.82rem">Optional — give recognition to any standout players. Skip this step if you'd rather not. Badges appear immediately on the public card and are tagged to this match.</p>
+      ${rows || '<p class="muted">No matchday squad.</p>'}
+    `;
+  };
+
   // ---- Main render + wire ----
 
   const render = () => {
@@ -5008,8 +5076,8 @@ function openResultWizard() {
     const footer  = overlay.querySelector('#rw-footer');
 
     // Title + step chips
-    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match'];
-    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 4: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
+    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match', 'Badges (optional)'];
+    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 5: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
     overlay.querySelectorAll('[data-rw-chip]').forEach(c => {
       const n = parseInt(c.getAttribute('data-rw-chip'), 10);
       c.style.background = n <= state.step ? '#1e3a8a' : '#e5e5e5';
@@ -5020,20 +5088,31 @@ function openResultWizard() {
     else if (state.step === 2) body.innerHTML = htmlStepFt();
     else if (state.step === 3) body.innerHTML = htmlStepGoals();
     else if (state.step === 4) body.innerHTML = htmlStepMotm();
+    else if (state.step === 5) body.innerHTML = htmlStepBadges();
 
     // Footer — hide Back/Next while a picker is open (the picker has its own Back).
+    // Step 4 shows both "Skip badges & save" (skips step 5) and "Next → Badges".
+    // Step 5 shows "✓ Save result" — any badges awarded are already persisted.
     if (state.pickMode) {
       footer.innerHTML = '';
     } else {
       const backBtn = state.step > 1
         ? '<button type="button" class="btn-secondary" id="rw-back">← Back</button>'
         : '<span></span>';
-      const rightBtn = state.step < 4
-        ? '<button type="button" class="primary" id="rw-next">Next →</button>'
-        : '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
+      let rightBtn;
+      if (state.step < 4) {
+        rightBtn = '<button type="button" class="primary" id="rw-next">Next →</button>';
+      } else if (state.step === 4) {
+        rightBtn = `
+          <button type="button" class="btn-secondary" id="rw-save-skip">Save & skip badges</button>
+          <button type="button" class="primary" id="rw-next">Next → Badges</button>
+        `;
+      } else {
+        rightBtn = '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
+      }
       footer.innerHTML = `
         <div>${backBtn}</div>
-        <div style="display:flex;gap:0.5rem">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end">
           <button type="button" class="btn-secondary" id="rw-cancel">Cancel</button>
           ${rightBtn}
         </div>
@@ -5105,17 +5184,55 @@ function openResultWizard() {
     const pickCancel = overlay.querySelector('#rw-pick-cancel');
     if (pickCancel) pickCancel.onclick = () => { state.pickMode = null; render(); };
 
+    // Step 5 — badges (per-player award + remove)
+    overlay.querySelectorAll('[data-rw-award-pid]').forEach(btn => {
+      btn.onclick = () => {
+        const pid = btn.dataset.rwAwardPid;
+        const player = (editor.players || []).find(p => p.id === pid);
+        if (!player) return;
+        openAwardBadgeModal({
+          team: editor.team,
+          player,
+          lineupId: editor.current?.id || null,
+          onAwarded: () => {
+            // Cache already updated by awardManualBadge; just re-render step 5.
+            render();
+          }
+        });
+      };
+    });
+    overlay.querySelectorAll('.rw-bg-chip-x').forEach(xBtn => {
+      xBtn.onclick = async (ev) => {
+        ev.stopPropagation();
+        const chip = xBtn.closest('[data-rw-bg-id]');
+        if (!chip) return;
+        const badgeId = chip.dataset.rwBgId;
+        if (!confirm('Remove this badge?')) return;
+        try {
+          await removeBadge(badgeId, editor.team?.id);
+        } catch (e) {
+          alert('Remove failed: ' + (e.message || e));
+          return;
+        }
+        render();
+      };
+    });
+
     // Footer
     const backBtn = overlay.querySelector('#rw-back');
     const nextBtn = overlay.querySelector('#rw-next');
     const saveBtn = overlay.querySelector('#rw-save');
+    const saveSkipBtn = overlay.querySelector('#rw-save-skip');
     const cancelBtn = overlay.querySelector('#rw-cancel');
     if (backBtn) backBtn.onclick = () => { state.step = Math.max(1, state.step - 1); render(); };
-    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(4, state.step + 1); render(); };
+    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(5, state.step + 1); render(); };
     if (cancelBtn) cancelBtn.onclick = close;
-    if (saveBtn) saveBtn.onclick = () => {
+
+    const doSave = () => {
       // Commit state → editor.current. Autosave hash covers these fields so this
       // will persist on the 800ms schedule. We also trigger immediately.
+      // Note: badges are already persisted by the time we get here — they write
+      // straight to player_badges on pick, same as the Squad-tab flow.
       editor.current.our_score_ht = state.ht_us;
       editor.current.opp_score_ht = state.ht_opp;
       editor.current.our_score_ft = state.ft_us;
@@ -5138,6 +5255,8 @@ function openResultWizard() {
         if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo({ top: 0, behavior: 'auto' });
       } catch (_) {}
     };
+    if (saveBtn) saveBtn.onclick = doSave;
+    if (saveSkipBtn) saveSkipBtn.onclick = doSave;
   };
 
   render();

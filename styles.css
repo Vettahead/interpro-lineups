@@ -2246,14 +2246,31 @@ body.public-card-view #app { padding-top: 0; }
 }
 
 /* ---------- Badges row on the public player card (Slice 9a) ---------- */
-.pc-badges-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  justify-content: center;
-  margin-top: 0.75rem;
-  padding: 0 0.25rem;
+/* Shell wraps the FIFA card + the right-side badge column so the column can
+   be absolutely positioned relative to the card's right edge, with each chip
+   sitting half over the card (translateX(-50%) on the column — chips then
+   render centered on the card's right edge). The shell keeps .pc-card's
+   overflow: hidden intact. */
+.pc-card-shell {
+  position: relative;
+  max-width: 380px;
+  margin: 0 auto;
 }
+.pc-badges-row {
+  position: absolute;
+  top: 8%;
+  right: 0;
+  transform: translateX(50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  margin: 0;
+  z-index: 2;
+  pointer-events: none; /* chips re-enable below — lets taps fall through gaps */
+}
+.pc-badges-row > * { pointer-events: auto; }
 .pc-badge-chip,
 .pc-badge-more {
   width: 42px;
@@ -2265,12 +2282,22 @@ body.public-card-view #app { padding-top: 0; }
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   padding: 0;
   transition: transform 0.08s ease;
 }
+.pc-badge-chip:hover,
+.pc-badge-more:hover { transform: scale(1.06); }
 .pc-badge-chip:active,
 .pc-badge-more:active { transform: scale(0.94); }
+/* On very narrow phones the chips start to crowd the screen edge —
+   shrink slightly so the overlap looks clean. */
+@media (max-width: 400px) {
+  .pc-badge-chip,
+  .pc-badge-more { width: 36px; height: 36px; }
+  .pc-badge-emoji { font-size: 1.15rem; }
+  .pc-badges-row { gap: 0.35rem; top: 6%; }
+}
 .pc-badge-emoji {
   font-size: 1.35rem;
   line-height: 1;

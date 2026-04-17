@@ -1,6 +1,54 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-17)
 
-## 🔖 Where we left off on 2026-04-17 (session 8 — read this first)
+## 🔖 Where we left off on 2026-04-17 (session 9 — read this first)
+
+**Slice 9a polish — three tweaks on top of the badges shipped in session 8.** No schema changes; all JS/CSS. Still manual-only badges; 9b (auto-derivations) unchanged.
+
+### Shipped this session (session 9)
+
+1. **Badges repositioned to the right edge of the FIFA card, half-overlapping.** Previously rendered as a centred row *below* the card. Now a vertical column on the right, each 42px chip translated `translateX(50%)` so it sits half-over the card's right edge. A new `.pc-card-shell` wrapper (`position: relative`, same 380px max-width as the card) hosts both the card and the absolutely-positioned `.pc-badges-row` so the card's own `overflow: hidden` can stay intact for the FIFA artwork. On viewports ≤ 400px, chips shrink to 36px and the column pulls up 2% so they don't crowd into the name line. `pointer-events: none` on the column with `auto` on children so gaps between chips pass taps through to the card. Hover now scales chips 1.06× for a satisfying feedback cue.
+
+2. **Hover tooltips include the coach note.** `.pc-badge-chip` now renders `title="{Badge name} — {note}"` on the card (desktop hover + mobile long-press) in addition to the click-to-open detail sheet. The `+N` / **All** button also gets a tooltip ("See all N badges"). No change to the detail sheet — still the primary "tap to read full context" path.
+
+3. **Optional badges step added to the post-match Result wizard.** The wizard was 4 steps (HT → FT → Goalscorers → MOTM); it's now **5 steps**, with step 5 = **Badges (optional)**. Each matchday candidate gets a compact row with their current badges for this match (filtered by `lineup_id`) inline as removable pill chips, plus a **+ Award badge** button. Tapping opens `openAwardBadgeModal` with `lineupId` pre-filled, so awards are linked to the match. Step 4 gains a new **Save & skip badges** button for coaches who don't want to touch the step at all — either button commits score/scorers/MOTM identically; badges save the instant they're confirmed in the picker (same as the Squad tab flow, so Cancel in the wizard afterwards doesn't roll them back).
+
+### Files touched (session 9)
+- `web/app.js` —
+  - Added `.pc-card-shell` wrapper around `.pc-card` + `${badgesRowHtml}` in `renderPlayerCardBody`.
+  - Badge chip `title=""` now includes coach note; **All**/`+N` gets its own tooltip.
+  - `openAwardBadgeModal` signature gained `lineupId` (optional); `awardManualBadge` call passes it through as `lineupId: lineupId || null`.
+  - `openResultWizard` extended to 5 steps: new `htmlStepBadges()` renderer, new `[data-rw-award-pid]` / `.rw-bg-chip-x` handlers in `wire()`, step-chips row renders 5 pips, step-label array adds `'Badges (optional)'`, `render()` caps step at 5, footer renders `Save & skip badges` on step 4 + `✓ Save result` on step 5. `doSave()` extracted from the save onclick so both buttons share the commit path.
+  - In-app `HELP_SECTIONS` "Recording the result" block rewritten from 4-step to 5-step. Quickstart "Post-match" line updated to include the Badges step.
+- `web/styles.css` — new `.pc-card-shell` + repositioned `.pc-badges-row` (absolute/right column); hover scale on chips; `@media (max-width: 400px)` shrinks chips to 36px on phones.
+- `web/FAQ.md` — "How do I record the result after the game has been played?" rewritten for 5 steps.
+- `web/HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 9)
+**None.** Session 8's `player_badges` migration still the only schema for Slice 9. `lineup_id` column already exists and was always nullable — this session just starts populating it via the wizard.
+
+### Sanity-check script (session 9)
+
+1. **Right-side badges, half-overlap** — open a player card with at least 2 badges. Beneath the stats grid there should be **nothing** (the old centred row is gone). On the right edge of the card, a vertical column of gold chips sits with each chip centred on the card's right border — half chip inside the card, half outside. On a phone-sized viewport, chips shrink to 36px and still half-overlap.
+2. **Tooltip** — desktop: hover a chip — the OS tooltip should read `{Badge name} — {note}`, e.g. `Clinical Finisher — Screamer from 30 yards`. Mobile: long-press a chip — same tooltip. Tap (short) — detail bottom-sheet still opens with the full info.
+3. **Card artwork unchanged** — stats grid, name, number, crest, W-D-L all unchanged. The FIFA PNG artwork is not clipped (card overflow still hidden).
+4. **Wizard 5 steps** — Matches → pick a played match → **⚽ Enter result**. Step indicator shows `Step 1 of 5`, five pips along the top. Advance through HT / FT / Goalscorers / MOTM as before.
+5. **Step 4 footer** — on step 4, footer now shows three buttons on the right: Cancel / **Save & skip badges** / **Next → Badges**. Tap **Save & skip badges** on a fresh test match — wizard closes, match card flips green with the FT chip. No badges written (as expected).
+6. **Step 5 UI** — re-open the wizard, advance to step 5. Every matchday player has a row with `+ Award badge` on the right. Tap it for any player — badge picker opens, pick `Clinical Finisher` with a note. Save → modal closes, step 5 re-renders, new gold pill appears inline beside the player's name with a `✕` to remove.
+7. **Badge tied to match** — open the public card for that player. The chip on the right of the card should be the one you just awarded. Open the badge detail → date + note present.
+8. **Cancel doesn't undo badges** — in the wizard step 5, award another badge. Tap **✕** to close the wizard instead of Save. Re-open the wizard — the badge is still there (persisted on confirm, as designed). Score/scorers/MOTM state is still from the last Save (unchanged by Cancel).
+9. **Remove in-flight** — in step 5, tap `✕` on a chip → confirm → chip disappears, row re-renders in place.
+10. **Squad-tab badges still work** — Squad → tap a player → existing Award badge + ✕ remove flow unchanged. A single badge award from there does NOT set `lineup_id` (it's left null) so won't appear in any wizard step 5 list.
+
+### Start-here on the new machine (session 9)
+Pull `web/app.js`, `web/styles.css`, `web/FAQ.md`, `web/HANDOFF.md` — no DB migration this session. Test: open the public player card first, confirm the right-edge badge column, then take a played match through the 5-step wizard and try both save paths.
+
+### Next up
+- **Slice 9b — auto-derived badges.** No change to plan from session 8. Every `flavour: 'auto'` catalog entry needs a pure-JS criterion against existing lineup data. Easy wins: `debut_match`, `opening_night`, `brace`, `hat_trick_hero`, `super_sub`, `games_10/25/50/100`, `goals_1/10/25/50`. Derive on lineup save or in a pass on `renderTeamDashboard`; persist into `player_badges` with `awarded_by = null, lineup_id = {match}`. De-dup in the UI via the existing `seenKeys` on the card.
+- **Visual / design pass.** Still deferred.
+
+---
+
+## 🔖 Where we left off on 2026-04-17 (session 8)
 
 **Slice 9a — Manual badges shipped.** FIFA UT-style achievement layer over the stats card. Full `BADGE_CATALOG` seeded (manual + auto stubs); 9a renders manual awards only. Auto-derived badges are Slice 9b.
 
