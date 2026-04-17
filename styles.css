@@ -1998,17 +1998,22 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
   /* Match editor on mobile — flex column in source order so top-strip
      (availability + status + Enter result) sits ABOVE the pitch, and the
      sub-tab strip sits below. Tighter padding on top-strip children so they
-     don't hog vertical space above the pitch. */
+     don't hog vertical space above the pitch.
+     align-items: stretch is CRITICAL — the desktop rule sets `start`, which
+     in a flex column shrinks each child to content width, collapsing the
+     pitch (its inner 86%-width card ends up 86% of ~0). */
   .match-editor-body {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+    align-items: stretch;
   }
   .match-editor-body > .me-pitch-col,
   .match-editor-body > .me-top-strip,
   .match-editor-body > .me-sub-strip {
     grid-column: auto;
     grid-row: auto;
+    width: 100%;
   }
   .match-editor-body > .me-top-strip { gap: 0.3rem; margin-bottom: 0.15rem; }
   .match-editor-body > .me-top-strip .me-avail-bar {
