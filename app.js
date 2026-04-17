@@ -1782,14 +1782,15 @@ async function renderTeamDashboard(user, teamId) {
   } else if (activeTab === 'help') {
     renderHelpTab(canEdit, role);
   } else if (activeTab === 'formations') {
-    // Placeholder — full Formations management UI is a later step in the redesign.
-    const host = document.getElementById('tab-content');
-    host.innerHTML = `
-      <div class="card">
-        <h2>Formations</h2>
-        <p class="muted">Formation management will live here soon. For now, you can create and edit custom formations from inside a match — open any match and go to the <strong>Formation</strong> tab.</p>
-      </div>
-    `;
+    editor = {
+      mode: 'formation',
+      team, canEdit, players, lineups, plays, customFormations,
+      currentUser: user,
+      currentUserId: user.id,
+      currentUserRole: role,
+      current: newFormationState()
+    };
+    renderFormationsTab();
   }
 }
 
@@ -3993,6 +3994,184 @@ const _LINEUP_PHONE_TABS = [
   { key: 'info',      label: 'Info',         icon: '' },
 ];
 
+// Formations top-level page sub-tab state. Only two sub-tabs: Formation (list +
+// edit/save) and Squad (palette for drag-preview).
+let _formationPhoneTab = 'formation';
+
+// Shape of editor.current when editing/previewing a formation on the top-level
+// Formations page. Intentionally slim — formations don't own match metadata.
+function newFormationState() {
+  return {
+    id: null,
+    formation: '4-3-3',
+    slots: {},
+    subs: [],            // always empty — Formations page has no subs row
+    arrows: [],
+    zoneLines: [null, null],
+    ballVisible: false,
+    ballPos: { x: 50, y: 50 }
+  };
+}
+
+// Render the Formations top-level page (2026-04-17 rebuild). Same pitch-left +
+// sub-tabs-right skeleton as the match editor, trimmed down to Formation +
+// Squad. Shares the edit-positions + save / save-as-new handlers with the
+// match editor (they've been made mode-aware via _rerenderEditor).
+function renderFormationsTab() {
+  const tabEl = document.getElementById('tab-content');
+  const { team, canEdit, players, customFormations, current } = editor;
+
+  const FORMS = allFormations(customFormations);
+  const formationBtns = Object.keys(FORMS).map(f => {
+    const cid = FORMS[f]._customId;
+    return `<button class="f-btn ${current.formation === f ? 'active' : ''}${cid ? ' f-btn-custom' : ''}" data-formation="${f}">${escapeHtml(f)}${cid && canEdit ? `<span class="f-del" data-del-formation="${cid}" title="Delete">✕</span>` : ''}</button>`;
+  }).join('');
+
+  // Palette: players not already in a slot on the pitch.
+  const usedIds = new Set([...Object.values(current.slots || {})].filter(Boolean));
+  const availablePlayers = (players || []).filter(p => !usedIds.has(p.id));
+  const paletteHtml = availablePlayers.length
+    ? availablePlayers.map(p => chipHtml(p, 'palette')).join('')
+    : `<p class="muted" style="padding:0.5rem">All players on the pitch.</p>`;
+
+  // Formation panel body — formation list + edit/save controls (full edit here).
+  const formationPanelHtml = `
+    <div class="f-btns f-btns-col">${formationBtns}</div>
+    ${canEdit ? `
+      <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+        ${_posEditMode
+          ? `<button class="primary btn-full" id="pos-edit-done">✓ Done</button>
+             <button class="btn-full" id="pos-edit-save">💾 Save formation</button>
+             <button class="btn-full" id="pos-edit-save-new">➕ Save as new formation…</button>
+             <button class="btn-full" id="pos-edit-cancel" style="margin-bottom:0">✕ Cancel</button>
+             <p class="muted" style="font-size:0.72rem;margin:0.25rem 0 0">Drag handles to reposition. Double-click a label to rename.</p>`
+          : `<button class="btn-full" id="pos-edit-toggle" style="margin-bottom:0">✎ Edit formation</button>`
+        }
+      </div>
+    ` : ''}
+  `;
+
+  const squadPanelHtml = `
+    <p class="muted me-hint">Drag players onto the pitch to preview this formation with your squad. On save you'll be asked whether to keep the placements.</p>
+    <div class="palette" id="palette">${paletteHtml}</div>
+    ${canEdit ? `<button type="button" class="btn-full me-btn-clear-pitch" id="clear-pitch-squad">Clear pitch</button>` : ''}
+  `;
+
+  // Sub-tab strip — just two tabs here.
+  const subTabsHtml = `
+    <nav class="lineup-phone-tabs me-subtabs" role="tablist" aria-label="Formations sections">
+      <button class="lineup-phone-tab ${_formationPhoneTab === 'formation' ? 'active' : ''}" role="tab" aria-selected="${_formationPhoneTab === 'formation' ? 'true' : 'false'}" data-ptab="formation">Formation</button>
+      <button class="lineup-phone-tab ${_formationPhoneTab === 'squad' ? 'active' : ''}"     role="tab" aria-selected="${_formationPhoneTab === 'squad' ? 'true' : 'false'}"     data-ptab="squad">Squad</button>
+    </nav>
+  `;
+
+  tabEl.innerHTML = `
+    <div class="match-editor lineup-layout formations-layout" data-phone-tab="${_formationPhoneTab}">
+      <div class="me-body">
+        <div class="me-pitch-col">
+          <div class="card pitch-card">
+            <div class="pitch" id="pitch">
+              <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+              <div class="slots-layer" id="slots-layer"></div>
+            </div>
+          </div>
+        </div>
+        <div class="me-panel-col">
+          ${subTabsHtml}
+          <div class="me-panel card">
+            <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
+            <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Paint the pitch and wire up events.
+  renderPitch();
+  wireFormationsEvents();
+  // Position editing needs special wiring (drag handles, label double-click)
+  if (canEdit && _posEditMode) wirePositionEditing();
+  // Drag-and-drop uses a capture-phase listener that's wired once globally;
+  // calling wireDragAndDrop ensures it's live if this is the first editor
+  // surface the user has opened this session.
+  if (typeof wireDragAndDrop === 'function') wireDragAndDrop();
+}
+
+// Wire events for the Formations top-level page. Formation-button clicks and
+// the pos-edit-* handlers are already wired inside wireLineupEvents, but we
+// don't call that function here (it would try to wire match-specific things
+// that don't exist on this page). Instead we re-bind the slice that the
+// Formations page renders: formation buttons, delete-formation X's,
+// pos-edit-* buttons, clear-pitch button, and the sub-tab switcher.
+function wireFormationsEvents() {
+  const tabEl = document.getElementById('tab-content');
+  const { canEdit } = editor;
+
+  // Sub-tab switcher (Formation ↔ Squad)
+  const layoutEl = tabEl.querySelector('.lineup-layout');
+  tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.ptab;
+      if (!key) return;
+      _formationPhoneTab = key;
+      if (layoutEl) layoutEl.setAttribute('data-phone-tab', key);
+      tabEl.querySelectorAll('.lineup-phone-tab[data-ptab]').forEach(b => {
+        const on = b.dataset.ptab === key;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    };
+  });
+
+  // Formation buttons — reuse the same data-formation logic as the match editor
+  tabEl.querySelectorAll('[data-formation]').forEach(b => {
+    b.onclick = () => {
+      if (!canEdit) return;
+      const picked = b.dataset.formation;
+      editor.current.formation = picked;
+      delete editor.current.pos;
+      delete editor.current.lbl;
+      _posEditMode = false;
+      // Pull stored player placements if this formation was saved with them
+      const custom = (editor.customFormations || []).find(c => c.name === picked);
+      editor.current.slots = custom?.data?.players ? { ...custom.data.players } : {};
+      _rerenderEditor();
+    };
+  });
+
+  // Custom-formation delete X on a formation button
+  tabEl.querySelectorAll('[data-del-formation]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      const id = btn.dataset.delFormation;
+      if (!confirm('Delete this custom formation?')) return;
+      const { error } = await supabase.from('formations').delete().eq('id', id);
+      if (error) { alert('Delete failed: ' + error.message); return; }
+      const cfs = editor.customFormations || [];
+      const idx = cfs.findIndex(c => c.id === id);
+      if (idx >= 0) cfs.splice(idx, 1);
+      await logAudit(editor.team.id, 'formation', id, 'delete', {});
+      if (!getFormation(editor.current.formation)) editor.current.formation = '4-3-3';
+      _rerenderEditor();
+    };
+  });
+
+  // Edit formation / Save / Save-as-new / Cancel / Done — shared extracted
+  // handlers that also drive the match editor's (now-removed) sub-tab.
+  wirePosEditingHandlers();
+
+  // Collapsibles reused elsewhere — harmless no-op if no <details> cards exist.
+  if (typeof wireCollapsibles === 'function') wireCollapsibles(tabEl);
+
+  // Clear pitch button (Squad sub-tab) — wipe slots without re-rendering whole tab
+  const clearBtn = document.getElementById('clear-pitch-squad');
+  if (clearBtn) clearBtn.onclick = () => {
+    editor.current.slots = {};
+    refreshAfterChipMove();
+  };
+}
+
 function renderLineupsTab() {
   const tabEl = document.getElementById('tab-content');
   const { team, canEdit, players, lineups, plays, customFormations, current } = editor;
@@ -5795,6 +5974,9 @@ function pitchSvgInner() {
 
 function renderSubsBar() {
   const row = document.getElementById('subs-row');
+  // Formations top-level page (re-uses pitch rendering) has no subs row, so
+  // renderSubsBar is a safe no-op there. Other callers always have one.
+  if (!row) return;
   const { current, players } = editor;
   const pById = id => players.find(p => p.id === id);
 
@@ -5856,21 +6038,32 @@ function wireLineupEvents() {
     };
   });
 
-  // Formation buttons
+  // Formation buttons. Shared by match editor + Formations top-level page. The
+  // Formations page loads the formation's stored player placements (if any)
+  // instead of carrying over whatever was on the pitch.
   tabEl.querySelectorAll('[data-formation]').forEach(b => {
     b.onclick = () => {
       if (!canEdit) return;
-      editor.current.formation = b.dataset.formation;
+      const picked = b.dataset.formation;
+      editor.current.formation = picked;
       // Changing formation resets any session-custom positions
       delete editor.current.pos;
       delete editor.current.lbl;
       _posEditMode = false;
-      // Drop any slotted players beyond the new formation's slot count
-      const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
-      Object.keys(editor.current.slots).forEach(k => {
-        if (parseInt(k) >= newCount) delete editor.current.slots[k];
-      });
-      renderLineupsTab();
+      // On the Formations page, load the formation's stored player placements
+      // (if the coach opted to save them). Presets never have stored players.
+      // On the match editor we keep the existing squad and just trim overflow.
+      if (editor?.mode === 'formation') {
+        const custom = (editor.customFormations || []).find(c => c.name === picked);
+        editor.current.slots = custom?.data?.players ? { ...custom.data.players } : {};
+      } else {
+        // Drop any slotted players beyond the new formation's slot count
+        const newCount = (getFormation(editor.current.formation)?.pos.length) || 0;
+        Object.keys(editor.current.slots).forEach(k => {
+          if (parseInt(k) >= newCount) delete editor.current.slots[k];
+        });
+      }
+      _rerenderEditor();
     };
   });
 
@@ -6092,11 +6285,43 @@ function wireLineupEvents() {
       await logAudit(team.id, 'formation', id, 'delete', {});
       // If current lineup used it, reset to 4-3-3
       if (!getFormation(editor.current.formation)) editor.current.formation = '4-3-3';
-      renderLineupsTab();
+      _rerenderEditor();
     };
   });
 
-  // Edit positions toggle
+  // Position-editing handlers (Edit formation / Save / Save-as-new / Cancel /
+  // Done). Extracted so the Formations top-level page can share them via
+  // wireFormationsEvents. Idempotent — safe to call on any page; all
+  // lookups null-guard.
+  wirePosEditingHandlers();
+
+  if (canEdit && _posEditMode) wirePositionEditing();
+
+  wireCollapsibles(tabEl);
+
+  if (canEdit && !_posEditMode) wireDragAndDrop();
+  if (canEdit && !_posEditMode) wireTacticsUI();
+  if (canEdit && !_posEditMode) wirePicker();
+}
+
+// Shared by wireLineupEvents (harmless — match editor Formation sub-tab no
+// longer renders these buttons) and wireFormationsEvents (Formations top-level
+// page — this is the real user of it). Uses editor.mode to branch on
+// side-effects (autosave only in 'lineup' mode; player-placements prompt only
+// in 'formation' mode). Idempotent; all DOM lookups null-guard.
+function wirePosEditingHandlers() {
+  // Optional prompt: when the coach has players on the pitch on the Formations
+  // page, ask whether to remember those placements with the saved formation.
+  // Returns the slots object to save, or null to save shape-only.
+  const _maybeIncludePlayersInSave = () => {
+    if (editor?.mode !== 'formation') return null;
+    const slots = editor.current.slots || {};
+    const filled = Object.values(slots).filter(Boolean).length;
+    if (filled === 0) return null;
+    return confirm(`Remember the ${filled} player placement${filled === 1 ? '' : 's'} currently on the pitch with this formation?\n\nOK — save players too (they'll be pre-placed next time you open this formation).\nCancel — save the shape only.`)
+      ? { ...slots } : null;
+  };
+
   const posToggle = document.getElementById('pos-edit-toggle');
   if (posToggle) posToggle.onclick = () => {
     const f = getFormation(editor.current.formation);
@@ -6104,22 +6329,21 @@ function wireLineupEvents() {
     if (!Array.isArray(editor.current.pos)) editor.current.pos = f.pos.map(p => [...p]);
     if (!Array.isArray(editor.current.lbl)) editor.current.lbl = [...f.lbl];
     _posEditMode = true;
-    renderLineupsTab();
+    _rerenderEditor();
   };
 
   const posDone = document.getElementById('pos-edit-done');
   if (posDone) posDone.onclick = () => {
     _posEditMode = false;
-    renderLineupsTab();
+    _rerenderEditor();
   };
 
   const posCancel = document.getElementById('pos-edit-cancel');
   if (posCancel) posCancel.onclick = () => {
-    // Revert to formation defaults for this session
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    renderLineupsTab();
+    _rerenderEditor();
   };
 
   const posSave = document.getElementById('pos-edit-save');
@@ -6130,10 +6354,8 @@ function wireLineupEvents() {
 
     let trimmed = baseName;
     if (existingCustomId) {
-      // Update existing custom formation in place (overwrite)
       if (!confirm(`Overwrite custom formation "${baseName}"?`)) return;
     } else {
-      // Built-in preset — must save as new (can't overwrite presets)
       const suggested = baseName + ' (custom)';
       const name = prompt('Preset formations can\'t be overwritten. Save as new custom formation — name:', suggested);
       if (!name) return;
@@ -6145,6 +6367,8 @@ function wireLineupEvents() {
       pos: editor.current.pos.map(p => [...p]),
       lbl: [...editor.current.lbl]
     };
+    const includePlayers = _maybeIncludePlayersInSave();
+    if (includePlayers) payloadData.players = includePlayers;
 
     if (existingCustomId) {
       const { data, error } = await supabase.from('formations')
@@ -6169,9 +6393,8 @@ function wireLineupEvents() {
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    // Persist formation-name change on the lineup itself
-    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
-    renderLineupsTab();
+    if (editor?.mode !== 'formation' && typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
+    _rerenderEditor();
   };
 
   const posSaveNew = document.getElementById('pos-edit-save-new');
@@ -6182,7 +6405,6 @@ function wireLineupEvents() {
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    // Check for name clash with existing custom formations
     const clash = (editor.customFormations || []).find(cf => cf.name === trimmed);
     if (clash && !confirm(`A formation named "${trimmed}" already exists. Overwrite it?`)) return;
 
@@ -6190,6 +6412,8 @@ function wireLineupEvents() {
       pos: editor.current.pos.map(p => [...p]),
       lbl: [...editor.current.lbl]
     };
+    const includePlayers = _maybeIncludePlayersInSave();
+    if (includePlayers) payloadData.players = includePlayers;
 
     if (clash) {
       const { data, error } = await supabase.from('formations')
@@ -6213,17 +6437,9 @@ function wireLineupEvents() {
     delete editor.current.pos;
     delete editor.current.lbl;
     _posEditMode = false;
-    if (typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
-    renderLineupsTab();
+    if (editor?.mode !== 'formation' && typeof scheduleAutosaveIfPublished === 'function') scheduleAutosaveIfPublished();
+    _rerenderEditor();
   };
-
-  if (canEdit && _posEditMode) wirePositionEditing();
-
-  wireCollapsibles(tabEl);
-
-  if (canEdit && !_posEditMode) wireDragAndDrop();
-  if (canEdit && !_posEditMode) wireTacticsUI();
-  if (canEdit && !_posEditMode) wirePicker();
 }
 
 function wirePositionEditing() {
@@ -6871,6 +7087,18 @@ function removeFromSource(payload) {
     delete current.slots[parseInt(payload.fromSlot)];
   } else if (payload.fromSub !== null && payload.fromSub !== undefined) {
     current.subs[parseInt(payload.fromSub)] = undefined;
+  }
+}
+
+// Re-render the currently-active editor tab. The position-editing handlers and
+// the formation-button click handler are shared between the match editor and
+// the Formations top-level page; both set editor.mode so this dispatch picks
+// the right renderer.
+function _rerenderEditor() {
+  if (editor?.mode === 'formation') {
+    renderFormationsTab();
+  } else {
+    renderLineupsTab();
   }
 }
 
