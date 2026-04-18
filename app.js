@@ -318,12 +318,135 @@ const BADGE_CATALOG = {
   clean_sheets_1:     { name: 'First Clean Sheet',emoji: '🧼', category: 'milestone', flavour: 'auto',   description: 'First clean sheet for the team.' },
   clean_sheets_5:     { name: '5 Clean Sheets',   emoji: '🧱', category: 'milestone', flavour: 'auto',   description: '5 career clean sheets.' },
   clean_sheets_10:    { name: '10 Clean Sheets',  emoji: '🏛️', category: 'milestone', flavour: 'auto',   description: '10 career clean sheets.' },
+  assists_1:          { name: 'First Assist',     emoji: '🎁', category: 'milestone', flavour: 'auto',   description: 'First assist for the team.' },
+  assists_10:         { name: '10 Assists',       emoji: '🪄', category: 'milestone', flavour: 'auto',   description: '10 career assists.' },
+  assists_25:         { name: '25 Assists',       emoji: '🎩', category: 'milestone', flavour: 'auto',   description: '25 career assists.' },
+
+  // 🥅 Goalkeeper specialists
+  penalty_saver:      { name: 'Penalty Saver',    emoji: '🥅', category: 'goalkeeper', flavour: 'manual', description: 'Saved a penalty — pure nerve and timing.' },
+  double_save:        { name: 'Double Save',      emoji: '✋', category: 'goalkeeper', flavour: 'manual', description: 'Parried the first shot, got up and saved the rebound.' },
+  fingertip_save:     { name: 'Fingertip Save',   emoji: '☝️', category: 'goalkeeper', flavour: 'manual', description: 'Flying save — just got enough on it.' },
+  commanding_area:    { name: 'Commanding the Area', emoji: '🧭', category: 'goalkeeper', flavour: 'manual', description: 'Dominated the six-yard box — came and claimed it.' },
+  one_v_one_hero:     { name: 'One-v-One Hero',   emoji: '🆚', category: 'goalkeeper', flavour: 'manual', description: 'Won a crucial 1-v-1 with the striker.' },
+  at_their_feet:      { name: 'At Their Feet',    emoji: '🦶', category: 'goalkeeper', flavour: 'manual', description: 'Brave save down low — right at the striker\'s boots.' },
+  distribution_king:  { name: 'Distribution King',emoji: '📡', category: 'goalkeeper', flavour: 'manual', description: 'Pinpoint kicks and throws started attacks all match.' },
+  claim_master:       { name: 'Claim Master',     emoji: '🙌', category: 'goalkeeper', flavour: 'manual', description: 'Plucked crosses out of the air with confidence.' },
+  keeper_captain:     { name: 'Keeper Captain',   emoji: '🗣️', category: 'goalkeeper', flavour: 'manual', description: 'Organised the back line from the sticks.' },
+  quick_release:      { name: 'Quick Release',    emoji: '⚡', category: 'goalkeeper', flavour: 'manual', description: 'Lightning throw-out launched a counter-attack.' },
+
+  // 🧱 Defender specialists
+  aerial_ace:         { name: 'Aerial Ace',       emoji: '🪽', category: 'defender', flavour: 'manual', description: 'Won everything in the air.' },
+  header_clearance:   { name: 'Header Clearance', emoji: '💨', category: 'defender', flavour: 'manual', description: 'Towering header to clear the danger.' },
+  clean_slide:        { name: 'Clean Slide',      emoji: '🧽', category: 'defender', flavour: 'manual', description: 'Perfect sliding tackle — all ball.' },
+  recovery_run:       { name: 'Recovery Run',     emoji: '🏃', category: 'defender', flavour: 'manual', description: 'Chased back from nowhere to stop a breakaway.' },
+  marking_master:     { name: 'Marking Master',   emoji: '👁️', category: 'defender', flavour: 'manual', description: 'Stuck to their man all match — never let them out of sight.' },
+  block_party:        { name: 'Block Party',      emoji: '🚫', category: 'defender', flavour: 'manual', description: 'Threw themselves in front of shots all game.' },
+  position_perfect:   { name: 'Position Perfect', emoji: '📐', category: 'defender', flavour: 'manual', description: 'Always in the right place — the defender\'s art.' },
+  long_ball_guru:     { name: 'Long-Ball Guru',   emoji: '🎯', category: 'defender', flavour: 'manual', description: 'Pinged a diagonal that split the opposition.' },
+  composed_defender:  { name: 'Composed Defender',emoji: '🧘', category: 'defender', flavour: 'manual', description: 'Played out from the back under pressure.' },
+  overlap_run:        { name: 'Overlap Run',      emoji: '↪️', category: 'defender', flavour: 'manual', description: 'Bombed forward to overlap the winger.' },
+  wingback_engine:    { name: 'Wing-Back Engine', emoji: '🚂', category: 'defender', flavour: 'manual', description: 'Up and down that flank all match.' },
+
+  // 🎛️ Midfielder specialists
+  metronome:          { name: 'Metronome',        emoji: '🎼', category: 'midfielder', flavour: 'manual', description: 'Set the tempo — kept the ball ticking over.' },
+  pass_master:        { name: 'Pass Master',      emoji: '🧵', category: 'midfielder', flavour: 'manual', description: 'Barely misplaced a pass all match.' },
+  playmaker:          { name: 'Playmaker',        emoji: '🎨', category: 'midfielder', flavour: 'manual', description: 'Pulled the strings — made the team tick.' },
+  key_pass:           { name: 'Key Pass',         emoji: '🗝️', category: 'midfielder', flavour: 'manual', description: 'The pass that unlocked the defence.' },
+  ball_winner:        { name: 'Ball Winner',      emoji: '🥊', category: 'midfielder', flavour: 'manual', description: 'Every loose ball ended up with them.' },
+  box_to_box:         { name: 'Box to Box',       emoji: '📦', category: 'midfielder', flavour: 'manual', description: 'Covered every blade of grass — end to end.' },
+  deep_architect:     { name: 'Deep-Lying Architect', emoji: '🏗️', category: 'midfielder', flavour: 'manual', description: 'Ran the game from deep — dictated everything.' },
+  number_ten:         { name: 'Number Ten',       emoji: '🔟', category: 'midfielder', flavour: 'manual', description: 'Found pockets of space between the lines.' },
+  turnover_ninja:     { name: 'Turnover Ninja',   emoji: '🥷', category: 'midfielder', flavour: 'manual', description: 'Won the ball high up and started the attack.' },
+  switch_of_play:     { name: 'Switch of Play',   emoji: '🔀', category: 'midfielder', flavour: 'manual', description: 'Crossfield ball switched the angle of attack.' },
+  eye_of_needle:      { name: 'Eye of the Needle',emoji: '🪡', category: 'midfielder', flavour: 'manual', description: 'Threaded a pass that shouldn\'t have been possible.' },
+
+  // 🏹 Forward specialists
+  target_man:         { name: 'Target Man',       emoji: '🎯', category: 'forward', flavour: 'manual', description: 'Held the ball up under pressure — gave the team a platform.' },
+  first_touch_wizard: { name: 'First-Touch Wizard', emoji: '✨', category: 'forward', flavour: 'manual', description: 'Silky first touch that took the defender out of the game.' },
+  chance_creator:     { name: 'Chance Creator',   emoji: '💡', category: 'forward', flavour: 'manual', description: 'Carved out chance after chance for teammates.' },
+  volley_virtuoso:    { name: 'Volley Virtuoso',  emoji: '🎻', category: 'forward', flavour: 'manual', description: 'Scored with a clean volley.' },
+  header_scorer:      { name: 'Header Scorer',    emoji: '🧠', category: 'forward', flavour: 'manual', description: 'Climbed to head one in.' },
+  chip_finish:        { name: 'Chip Finish',      emoji: '🥄', category: 'forward', flavour: 'manual', description: 'Dinked it over the keeper — ice cold.' },
+  bicycle_kick:       { name: 'Bicycle Kick',     emoji: '🚴', category: 'forward', flavour: 'manual', description: 'Pulled off a bicycle kick — attempted or scored.' },
+  pressing_monster:   { name: 'Pressing Monster', emoji: '👹', category: 'forward', flavour: 'manual', description: 'Harried defenders until they cracked.' },
+  link_up_play:       { name: 'Link-Up Play',     emoji: '🔗', category: 'forward', flavour: 'manual', description: 'Brought others into the game with clever lay-offs.' },
+  channel_runner:     { name: 'Channel Runner',   emoji: '🏃‍♂️', category: 'forward', flavour: 'manual', description: 'Made clever runs into the channels behind.' },
+
+  // 🔥 Attacking moments (expanded)
+  opener:             { name: 'The Opener',       emoji: '🔓', category: 'attacking', flavour: 'manual', description: 'Scored the first goal of the match.' },
+  equaliser:          { name: 'Equaliser',        emoji: '⚖️', category: 'attacking', flavour: 'manual', description: 'Scored the goal that levelled it up.' },
+  winning_goal:       { name: 'Winning Goal',     emoji: '🏆', category: 'attacking', flavour: 'manual', description: 'Scored the match-winner.' },
+  late_winner:        { name: 'Late Winner',      emoji: '⏰', category: 'attacking', flavour: 'manual', description: 'A late goal that sealed the three points.' },
+  comeback_scorer:    { name: 'Comeback Scorer',  emoji: '🔁', category: 'attacking', flavour: 'manual', description: 'Scored when the team was behind — sparked a comeback.' },
+  derby_goal:         { name: 'Derby Goal',       emoji: '🏟️', category: 'attacking', flavour: 'manual', description: 'Scored in a derby or rivalry match.' },
+  first_time_finish:  { name: 'First-Time Finish',emoji: '💥', category: 'attacking', flavour: 'manual', description: 'Hit it first-time and buried it.' },
+  assist_match:       { name: 'Assist',           emoji: '🎁', category: 'attacking', flavour: 'manual', description: 'Provided the pass for a goal.' },
+  double_assist:      { name: 'Double Assist',    emoji: '🎁🎁', category: 'attacking', flavour: 'manual', description: 'Two assists in one match.' },
+  hat_assist:         { name: 'Hat-Trick of Assists', emoji: '🎁🎁🎁', category: 'attacking', flavour: 'manual', description: 'Three assists in a single match.' },
+  through_ball:       { name: 'Through-Ball Artist', emoji: '🏹', category: 'attacking', flavour: 'manual', description: 'Defence-splitting through ball.' },
+  chance_factory:     { name: 'Chance Factory',   emoji: '🏭', category: 'attacking', flavour: 'manual', description: 'Created 3+ clear chances in one match.' },
+
+  // 🎱 Set pieces & dead balls
+  free_kick_ace:      { name: 'Free-Kick Ace',    emoji: '🎯', category: 'setpiece', flavour: 'manual', description: 'Curled a free-kick home or onto target.' },
+  corner_king:        { name: 'Corner King',      emoji: '🚩', category: 'setpiece', flavour: 'manual', description: 'Dangerous delivery from every corner.' },
+  penalty_taker_ace:  { name: 'Penalty Ace',      emoji: '🎯', category: 'setpiece', flavour: 'manual', description: 'Stepped up and calmly scored a penalty.' },
+  dead_ball_master:   { name: 'Dead-Ball Master', emoji: '🎱', category: 'setpiece', flavour: 'manual', description: 'Ran the set-pieces — free kicks, corners, the lot.' },
+  cross_master:       { name: 'Cross Master',     emoji: '➕', category: 'setpiece', flavour: 'manual', description: 'Whipped in cross after cross into dangerous areas.' },
+  long_throw_weapon:  { name: 'Long-Throw Weapon',emoji: '🏐', category: 'setpiece', flavour: 'manual', description: 'Long throws causing chaos in the box.' },
+
+  // ⚡ Skill tricks (expanded)
+  stepover_specialist: { name: 'Stepover Specialist', emoji: '🕺', category: 'skill', flavour: 'manual', description: 'Stepovers sent the defender the wrong way.' },
+  scissor_kick:       { name: 'Scissor Kick',     emoji: '✂️', category: 'skill', flavour: 'manual', description: 'Audacious scissor-kick attempt.' },
+  elastico:           { name: 'Elastico',         emoji: '🪀', category: 'skill', flavour: 'manual', description: 'Flicked the ball one way and went the other.' },
+  cruyff_turn:        { name: 'Cruyff Turn',      emoji: '🌀', category: 'skill', flavour: 'manual', description: 'Classic Cruyff turn to shake the marker.' },
+  backheel_hero:      { name: 'Backheel Hero',    emoji: '👠', category: 'skill', flavour: 'manual', description: 'Cheeky backheel that came off.' },
+  no_look_pass:       { name: 'No-Look Pass',     emoji: '🙈', category: 'skill', flavour: 'manual', description: 'Disguised pass to set up a teammate.' },
+
+  // 🧠 Attitude (expanded)
+  captain_armband:    { name: 'Captain\'s Armband', emoji: '🎽', category: 'attitude', flavour: 'manual', description: 'Wore the armband and led the team.' },
+  first_full_game:    { name: 'First Full Game',  emoji: '⏱️', category: 'attitude', flavour: 'manual', description: 'Played their first full 90 minutes.' },
+  late_bloomer:       { name: 'Late Bloomer',     emoji: '🌸', category: 'attitude', flavour: 'manual', description: 'Quiet first half, took over the second.' },
+  silent_hero:        { name: 'Silent Hero',      emoji: '🤫', category: 'attitude', flavour: 'manual', description: 'No fanfare — just quietly brilliant.' },
+  second_chance:      { name: 'Second Chance',    emoji: '🔄', category: 'attitude', flavour: 'manual', description: 'Missed a big chance, then made up for it.' },
+  bench_energy:       { name: 'Bench Energy',     emoji: '🔋', category: 'attitude', flavour: 'manual', description: 'Biggest cheerleader on the sidelines.' },
+
+  // 🎉 Fun (expanded — matchday character badges)
+  mud_magnet:         { name: 'Mud Magnet',       emoji: '🟫', category: 'fun', flavour: 'manual', description: 'Left the pitch unrecognisable — caked head to toe in mud.' },
+  goal_dance:         { name: 'Goal Dance',       emoji: '💃', category: 'fun', flavour: 'manual', description: 'Best celebration dance of the day.' },
+  keepy_up_king:      { name: 'Keepy-Up King',    emoji: '🤹', category: 'fun', flavour: 'manual', description: 'Pre-match keepy-up record holder.' },
+  warm_up_mvp:        { name: 'Warm-Up MVP',      emoji: '🏃', category: 'fun', flavour: 'manual', description: 'Set the tone in the warm-up — everyone else had to catch up.' },
+  post_match_pundit:  { name: 'Post-Match Pundit',emoji: '🎤', category: 'fun', flavour: 'manual', description: 'Best post-match analysis in the huddle.' },
+  bag_hero:           { name: 'Bag Hero',         emoji: '🎒', category: 'fun', flavour: 'manual', description: 'Helped pack the kit away without being asked.' },
+  snack_hero:         { name: 'Snack Hero',       emoji: '🍎', category: 'fun', flavour: 'manual', description: 'Brought the best half-time snacks.' },
+  water_boy:          { name: 'Water Carrier',    emoji: '💧', category: 'fun', flavour: 'manual', description: 'Kept the whole bench hydrated.' },
+  cone_carrier:       { name: 'Cone Carrier',     emoji: '🔺', category: 'fun', flavour: 'manual', description: 'First in, last out — helped set up and pack down.' },
+  dressing_room_dj:   { name: 'Dressing-Room DJ', emoji: '🎧', category: 'fun', flavour: 'manual', description: 'Brought the tunes — hyped the whole team up.' },
+  photo_finish:       { name: 'Photo Finish',     emoji: '📸', category: 'fun', flavour: 'manual', description: 'Star of the match-day team photo.' },
+  fresh_haircut:      { name: 'Fresh Haircut',    emoji: '💈', category: 'fun', flavour: 'manual', description: 'Fresh cut, fresh form.' },
+  sock_style:         { name: 'Sock Style',       emoji: '🧦', category: 'fun', flavour: 'manual', description: 'Best socks on the pitch.' },
+  matchday_mascot:    { name: 'Matchday Mascot',  emoji: '🐾', category: 'fun', flavour: 'manual', description: 'Brought the matchday energy from first whistle.' },
+  selfie_star:        { name: 'Selfie Star',      emoji: '🤳', category: 'fun', flavour: 'manual', description: 'Star of the post-match selfie.' },
+  tunnel_walk:        { name: 'Tunnel Walk',      emoji: '🚪', category: 'fun', flavour: 'manual', description: 'Walked out looking like a proper pro.' },
+  windmill_celly:     { name: 'Windmill Celly',   emoji: '🌪️', category: 'fun', flavour: 'manual', description: 'Spun away celebrating — pure joy.' },
+  ref_assistant:      { name: 'Ref\'s Assistant', emoji: '🚩', category: 'fun', flavour: 'manual', description: 'Stepped up to run the line when the ref needed a hand.' },
+  full_kit_hero:      { name: 'Full-Kit Hero',    emoji: '🎽', category: 'fun', flavour: 'manual', description: 'Turned up kitted out head to toe.' },
+  goal_commentator:   { name: 'Own Commentator',  emoji: '📻', category: 'fun', flavour: 'manual', description: 'Called their own goal as it went in.' },
+  mismatched_boots:   { name: 'Mismatched Boots', emoji: '👟', category: 'fun', flavour: 'manual', description: 'Turned up with mismatched boots and still bossed it.' },
+  kit_forgetful:      { name: 'Kit Scramble',     emoji: '🎽', category: 'fun', flavour: 'manual', description: 'Forgot something but still made it onto the pitch — barely.' },
+  half_time_hero:     { name: 'Half-Time Hero',   emoji: '🍊', category: 'fun', flavour: 'manual', description: 'Came out of the half-time chat a different player.' },
+  whistle_speedster:  { name: 'Whistle Sprinter', emoji: '🏁', category: 'fun', flavour: 'manual', description: 'Off like a rocket the second the whistle blew.' },
+  thunderclap:        { name: 'Thunder Clap',     emoji: '👏', category: 'fun', flavour: 'manual', description: 'Led the post-match cheer for the team.' },
 };
 
 const BADGE_CATEGORY_LABELS = {
+  goalkeeper:'🥅 Goalkeeper',
+  defender:  '🧱 Defender',
+  midfielder:'🎛️ Midfielder',
+  forward:   '🏹 Forward',
   attacking: '🔥 Attacking',
   skill:     '⚡ Skill',
   defending: '🛡️ Defending',
+  setpiece:  '🎱 Set pieces',
   attitude:  '🧠 Attitude',
   teamwork:  '🤝 Teamwork',
   fun:       '🎉 Fun',
@@ -331,7 +454,7 @@ const BADGE_CATEGORY_LABELS = {
 };
 
 // All-time order for categories in the award modal + card display.
-const BADGE_CATEGORY_ORDER = ['attacking','skill','defending','attitude','teamwork','fun','milestone'];
+const BADGE_CATEGORY_ORDER = ['goalkeeper','defender','midfielder','forward','attacking','skill','defending','setpiece','attitude','teamwork','fun','milestone'];
 
 // Max badge chips shown inline on the public card before overflow into "See all".
 const CARD_BADGES_MAX = 9;
