@@ -3508,6 +3508,52 @@ const HELP_SECTIONS = [
     `
   },
   {
+    id: 'focus', title: "Coach's Focus (pre-match cues)", adminOnly: false,
+    body: `
+      <h4>What is Coach's Focus?</h4>
+      <p>A <strong>pre-match</strong> companion to badges. Where badges celebrate what a kid did <em>after</em> the game, Coach's Focus is <strong>the one thing you want them to focus on going in</strong> — a technical, physical, psychological, social or welfare cue. Set before kick-off, the parent sees it on their child's match page, and after the game you can revisit how it went. Capped at <strong>3 cues per player per match</strong>, one of which is the <strong>primary</strong> ("the one thing") so kids aren't overloaded.</p>
+
+      <h4>The frameworks it's built on</h4>
+      <p>The catalog of ~86 cues is grounded in the coaching models we lean on for youth development:</p>
+      <ul>
+        <li><strong>The FA Four Corner Model</strong> — England FA's player-development framework. Every cue is tagged to one of <strong>Technical · Physical · Psychological · Social</strong>, so you're balancing the corners across the squad rather than always hammering technical.</li>
+        <li><strong>ELM (Effort · Learning · Mistakes)</strong> — Positive Coaching Alliance's mental-game model. Praises effort and learning over outcome, so kids stay brave and take risks.</li>
+        <li><strong>ROOTS (Rules · Opponents · Officials · Teammates · Self)</strong> — PCA's sportsmanship and character framework: shaking the ref's hand, picking a teammate up after a mistake, respecting the rules.</li>
+        <li><strong>Emotional Tank</strong> — Jim Thompson's metaphor: kids play well when their tank is full. Cues focus on filling teammates' tanks through encouragement, celebration and picking each other up.</li>
+        <li><strong>Welfare</strong> — coach-only flags for wellbeing (tired today, came in upset, minding an injury). <strong>Never visible to parents</strong> by design.</li>
+        <li><strong>Role / position</strong> — position-specific coaching points (e.g. "Stay wide" for a winger, "Communicate with your back four" for a keeper).</li>
+        <li><strong>Encouragement</strong> — general confidence boosters for kids who need a lift.</li>
+      </ul>
+
+      <h4>Where do I set a focus?</h4>
+      <p>Open a match → <strong>🎯 Focus</strong> sub-tab (between Formation and Info). The default is <strong>Focus mode</strong> — a tap-to-select flow made for phones: tap a player on the pitch, only that player's row appears, add up to 3 cues, tap the next player. Flip to <strong>📋 Full picked squad</strong> if you'd rather see everyone at once.</p>
+
+      <h4>Primary cue ("the one thing")</h4>
+      <p>One of each player's cues can be marked <strong>primary</strong> — it gets a gold ★ and represents the single most important message for that kid this match. The first cue you add is auto-primary; set a new one as primary and the old one quietly demotes (so there's always zero or one primary, never two).</p>
+
+      <h4>Pitch markers — who's still waiting for a focus?</h4>
+      <p>Every filled pitch / subs chip shows a small <strong>🎯 pill in the bottom-right corner</strong> when that player has ≥1 cue set. Gold when a primary is set, purple otherwise. A quick glance at the pitch tells you who still needs one.</p>
+
+      <h4>What parents see</h4>
+      <p>On the parent's match page, the yellow <strong>Your squad</strong> card gains a <strong>"🎯 Coach's focus for this match"</strong> block per unlocked child. Primary cue is gold with a ★, others are purple. Your personal note shows in italics underneath; if you skipped the note, the catalog's default description shows so parents still get context.</p>
+
+      <h4>Coach-only welfare cues</h4>
+      <p>Picking a <strong>Welfare</strong> cue auto-ticks the <strong>🔒 Coach-only</strong> checkbox — it's hidden from parents both at the database layer (RLS) and on the client. It still counts toward the chip pill so you see it on the pitch.</p>
+
+      <h4>Why cap at 3?</h4>
+      <p>Youth-coaching best practice: a kid playing a 30–40 minute half can't act on five things. One clear primary + two optional fallbacks is enough to steer the match without overwhelming.</p>
+
+      <h4>Edit or remove</h4>
+      <p>Tap a chip to re-open the editor (change cue / note / primary flag / visibility). Tap the small <strong>✕</strong> to remove after a confirm. Everything saves immediately.</p>
+
+      <h4>Carryover between matches</h4>
+      <p>Each cue is tied to one match + player, so nothing carries over. Kids start each match with a clean Focus panel. A post-match "how did the focus go?" step is planned as a later phase.</p>
+
+      <h4>Focus vs. badges</h4>
+      <p>Different time horizons, different purposes. <strong>Badges</strong> are celebratory, awarded after the fact, visible forever on the player's stats card. <strong>Focus</strong> is directional, set before the match, visible for that one match, and meant to steer behaviour in the moment.</p>
+    `
+  },
+  {
     id: 'formations', title: 'Formations tab', adminOnly: true,
     body: `
       <h4>What's the Formations tab for?</h4>
@@ -11411,9 +11457,48 @@ async function highlightMyChildrenOnPitch(lineup, players) {
   const renderParentCueChip = (cue) => {
     const entry = cue.cue_slug ? cueEntry(cue.cue_slug) : null;
     const emoji = entry ? entry.emoji : '📝';
-    const label = entry ? entry.label
-                        : (cue.custom_note || '').split('\n')[0].slice(0, 40) || 'Focus';
-    const note = cue.custom_note && entry ? cue.custom_note : '';
+    // Build a "fallback label" from the custom note if the catalog entry is
+    // missing (e.g. RLS hasn't returned the catalog yet for anon users, or a
+    // coach wrote a custom-note-only cue with no slug). Keep the label tidy:
+    // first line, max 40 chars.
+    const noteLabelFallback = (cue.custom_note || '').split('\n')[0].slice(0, 40) || 'Focus';
+    const label = entry ? entry.label : noteLabelFallback;
+    // Show BOTH the catalog description (neutral context explaining the cue)
+    // AND the coach's custom note (personalised, italic) whenever both exist.
+    // Priority rules:
+    //   - Catalog description: always render when available. It's the stock
+    //     explanation of what this cue means; parents benefit from context
+    //     regardless of whether the coach added a personal note.
+    //   - Custom note: render below the description in italic. But if there
+    //     was no catalog entry, the note was already used as the label, so
+    //     don't repeat it here.
+    // Description: prefer the catalog's explicit description, fall back to
+    // sub_concept + framework (e.g. "Scanning · Technical corner") so parents
+    // still get SOME context even if a seed row shipped without a description.
+    // This is belt-and-braces — descriptions should normally be present, but
+    // empty-string rows have been observed in seed data.
+    const FRAMEWORK_LBL = {
+      FA: 'FA Four Corner Model',
+      ELM: 'Effort · Learning · Mistakes',
+      ROOTS: 'ROOTS',
+      TANK: 'Emotional Tank',
+      WELFARE: 'Welfare',
+      ROLE: 'Role',
+      ENCOURAGEMENT: 'Encouragement'
+    };
+    let desc = '';
+    if (entry) {
+      if (entry.description && entry.description.trim()) {
+        desc = entry.description.trim();
+      } else {
+        const bits = [];
+        if (entry.sub_concept) bits.push(entry.sub_concept);
+        if (entry.framework && FRAMEWORK_LBL[entry.framework]) bits.push(FRAMEWORK_LBL[entry.framework]);
+        else if (entry.corner) bits.push(`${entry.corner[0].toUpperCase()}${entry.corner.slice(1)} corner`);
+        if (bits.length) desc = bits.join(' · ');
+      }
+    }
+    const showNote = cue.custom_note && entry;  // if no entry, note is the label already
     const star = cue.is_primary ? '<span class="pv-focus-star" aria-hidden="true">★</span>' : '';
     return `
       <div class="pv-focus-chip ${cue.is_primary ? 'is-primary' : ''}">
@@ -11421,7 +11506,8 @@ async function highlightMyChildrenOnPitch(lineup, players) {
         <span class="pv-focus-emoji" aria-hidden="true">${emoji}</span>
         <div class="pv-focus-text">
           <div class="pv-focus-label">${escapeHtml(label)}</div>
-          ${note ? `<div class="pv-focus-note">${escapeHtml(note)}</div>` : ''}
+          ${desc ? `<div class="pv-focus-desc">${escapeHtml(desc)}</div>` : ''}
+          ${showNote ? `<div class="pv-focus-note">${escapeHtml(cue.custom_note)}</div>` : ''}
         </div>
       </div>`;
   };
