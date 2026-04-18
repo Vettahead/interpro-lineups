@@ -758,10 +758,11 @@ function resetHeader() {
 }
 
 async function render() {
-  // Clear the body class that public card mode sets. If we're still on the
-  // card route it gets re-added below; if we're navigating away this removes
-  // the header-hide CSS.
+  // Clear the body classes that public-facing routes set. If we're still on the
+  // relevant route they get re-added below; if we're navigating away this
+  // removes the header-hide CSS.
   document.body.classList.remove('public-card-view');
+  document.body.classList.remove('parent-view-active');
 
   // Public parent view — no auth required
   const preRoute = currentRoute();
@@ -2367,6 +2368,11 @@ let _coachAvailabilityPoll = null;
 let _coachAvailabilityPollLineupId = null;
 
 async function renderParentView(lineupId, opts = {}) {
+  // Hide the app's main header/sidebar/drawer on this public route so the
+  // match-details page is the only thing on-screen — no admin chrome
+  // leaking into a page meant for a parent. Same pattern as the public
+  // player-card route. `render()` removes the class when navigating away.
+  document.body.classList.add('parent-view-active');
   // Stop any existing poll if we're navigating away or re-rendering fresh
   if (!opts.fromPoll) {
     if (_parentViewPoll) { clearInterval(_parentViewPoll); _parentViewPoll = null; }
@@ -2494,6 +2500,74 @@ async function renderParentView(lineupId, opts = {}) {
   }
   const availByPlayer = Object.fromEntries(availability.map(a => [a.player_id, a]));
 
+  // Match details / coach notes / availability / code-box go in the right
+  // column on desktop (pv-side); the pitch + Your Squad banner go in the
+  // main/left column (pv-main). Mobile stacks them in the same order as
+  // before — side first (HTML order), then main, via flex column.
+  const sideBlock = `
+    <div class="pv-card">
+      <h3 class="pv-card-title">Match details</h3>
+      <dl class="pv-details">
+        ${dateStr ? `<dt>Date</dt><dd>${escapeHtml(dateStr)}</dd>` : ''}
+        ${kickoff ? `<dt>Kick off</dt><dd>${escapeHtml(kickoff)}</dd>` : ''}
+        ${arrival ? `<dt>Team arrival</dt><dd>${escapeHtml(arrival)}</dd>` : ''}
+        ${(venue.name || venue.postcode) ? `<dt>Venue</dt><dd>${escapeHtml(venue.name || '')}${venue.name && venue.postcode ? ' · ' : ''}${escapeHtml(venue.postcode || '')}</dd>` : ''}
+      </dl>
+      ${(mapHref || w3wHref) ? `
+        <div class="pv-links">
+          ${mapHref ? `<a class="pv-link" href="${mapHref}" target="_blank" rel="noopener">🗺️ Open map</a>` : ''}
+          ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
+        </div>
+      ` : ''}
+      ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
+    </div>
+
+    ${notes ? `
+      <div class="pv-card">
+        <h3 class="pv-card-title">Coach notes</h3>
+        <p class="pv-notes">${escapeHtml(notes)}</p>
+      </div>
+    ` : ''}
+
+    ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
+
+    ${viewMode === 'avail' && status === 'draft' ? `
+      <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
+    ` : ''}
+
+    ${pvShowMatchCodeBox ? `
+    <div class="pv-card" id="mv-code-card">
+      <h3 class="pv-card-title">Is your child in the squad?</h3>
+      <p class="muted" style="font-size:0.85rem;margin-top:0">Enter your child's access code to see which position they're playing today.</p>
+      <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
+        <input type="text" id="mv-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
+          style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
+        <button type="button" class="primary" id="mv-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
+      </div>
+      <div id="mv-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+    </div>` : ''}
+  `;
+
+  const mainBlock = `
+    ${showPitch ? `
+    <div id="pv-child-notice"></div>
+    <div class="pv-card">
+      <h3 class="pv-card-title">Lineup</h3>
+      <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">
+        <div class="pitch" id="fix-pitch">
+          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+          <div class="slots-layer" id="fix-slots-layer"></div>
+          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+          <div class="ball-el" id="fix-ball" style="display:none"></div>
+        </div>
+        <div class="subs-bar">
+          <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
+          <div class="subs-row" id="fix-subs-row"></div>
+        </div>
+      </div>
+    </div>` : ''}
+  `;
+
   appEl.innerHTML = `
     <div class="parent-view">
       <div class="pv-header">
@@ -2505,65 +2579,10 @@ async function renderParentView(lineupId, opts = {}) {
         </div>
       </div>
 
-      <div class="pv-card">
-        <h3 class="pv-card-title">Match details</h3>
-        <dl class="pv-details">
-          ${dateStr ? `<dt>Date</dt><dd>${escapeHtml(dateStr)}</dd>` : ''}
-          ${kickoff ? `<dt>Kick off</dt><dd>${escapeHtml(kickoff)}</dd>` : ''}
-          ${arrival ? `<dt>Team arrival</dt><dd>${escapeHtml(arrival)}</dd>` : ''}
-          ${(venue.name || venue.postcode) ? `<dt>Venue</dt><dd>${escapeHtml(venue.name || '')}${venue.name && venue.postcode ? ' · ' : ''}${escapeHtml(venue.postcode || '')}</dd>` : ''}
-        </dl>
-        ${(mapHref || w3wHref) ? `
-          <div class="pv-links">
-            ${mapHref ? `<a class="pv-link" href="${mapHref}" target="_blank" rel="noopener">🗺️ Open map</a>` : ''}
-            ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
-          </div>
-        ` : ''}
-        ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
+      <div class="pv-body">
+        <div class="pv-side">${sideBlock}</div>
+        <div class="pv-main">${mainBlock}</div>
       </div>
-
-      ${notes ? `
-        <div class="pv-card">
-          <h3 class="pv-card-title">Coach notes</h3>
-          <p class="pv-notes">${escapeHtml(notes)}</p>
-        </div>
-      ` : ''}
-
-      ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
-
-      ${viewMode === 'avail' && status === 'draft' ? `
-        <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
-      ` : ''}
-
-      ${pvShowMatchCodeBox ? `
-      <div class="pv-card" id="mv-code-card">
-        <h3 class="pv-card-title">Is your child in the squad?</h3>
-        <p class="muted" style="font-size:0.85rem;margin-top:0">Enter your child's access code to see which position they're playing today.</p>
-        <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
-          <input type="text" id="mv-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
-            style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
-          <button type="button" class="primary" id="mv-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
-        </div>
-        <div id="mv-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
-      </div>` : ''}
-
-      ${showPitch ? `
-      <div id="pv-child-notice"></div>
-      <div class="pv-card">
-        <h3 class="pv-card-title">Lineup</h3>
-        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">
-          <div class="pitch" id="fix-pitch">
-            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-            <div class="slots-layer" id="fix-slots-layer"></div>
-            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
-            <div class="ball-el" id="fix-ball" style="display:none"></div>
-          </div>
-          <div class="subs-bar">
-            <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
-            <div class="subs-row" id="fix-subs-row"></div>
-          </div>
-        </div>
-      </div>` : ''}
 
       <div class="pv-footer">
         <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
