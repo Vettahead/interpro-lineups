@@ -2500,10 +2500,13 @@ async function renderParentView(lineupId, opts = {}) {
   }
   const availByPlayer = Object.fromEntries(availability.map(a => [a.player_id, a]));
 
-  // Match details / coach notes / availability / code-box go in the right
-  // column on desktop (pv-side); the pitch + Your Squad banner go in the
-  // main/left column (pv-main). Mobile stacks them in the same order as
-  // before — side first (HTML order), then main, via flex column.
+  // Side column holds all the info/context panels: Match details, Your Squad
+  // banner, Coach notes, Availability form and the match-code unlock box.
+  // The main column holds ONLY the pitch. This groups all text/info
+  // together so on desktop the pitch can breathe in its own column
+  // without the info feeling disconnected from the match details card.
+  // #pv-child-notice is injected into by highlightMyChildrenOnPitch after
+  // the DOM renders — it just needs to exist somewhere on the page.
   const sideBlock = `
     <div class="pv-card">
       <h3 class="pv-card-title">Match details</h3>
@@ -2521,6 +2524,8 @@ async function renderParentView(lineupId, opts = {}) {
       ` : ''}
       ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
     </div>
+
+    ${showPitch ? `<div id="pv-child-notice"></div>` : ''}
 
     ${notes ? `
       <div class="pv-card">
@@ -2550,7 +2555,6 @@ async function renderParentView(lineupId, opts = {}) {
 
   const mainBlock = `
     ${showPitch ? `
-    <div id="pv-child-notice"></div>
     <div class="pv-card">
       <h3 class="pv-card-title">Lineup</h3>
       <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">

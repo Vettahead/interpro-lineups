@@ -1667,9 +1667,13 @@ body.parent-view-active #app { padding-top: 0; }
     align-items: start;
   }
   /* Main column (pitch) sits on the left; side (info) on the right.
-     HTML order is side-first for mobile — grid-column overrides on desktop. */
-  .pv-main { grid-column: 1; }
-  .pv-side { grid-column: 2; }
+     HTML order is side-first for mobile — grid-column/grid-row pin both
+     to row 1 so the browser doesn't push pv-main into row 2 (grid's
+     default auto-placement won't backfill an earlier cell without
+     `grid-auto-flow: dense`, which was causing a big gap on desktop
+     because pv-side landed in col 2 row 1, then pv-main went to row 2). */
+  .pv-main { grid-column: 1; grid-row: 1; }
+  .pv-side { grid-column: 2; grid-row: 1; }
 }
 
 /* ---------- Help / FAQ tab ---------- */
