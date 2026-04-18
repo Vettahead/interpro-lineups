@@ -4530,12 +4530,17 @@ function matchAwardsCardHtml(current, teamId) {
 }
 
 // ---------- Coach's Focus panel (Slice 10 Phase 2) ----------
-// The panel shows one row per *picked* player (pitch starters + subs). Each row
-// lists the cues that have been set for this match (primary star + emoji + short
-// label) plus an "Add focus" button when there's room (cap = 3 per player).
+// The panel shows one row per player (picked or roster-wide — the coach toggles).
+// Each row lists the cues that have been set for this match (primary star + emoji
+// + short label) plus an "Add focus" button when there's room (cap = 3 per player).
 // Tapping a chip opens openFocusEditor in edit mode; the X removes the cue.
 // Designed to be re-rendered cheaply — pure-string output from cache reads.
 const FOCUS_MAX_PER_PLAYER = 3;
+
+// List-mode state — 'picked' shows starters + subs only (default), 'all' shows
+// every team player. Persisted across re-renders within a session so the coach's
+// choice survives tab switches and lineup reloads.
+let _focusListMode = 'picked';
 
 function _focusChipHtml(cue, playerName) {
   // Cue label = catalog entry label, or the first chunk of the custom note.
@@ -4562,19 +4567,38 @@ function _focusChipHtml(cue, playerName) {
   `;
 }
 
-function _focusPlayerRowHtml(player, cues) {
+function _focusPlayerRowHtml(player, cues, opts = {}) {
   const name = shortName(player.name || '') || '—';
   const chipsHtml = cues.length
     ? cues.map(c => _focusChipHtml(c, name)).join('')
     : '<span class="focus-empty muted">No focus yet.</span>';
   const canAdd = cues.length < FOCUS_MAX_PER_PLAYER;
+  const atCap = cues.length >= FOCUS_MAX_PER_PLAYER;
   const addBtn = canAdd
     ? `<button class="focus-add-btn" data-focus-add="${player.id}">+ Add focus</button>`
-    : `<span class="muted focus-cap-note">Max ${FOCUS_MAX_PER_PLAYER}</span>`;
+    : `<span class="muted focus-cap-note">Max ${FOCUS_MAX_PER_PLAYER} reached</span>`;
+
+  // Count pill — shows how many cues are set vs the cap. Neutral at 0, gold as
+  // it fills, solid-gold at the cap so the coach can scan-check the list.
+  const countClass = cues.length === 0
+    ? 'focus-count-empty'
+    : atCap
+      ? 'focus-count-full'
+      : 'focus-count-partial';
+  const countPill = `<span class="focus-count-pill ${countClass}" title="${cues.length} of ${FOCUS_MAX_PER_PLAYER} focus cues set">${cues.length}/${FOCUS_MAX_PER_PLAYER}</span>`;
+
+  // In "all players" mode, subtly dim rows for players who aren't in the
+  // current picked squad so the coach can spot them — they can still add a
+  // focus (the cue saves against the lineup regardless of selection).
+  const notPickedClass = opts.notPicked ? 'focus-row-not-picked' : '';
+  const notPickedTag = opts.notPicked ? '<span class="focus-not-picked-tag muted" title="Not in the picked squad for this match">not picked</span>' : '';
+
   return `
-    <div class="focus-player-row" data-focus-player-row="${player.id}">
+    <div class="focus-player-row ${atCap ? 'at-cap' : ''} ${notPickedClass}" data-focus-player-row="${player.id}">
       <div class="focus-row-head">
         <span class="focus-row-name">${escapeHtml(name)}</span>
+        ${notPickedTag}
+        ${countPill}
         ${addBtn}
       </div>
       <div class="focus-row-chips">${chipsHtml}</div>
@@ -4609,21 +4633,44 @@ function renderFocusPanelHtml(current, teamId, players) {
   // Build the pick list: pitch starters (from slots) + subs — in formation /
   // slot order, subs afterwards. De-dupe by player id.
   const pickedIds = [];
-  const seen = new Set();
+  const pickedSet = new Set();
   const slotKeys = Object.keys(current.slots || {}).sort();
   slotKeys.forEach(k => {
     const pid = current.slots[k];
-    if (pid && !seen.has(pid)) { pickedIds.push(pid); seen.add(pid); }
+    if (pid && !pickedSet.has(pid)) { pickedIds.push(pid); pickedSet.add(pid); }
   });
   (current.subs || []).forEach(pid => {
-    if (pid && !seen.has(pid)) { pickedIds.push(pid); seen.add(pid); }
+    if (pid && !pickedSet.has(pid)) { pickedIds.push(pid); pickedSet.add(pid); }
   });
 
-  if (pickedIds.length === 0) {
-    return `<p class="muted me-hint">Pick your squad on the pitch first — drop players into slots (or subs) and they'll appear here for you to set a Focus on.</p>`;
-  }
+  // Sort the full roster for "all players" mode — by number then name.
+  const allSorted = [...(players || [])].sort((a, b) => {
+    const an = a.number == null ? 999 : Number(a.number);
+    const bn = b.number == null ? 999 : Number(b.number);
+    if (an !== bn) return an - bn;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
-  const playersById = Object.fromEntries((players || []).map(p => [p.id, p]));
+  // Segmented toggle — picked vs all roster. Counts shown in the button labels
+  // so the coach sees the delta without switching.
+  const pickedCount = pickedIds.length;
+  const allCount = allSorted.length;
+  const toggleHtml = `
+    <div class="focus-mode-toggle" role="tablist" aria-label="Focus list mode">
+      <button type="button"
+              class="focus-mode-btn ${_focusListMode === 'picked' ? 'active' : ''}"
+              role="tab"
+              aria-selected="${_focusListMode === 'picked' ? 'true' : 'false'}"
+              data-focus-mode="picked">Picked squad <span class="focus-mode-count">${pickedCount}</span></button>
+      <button type="button"
+              class="focus-mode-btn ${_focusListMode === 'all' ? 'active' : ''}"
+              role="tab"
+              aria-selected="${_focusListMode === 'all' ? 'true' : 'false'}"
+              data-focus-mode="all">All players <span class="focus-mode-count">${allCount}</span></button>
+    </div>
+  `;
+
+  // Cues keyed by player id (for lookup regardless of mode).
   const cueRows = getCachedMatchCues(current.id);
   const cuesByPlayer = new Map();
   cueRows.forEach(c => {
@@ -4632,22 +4679,44 @@ function renderFocusPanelHtml(current, teamId, players) {
   });
   // Cache is already ordered primary-first by fetcher; safe to use directly.
 
-  const rowsHtml = pickedIds
-    .map(pid => playersById[pid])
-    .filter(Boolean)
-    .map(p => _focusPlayerRowHtml(p, cuesByPlayer.get(p.id) || []))
+  const playersById = Object.fromEntries((players || []).map(p => [p.id, p]));
+
+  // Decide which list of players to render based on the toggle. In "picked"
+  // mode we keep the existing squad-order ordering; in "all" we sort by shirt
+  // number / name and tag non-picked rows so the coach still sees the squad
+  // split at a glance.
+  let renderList = [];
+  let emptyHint = '';
+  if (_focusListMode === 'all') {
+    renderList = allSorted.map(p => ({ player: p, notPicked: !pickedSet.has(p.id) }));
+    if (renderList.length === 0) {
+      emptyHint = `<p class="muted me-hint" style="padding:0.5rem 0">No players on this team yet — add squad members from the Squad details tab.</p>`;
+    }
+  } else {
+    if (pickedIds.length === 0) {
+      emptyHint = `<p class="muted me-hint" style="padding:0.5rem 0">No squad picked yet — drop players onto the pitch (or subs) in the Squad tab, or switch to <strong>All players</strong> above to set focuses before picking the squad.</p>`;
+    }
+    renderList = pickedIds.map(pid => playersById[pid]).filter(Boolean).map(p => ({ player: p, notPicked: false }));
+  }
+
+  const rowsHtml = renderList
+    .map(({ player, notPicked }) => _focusPlayerRowHtml(player, cuesByPlayer.get(player.id) || [], { notPicked }))
     .join('');
 
   const totalSet = cueRows.length;
-  const playersWithCue = new Set(cueRows.map(c => c.player_id)).size;
+  const playersWithCueInList = renderList.reduce((n, { player }) => n + ((cuesByPlayer.get(player.id) || []).length > 0 ? 1 : 0), 0);
+  const listLabel = _focusListMode === 'all' ? 'players (roster)' : 'picked players';
+  const denom = renderList.length;
 
   return `
     <div class="focus-panel">
       <div class="focus-intro">
         <div class="focus-intro-head">🎯 Coach's Focus</div>
-        <p class="muted focus-intro-body">One thing you want each player to focus on. Keep it small — one starred primary cue per player is the sweet spot. Parent-visible cues appear on the child's match page; coach-only stay here.</p>
-        <div class="focus-stats muted">${playersWithCue}/${pickedIds.length} players with a cue · ${totalSet} cue${totalSet === 1 ? '' : 's'} set</div>
+        <p class="muted focus-intro-body">One thing you want each player to focus on. Keep it small — one starred primary cue per player is the sweet spot (max ${FOCUS_MAX_PER_PLAYER} per child). Parent-visible cues appear on the child's match page; coach-only stay here.</p>
+        <div class="focus-stats muted">${playersWithCueInList}/${denom} ${listLabel} with a cue · ${totalSet} cue${totalSet === 1 ? '' : 's'} set in total</div>
       </div>
+      ${toggleHtml}
+      ${emptyHint}
       <div class="focus-rows">${rowsHtml}</div>
     </div>
   `;
@@ -4681,6 +4750,18 @@ function _wireFocusPanel() {
   const current = editor?.current;
   const team = editor?.team;
   if (!current?.id || !team?.id) return;
+
+  // List-mode toggle — switch between picked squad / all roster.
+  body.querySelectorAll('[data-focus-mode]').forEach(btn => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const mode = btn.dataset.focusMode;
+      if (mode !== 'picked' && mode !== 'all') return;
+      if (_focusListMode === mode) return;
+      _focusListMode = mode;
+      _rerenderFocusPanel();
+    };
+  });
 
   // Add button
   body.querySelectorAll('[data-focus-add]').forEach(btn => {
