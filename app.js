@@ -2400,11 +2400,17 @@ async function renderParentView(lineupId, opts = {}) {
   // Explicit column list — never expose access_code / family_code to anon clients.
   // Also fetch team badges so applyMatchDecorations can overlay match-specific
   // awards on each chip — RLS allows anon SELECT via team_has_published_lineup.
+  // Match cues + cue catalog populate caches so highlightMyChildrenOnPitch can
+  // render each unlocked child's parent-visible focus cues in the Your Squad
+  // card — anon SELECT on match_cues is gated to visibility='parent_visible'
+  // by RLS, so coach-only cues never reach parent clients.
   const [teamRes, playersRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
     supabase.from('players').select('id,team_id,name,number,position,photo_url').eq('team_id', lineup.team_id),
     supabase.from('formations').select('*').eq('team_id', lineup.team_id),
-    fetchTeamBadges(lineup.team_id).catch(() => [])
+    fetchTeamBadges(lineup.team_id).catch(() => []),
+    fetchMatchCues(lineup.team_id, lineup.id).catch(() => []),
+    fetchCueCatalog().catch(() => ({}))
   ]);
   const team = teamRes.data || { name: '' };
   const players = playersRes.data || [];
@@ -4540,12 +4546,13 @@ function matchAwardsCardHtml(current, teamId) {
 // Designed to be re-rendered cheaply — pure-string output from cache reads.
 const FOCUS_MAX_PER_PLAYER = 3;
 
-// List-mode state — 'picked' shows the full picked-squad list (starters + subs),
-// 'focus' is a tap-to-focus flow where the coach taps one player on the pitch at
-// a time and only that player's row shows in the panel. Persisted across
-// re-renders within a session so the coach's choice survives tab switches and
-// lineup reloads.
-let _focusListMode = 'picked';
+// List-mode state — 'focus' (default) is a tap-to-focus flow where the coach
+// taps one player on the pitch at a time and only that player's row shows in
+// the panel; 'picked' shows the full picked-squad list (starters + subs).
+// Persisted across re-renders within a session so the coach's choice survives
+// tab switches and lineup reloads. Default flipped to 'focus' 2026-04-18 per
+// Chris — the tap-to-select flow scales better on a phone with 15+ players.
+let _focusListMode = 'focus';
 
 // In 'focus' mode this tracks which player the coach has tapped on the pitch.
 // Cleared whenever the lineup changes so the prompt shows first on a new match.
@@ -11392,25 +11399,68 @@ async function highlightMyChildrenOnPitch(lineup, players) {
     ? `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">Reminder: ${timeBits.join(' · ')}.</div>`
     : '';
 
+  // Build a parent-visible cue chip for the Your Squad card. Read-only
+  // rendering — no edit/delete controls. Coach-only cues never reach this
+  // client (RLS filters the SELECT on anon users), but we also belt-and-
+  // braces filter by visibility here in case a coach is signed in as a
+  // team member viewing the public page.
+  const focusCuesForParent = (playerId) => {
+    const all = cuesForPlayer(lineup.id, playerId) || [];
+    return all.filter(c => c.visibility === 'parent_visible');
+  };
+  const renderParentCueChip = (cue) => {
+    const entry = cue.cue_slug ? cueEntry(cue.cue_slug) : null;
+    const emoji = entry ? entry.emoji : '📝';
+    const label = entry ? entry.label
+                        : (cue.custom_note || '').split('\n')[0].slice(0, 40) || 'Focus';
+    const note = cue.custom_note && entry ? cue.custom_note : '';
+    const star = cue.is_primary ? '<span class="pv-focus-star" aria-hidden="true">★</span>' : '';
+    return `
+      <div class="pv-focus-chip ${cue.is_primary ? 'is-primary' : ''}">
+        ${star}
+        <span class="pv-focus-emoji" aria-hidden="true">${emoji}</span>
+        <div class="pv-focus-text">
+          <div class="pv-focus-label">${escapeHtml(label)}</div>
+          ${note ? `<div class="pv-focus-note">${escapeHtml(note)}</div>` : ''}
+        </div>
+      </div>`;
+  };
+  const renderFocusBlock = (player) => {
+    const cues = focusCuesForParent(player.id);
+    if (!cues.length) return '';
+    // Primary first, then the rest — the cached fetcher already orders that
+    // way, but re-sort here in case the filter stripped the primary out.
+    cues.sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0));
+    return `
+      <div class="pv-focus-block">
+        <div class="pv-focus-head">🎯 Coach's focus for this match</div>
+        <div class="pv-focus-chips">
+          ${cues.map(renderParentCueChip).join('')}
+        </div>
+      </div>`;
+  };
+
   // Build the notice copy
   const firstName = n => (n || '').split(/\s+/)[0] || 'Your child';
   const lines = entries.map(({ player, role, position }) => {
     const name = escapeHtml(firstName(player.name));
+    const focusBlock = role !== 'none' ? renderFocusBlock(player) : '';
     if (role === 'slot') {
       const posKey = (position || '').toUpperCase().replace(/[^A-Z]/g, '');
       const blurb = POSITION_BLURB[posKey] || '';
       const shirt = player.number != null ? ` in shirt <strong>#${player.number}</strong>` : '';
       return `
-        <div style="margin:0.25rem 0">
+        <div style="margin:0.25rem 0" class="pv-squad-entry">
           <strong>${name}</strong> is in the starting XI at <strong>${escapeHtml(position)}</strong>${shirt} ⚽
           ${blurb ? `<div class="muted" style="font-size:0.8rem;margin-top:0.15rem">The ${escapeHtml(blurb)}.</div>` : ''}
           <div style="font-size:0.8rem;margin-top:0.15rem">Go get 'em! 💪</div>
+          ${focusBlock}
         </div>`;
     }
     if (role === 'sub') {
-      return `<div style="margin:0.25rem 0"><strong>${name}</strong> is on the bench today and will come on when the coaches make changes. They do their best to rotate minutes across the season, but we can't promise equal playing time every match — thanks for your support 💛</div>`;
+      return `<div style="margin:0.25rem 0" class="pv-squad-entry"><strong>${name}</strong> is on the bench today and will come on when the coaches make changes. They do their best to rotate minutes across the season, but we can't promise equal playing time every match — thanks for your support 💛${focusBlock}</div>`;
     }
-    return `<div style="margin:0.25rem 0"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
+    return `<div style="margin:0.25rem 0" class="pv-squad-entry"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
   }).join('');
 
   noticeEl.innerHTML = `

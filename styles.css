@@ -4041,3 +4041,77 @@ body.mw-open { overflow: hidden; }
 }
 .chip-focus-icon { font-size: 10px; line-height: 1; }
 .chip-focus-count { font-weight: 800; }
+
+/* ---------- Parent Your-Squad card focus block ---------- */
+/* Renders per-child parent-visible cues underneath each entry in the yellow
+   "Your squad" notice on the public match page. Read-only rendering — no
+   edit controls, friendlier copy, a bit more breathing room than the
+   coach-side chips. Primary cue gets a gold accent + star. */
+.pv-focus-block {
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  background: #fff;
+  border: 1px solid #f0e0a8;
+  border-radius: 6px;
+}
+.pv-focus-head {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #8a6a00;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.3rem;
+}
+.pv-focus-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.pv-focus-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: #f6f3ff;
+  border: 1px solid #d9ccff;
+  border-radius: 6px;
+  line-height: 1.3;
+}
+.pv-focus-chip.is-primary {
+  background: #fff6dc;
+  border-color: #e8c968;
+  box-shadow: inset 0 0 0 1px #f0d488;
+}
+.pv-focus-star {
+  color: #c89200;
+  font-weight: 800;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+.pv-focus-emoji {
+  font-size: 1.1rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.pv-focus-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.pv-focus-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+.pv-focus-note {
+  font-size: 0.78rem;
+  color: #555;
+  font-style: italic;
+  line-height: 1.3;
+}
+.pv-squad-entry + .pv-squad-entry {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #eadea3;
+}
