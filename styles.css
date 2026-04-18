@@ -2039,6 +2039,7 @@ details.card.collapsible > .card-body { padding: 0 0.8rem 0.65rem; }
 .lineup-layout[data-phone-tab="squad"]     [data-phone-group]:not([data-phone-group="squad"])     { display: none !important; }
 .lineup-layout[data-phone-tab="subs"]      [data-phone-group]:not([data-phone-group="subs"])      { display: none !important; }
 .lineup-layout[data-phone-tab="formation"] [data-phone-group]:not([data-phone-group="formation"]) { display: none !important; }
+.lineup-layout[data-phone-tab="focus"]     [data-phone-group]:not([data-phone-group="focus"])     { display: none !important; }
 .lineup-layout[data-phone-tab="info"]      [data-phone-group]:not([data-phone-group="info"])      { display: none !important; }
 /* Tactics page sub-tabs (2026-04-17) */
 .lineup-layout[data-phone-tab="tactics"]   [data-phone-group]:not([data-phone-group="tactics"])   { display: none !important; }
