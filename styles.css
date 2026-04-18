@@ -3918,3 +3918,126 @@ body.mw-open { overflow: hidden; }
 @media (min-width: 540px) {
   .fe-group-body { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- Focus mode (tap-to-select) ---------- */
+/* When the coach is in focus mode the panel swaps the long picked-squad list
+   for a single selected player's row + a strip of quick-switch chips for
+   players who already have cues. A dashed purple ring appears on whichever
+   pitch/subs chip is currently selected so the coach can see who they're
+   editing at a glance. */
+.focus-panel.focus-mode-active .focus-intro-head { color: #5a49c7; }
+
+.focus-quick-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  background: #f7f5ff;
+  border: 1px solid #e0d8f7;
+  border-radius: 6px;
+}
+.focus-quick-switch-label { font-size: 0.72rem; letter-spacing: 0.02em; }
+.focus-quick-switch-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.focus-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.5rem 0.22rem 0.4rem;
+  font-size: 0.78rem;
+  border: 1px solid #cfc4ee;
+  background: #fff;
+  color: #3d2e8a;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.focus-quick-chip:hover { background: #ece5ff; }
+.focus-quick-chip.active {
+  background: #6a5acd;
+  color: #fff;
+  border-color: #5a49c7;
+  box-shadow: 0 1px 3px rgba(106, 90, 205, 0.3);
+}
+.focus-quick-name { font-weight: 600; }
+.focus-quick-count {
+  font-size: 0.68rem;
+  opacity: 0.85;
+  padding: 0 0.3rem;
+  background: rgba(0, 0, 0, 0.07);
+  border-radius: 999px;
+  line-height: 1.4;
+}
+.focus-quick-chip.active .focus-quick-count {
+  background: rgba(255, 255, 255, 0.25);
+  opacity: 0.95;
+}
+
+/* Empty-state tap prompt shown before the coach has selected anyone. */
+.focus-tap-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.35rem;
+  padding: 1rem 0.75rem;
+  background: #faf8ff;
+  border: 1px dashed #cfc4ee;
+  border-radius: 8px;
+}
+.focus-tap-prompt-icon { font-size: 2rem; line-height: 1; }
+.focus-tap-prompt-head { font-weight: 600; color: #3d2e8a; font-size: 0.95rem; }
+.focus-tap-prompt-body { margin: 0; font-size: 0.8rem; line-height: 1.35; max-width: 38ch; }
+
+.focus-rows-single { /* same layout as focus-rows but single child */
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Dashed purple ring on the currently-selected pitch / subs chip. Sits above
+   the chip's own styling without altering its geometry. */
+.chip.focus-target-selected {
+  outline: 2.5px dashed #6a5acd;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(106, 90, 205, 0.15);
+  animation: focusTargetPulse 1.8s ease-in-out infinite;
+}
+@keyframes focusTargetPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(106, 90, 205, 0.15); }
+  50%      { box-shadow: 0 0 0 7px rgba(106, 90, 205, 0.28); }
+}
+
+/* ---------- Pitch-chip Coach's Focus marker ---------- */
+/* Bottom-right 🎯 pill that shows how many cues are set for the player on the
+   current lineup. Bottom-right is free — MOTM star sits top-left, goals
+   top-right, badge row bottom-left. Gets a slight gold tint when the primary
+   cue is set so the coach can see at a glance which players have "the one
+   thing" locked in. */
+.chip-focus-marker {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px 0 3px;
+  background: #fff;
+  color: #3d2e8a;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1.5px solid #6a5acd;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  z-index: 4;
+  pointer-events: none;
+  line-height: 1;
+}
+.chip-focus-marker.has-primary {
+  border-color: #d4a017;
+  background: #fff8e1;
+  color: #6b4a00;
+}
+.chip-focus-icon { font-size: 10px; line-height: 1; }
+.chip-focus-count { font-weight: 800; }
