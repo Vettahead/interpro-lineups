@@ -548,6 +548,178 @@ async function removeBadge(badgeId, teamId) {
   try { await logAudit(teamId, 'player_badge', badgeId, 'delete', {}); } catch {}
 }
 
+// ---------- Coach's Focus — match cues (Slice 10 Phase 2) ----------
+// The cue catalog is a seeded taxonomy (~86 entries) covering FA Four Corner Model,
+// ELM (Effort/Learning/Mistakes), ROOTS (Rules/Opponents/Officials/Teammates/Self),
+// Emotional Tank, welfare flags, player roles, and encouragement. It's effectively
+// static from the client's perspective — fetched once per session and held in a
+// module-scope map keyed by slug. Admin CRUD for the catalog is a later phase.
+// Shape per row:
+//   { slug, label, emoji, description, framework, corner, sub_concept,
+//     visibility, age_band, frequency_cap, default_pairs_with, active, sort_order }
+let _cueCatalog = null;        // map of slug -> row, or null if not loaded yet
+let _cueCatalogLoading = null; // in-flight promise so parallel callers share one fetch
+
+async function fetchCueCatalog() {
+  if (_cueCatalog) return _cueCatalog;
+  if (_cueCatalogLoading) return _cueCatalogLoading;
+  _cueCatalogLoading = (async () => {
+    const { data, error } = await supabase
+      .from('cue_catalog')
+      .select('slug,label,emoji,description,framework,corner,sub_concept,visibility,age_band,frequency_cap,default_pairs_with,active,sort_order')
+      .eq('active', true)
+      .order('sort_order', { ascending: true })
+      .order('slug', { ascending: true });
+    if (error) {
+      console.warn('fetchCueCatalog error', error.message || error);
+      _cueCatalogLoading = null;
+      return {};
+    }
+    const map = {};
+    (data || []).forEach(r => { map[r.slug] = r; });
+    _cueCatalog = map;
+    return map;
+  })();
+  return _cueCatalogLoading;
+}
+
+function getCachedCueCatalog() { return _cueCatalog || {}; }
+function cueEntry(slug)  { return (_cueCatalog && _cueCatalog[slug]) || null; }
+function cueLabel(slug)  { return cueEntry(slug)?.label || slug; }
+function cueEmoji(slug)  { return cueEntry(slug)?.emoji || '🎯'; }
+
+// Match cues cache. Shape: { [lineupId]: Array<row> }.
+// Rows include: id, team_id, lineup_id, player_id, cue_slug, custom_note,
+// is_primary, visibility, status, outcome_note, sort_order, set_by,
+// reviewed_by, created_at, updated_at.
+let _matchCues = {};
+
+async function fetchMatchCues(teamId, lineupId) {
+  if (!teamId || !lineupId) return [];
+  const { data, error } = await supabase
+    .from('match_cues')
+    .select('id,team_id,lineup_id,player_id,cue_slug,custom_note,is_primary,visibility,status,outcome_note,sort_order,set_by,reviewed_by,created_at,updated_at')
+    .eq('team_id', teamId)
+    .eq('lineup_id', lineupId)
+    .order('is_primary', { ascending: false })
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.warn('fetchMatchCues error', error.message || error);
+    _matchCues[lineupId] = [];
+    return [];
+  }
+  _matchCues[lineupId] = data || [];
+  return _matchCues[lineupId];
+}
+
+function getCachedMatchCues(lineupId) {
+  return _matchCues[lineupId] || [];
+}
+
+function cuesForPlayer(lineupId, playerId) {
+  return getCachedMatchCues(lineupId).filter(c => c.player_id === playerId);
+}
+
+// Insert a new match cue. Accepts either cue_slug OR a free-text custom_note
+// (both is fine too — a slug-with-a-personalising-note is the sweet spot).
+// If is_primary is set and another primary already exists for this player on
+// this lineup, the existing one is demoted first (unique partial index on DB
+// would otherwise reject the insert).
+async function setMatchCue({ teamId, lineupId, playerId, cueSlug, customNote, isPrimary, visibility }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  if (!cueSlug && !(customNote && customNote.trim())) {
+    throw new Error('Pick a cue or write a custom note.');
+  }
+  // Resolve effective visibility — default to catalog's visibility if slug given.
+  let effVisibility = visibility;
+  if (!effVisibility) {
+    const entry = cueSlug ? cueEntry(cueSlug) : null;
+    effVisibility = entry?.visibility || 'parent_visible';
+  }
+
+  // If primary requested, demote any existing primary for this player on this lineup.
+  if (isPrimary) {
+    const existingPrimary = cuesForPlayer(lineupId, playerId).find(c => c.is_primary);
+    if (existingPrimary) {
+      await supabase.from('match_cues').update({ is_primary: false }).eq('id', existingPrimary.id);
+      const cache = _matchCues[lineupId] || [];
+      const idx = cache.findIndex(c => c.id === existingPrimary.id);
+      if (idx >= 0) cache[idx] = { ...cache[idx], is_primary: false };
+    }
+  }
+
+  // Sort_order: append at the end of this player's existing cues.
+  const existingForPlayer = cuesForPlayer(lineupId, playerId);
+  const nextSort = existingForPlayer.length
+    ? Math.max(...existingForPlayer.map(c => c.sort_order || 0)) + 1
+    : 0;
+
+  const row = {
+    team_id: teamId,
+    lineup_id: lineupId,
+    player_id: playerId,
+    cue_slug: cueSlug || null,
+    custom_note: (customNote && customNote.trim()) ? customNote.trim().slice(0, 200) : null,
+    is_primary: !!isPrimary,
+    visibility: effVisibility,
+    status: 'set',
+    sort_order: nextSort,
+    set_by: user.id,
+  };
+  const { data, error } = await supabase.from('match_cues').insert(row).select().single();
+  if (error) throw error;
+  if (!_matchCues[lineupId]) _matchCues[lineupId] = [];
+  _matchCues[lineupId].push(data);
+  try { await logAudit(teamId, 'match_cue', data.id, 'create', { player_id: playerId, cue_slug: cueSlug, is_primary: !!isPrimary }); } catch {}
+  return data;
+}
+
+// Update an existing cue row. Accepts partial patch — any of { cue_slug,
+// custom_note, is_primary, visibility, status, outcome_note }.
+async function updateMatchCue(cueId, lineupId, patch) {
+  if (!cueId) throw new Error('Missing cue id.');
+  const cache = _matchCues[lineupId] || [];
+  const existing = cache.find(c => c.id === cueId);
+
+  const p = {};
+  if ('cue_slug'    in patch) p.cue_slug    = patch.cue_slug || null;
+  if ('custom_note' in patch) p.custom_note = (patch.custom_note && patch.custom_note.trim()) ? patch.custom_note.trim().slice(0, 200) : null;
+  if ('is_primary'  in patch) p.is_primary  = !!patch.is_primary;
+  if ('visibility'  in patch) p.visibility  = patch.visibility;
+  if ('status'      in patch) p.status      = patch.status;
+  if ('outcome_note' in patch) p.outcome_note = (patch.outcome_note && patch.outcome_note.trim()) ? patch.outcome_note.trim().slice(0, 300) : null;
+
+  // If flipping is_primary true, demote the current primary first.
+  if (p.is_primary === true && existing) {
+    const currentPrimary = cache.find(c => c.is_primary && c.player_id === existing.player_id && c.id !== cueId);
+    if (currentPrimary) {
+      await supabase.from('match_cues').update({ is_primary: false }).eq('id', currentPrimary.id);
+      const idx = cache.findIndex(c => c.id === currentPrimary.id);
+      if (idx >= 0) cache[idx] = { ...cache[idx], is_primary: false };
+    }
+  }
+
+  const { data, error } = await supabase.from('match_cues').update(p).eq('id', cueId).select().single();
+  if (error) throw error;
+  const idx = cache.findIndex(c => c.id === cueId);
+  if (idx >= 0) cache[idx] = data;
+  const teamId = data.team_id;
+  try { await logAudit(teamId, 'match_cue', cueId, 'update', p); } catch {}
+  return data;
+}
+
+async function deleteMatchCue(cueId, lineupId, teamId) {
+  if (!cueId) return;
+  const { error } = await supabase.from('match_cues').delete().eq('id', cueId);
+  if (error) throw error;
+  if (_matchCues[lineupId]) {
+    _matchCues[lineupId] = _matchCues[lineupId].filter(c => c.id !== cueId);
+  }
+  try { await logAudit(teamId, 'match_cue', cueId, 'delete', {}); } catch {}
+}
+
 // ---------- Router ----------
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -2881,7 +3053,9 @@ async function renderTeamDashboard(user, teamId) {
     supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true }),
     // Badge fetch — swallows errors internally; cache populated for synchronous
     // reads in renderSquadTab's player modal. Safe when the migration is pending.
-    fetchTeamBadges(teamId)
+    fetchTeamBadges(teamId),
+    // Cue catalog — once per session. Swallows errors (Focus panel just shows empty picker).
+    fetchCueCatalog().catch(() => ({}))
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -4355,6 +4529,443 @@ function matchAwardsCardHtml(current, teamId) {
   `;
 }
 
+// ---------- Coach's Focus panel (Slice 10 Phase 2) ----------
+// The panel shows one row per *picked* player (pitch starters + subs). Each row
+// lists the cues that have been set for this match (primary star + emoji + short
+// label) plus an "Add focus" button when there's room (cap = 3 per player).
+// Tapping a chip opens openFocusEditor in edit mode; the X removes the cue.
+// Designed to be re-rendered cheaply — pure-string output from cache reads.
+const FOCUS_MAX_PER_PLAYER = 3;
+
+function _focusChipHtml(cue, playerName) {
+  // Cue label = catalog entry label, or the first chunk of the custom note.
+  const entry = cue.cue_slug ? cueEntry(cue.cue_slug) : null;
+  const emoji = entry ? entry.emoji : '📝';
+  const label = entry ? entry.label
+                      : (cue.custom_note || '').split('\n')[0].slice(0, 24) || 'Custom';
+  const tip = cue.custom_note
+    ? `${label} — ${cue.custom_note}`
+    : (entry?.description || label);
+  const tipWithPlayer = playerName ? `${playerName}: ${tip}` : tip;
+  const star = cue.is_primary ? '<span class="focus-chip-star" title="Primary focus" aria-label="primary">★</span>' : '';
+  const visDot = cue.visibility === 'coach_only'
+    ? '<span class="focus-chip-vis focus-chip-vis-coach" title="Coach only">🔒</span>'
+    : '';
+  return `
+    <span class="focus-cue-chip ${cue.is_primary ? 'is-primary' : ''}" data-cue-id="${cue.id}" title="${escapeHtml(tipWithPlayer)}">
+      ${star}
+      <span class="focus-chip-emoji" aria-hidden="true">${emoji}</span>
+      <span class="focus-chip-label">${escapeHtml(label)}</span>
+      ${visDot}
+      <button class="focus-chip-x" data-cue-del="${cue.id}" aria-label="Remove focus" title="Remove">✕</button>
+    </span>
+  `;
+}
+
+function _focusPlayerRowHtml(player, cues) {
+  const name = shortName(player.name || '') || '—';
+  const chipsHtml = cues.length
+    ? cues.map(c => _focusChipHtml(c, name)).join('')
+    : '<span class="focus-empty muted">No focus yet.</span>';
+  const canAdd = cues.length < FOCUS_MAX_PER_PLAYER;
+  const addBtn = canAdd
+    ? `<button class="focus-add-btn" data-focus-add="${player.id}">+ Add focus</button>`
+    : `<span class="muted focus-cap-note">Max ${FOCUS_MAX_PER_PLAYER}</span>`;
+  return `
+    <div class="focus-player-row" data-focus-player-row="${player.id}">
+      <div class="focus-row-head">
+        <span class="focus-row-name">${escapeHtml(name)}</span>
+        ${addBtn}
+      </div>
+      <div class="focus-row-chips">${chipsHtml}</div>
+    </div>
+  `;
+}
+
+function renderFocusPanelHtml(current, teamId, players) {
+  if (!current?.id || !teamId) {
+    return `<p class="muted me-hint">Save the match first, then pick your squad — you'll be able to set a Focus for each player.</p>`;
+  }
+
+  // Kick off a cache populate if we haven't fetched yet for this lineup. The
+  // fetcher sets _matchCues[lineupId] itself; when it resolves we re-render the
+  // one panel body so the coach doesn't see an empty state forever. We also
+  // populate the catalog in case renderTeamDashboard's parallel fetch lost the
+  // race (network hiccup, subsequent navigation, etc.).
+  if (!_matchCues[current.id]) {
+    fetchMatchCues(teamId, current.id)
+      .then(() => {
+        // Only refresh the focus panel if the editor is still on this lineup.
+        if (editor?.current?.id === current.id) _rerenderFocusPanel();
+      })
+      .catch(() => {});
+  }
+  if (!_cueCatalog && !_cueCatalogLoading) {
+    fetchCueCatalog().then(() => {
+      if (editor?.current?.id === current.id) _rerenderFocusPanel();
+    }).catch(() => {});
+  }
+
+  // Build the pick list: pitch starters (from slots) + subs — in formation /
+  // slot order, subs afterwards. De-dupe by player id.
+  const pickedIds = [];
+  const seen = new Set();
+  const slotKeys = Object.keys(current.slots || {}).sort();
+  slotKeys.forEach(k => {
+    const pid = current.slots[k];
+    if (pid && !seen.has(pid)) { pickedIds.push(pid); seen.add(pid); }
+  });
+  (current.subs || []).forEach(pid => {
+    if (pid && !seen.has(pid)) { pickedIds.push(pid); seen.add(pid); }
+  });
+
+  if (pickedIds.length === 0) {
+    return `<p class="muted me-hint">Pick your squad on the pitch first — drop players into slots (or subs) and they'll appear here for you to set a Focus on.</p>`;
+  }
+
+  const playersById = Object.fromEntries((players || []).map(p => [p.id, p]));
+  const cueRows = getCachedMatchCues(current.id);
+  const cuesByPlayer = new Map();
+  cueRows.forEach(c => {
+    if (!cuesByPlayer.has(c.player_id)) cuesByPlayer.set(c.player_id, []);
+    cuesByPlayer.get(c.player_id).push(c);
+  });
+  // Cache is already ordered primary-first by fetcher; safe to use directly.
+
+  const rowsHtml = pickedIds
+    .map(pid => playersById[pid])
+    .filter(Boolean)
+    .map(p => _focusPlayerRowHtml(p, cuesByPlayer.get(p.id) || []))
+    .join('');
+
+  const totalSet = cueRows.length;
+  const playersWithCue = new Set(cueRows.map(c => c.player_id)).size;
+
+  return `
+    <div class="focus-panel">
+      <div class="focus-intro">
+        <div class="focus-intro-head">🎯 Coach's Focus</div>
+        <p class="muted focus-intro-body">One thing you want each player to focus on. Keep it small — one starred primary cue per player is the sweet spot. Parent-visible cues appear on the child's match page; coach-only stay here.</p>
+        <div class="focus-stats muted">${playersWithCue}/${pickedIds.length} players with a cue · ${totalSet} cue${totalSet === 1 ? '' : 's'} set</div>
+      </div>
+      <div class="focus-rows">${rowsHtml}</div>
+    </div>
+  `;
+}
+
+// Re-render just the Focus panel body in-place so background fetches don't
+// snap the whole editor. Safe to call from anywhere — bails if the panel isn't
+// mounted (e.g. coach switched sub-tabs mid-fetch).
+function _rerenderFocusPanel() {
+  const tabEl = document.getElementById('tab-content');
+  if (!tabEl) return;
+  const body = tabEl.querySelector('[data-phone-group="focus"]');
+  if (!body) return;
+  const current = editor?.current;
+  const team = editor?.team;
+  const players = editor?.players || [];
+  if (!current || !team) return;
+  body.innerHTML = renderFocusPanelHtml(current, team.id, players);
+  _wireFocusPanel();
+}
+
+// Wire the Focus panel click handlers: add-cue button opens openFocusEditor
+// in "add" mode, chip click opens it in "edit" mode, X button removes the cue
+// after a confirm. Idempotent — safe to re-run after each re-render.
+function _wireFocusPanel() {
+  const tabEl = document.getElementById('tab-content');
+  if (!tabEl) return;
+  const body = tabEl.querySelector('[data-phone-group="focus"]');
+  if (!body) return;
+
+  const current = editor?.current;
+  const team = editor?.team;
+  if (!current?.id || !team?.id) return;
+
+  // Add button
+  body.querySelectorAll('[data-focus-add]').forEach(btn => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const playerId = btn.dataset.focusAdd;
+      openFocusEditor({ teamId: team.id, lineupId: current.id, playerId });
+    };
+  });
+
+  // Chip click (edit) — ignore clicks on the X button
+  body.querySelectorAll('.focus-cue-chip[data-cue-id]').forEach(chip => {
+    chip.onclick = (ev) => {
+      if (ev.target.closest('[data-cue-del]')) return;
+      ev.stopPropagation();
+      const cueId = chip.dataset.cueId;
+      const row = getCachedMatchCues(current.id).find(c => c.id === cueId);
+      if (!row) return;
+      openFocusEditor({ teamId: team.id, lineupId: current.id, playerId: row.player_id, cueId });
+    };
+  });
+
+  // Remove X
+  body.querySelectorAll('[data-cue-del]').forEach(btn => {
+    btn.onclick = async (ev) => {
+      ev.stopPropagation();
+      const cueId = btn.dataset.cueDel;
+      if (!confirm('Remove this focus?')) return;
+      try {
+        await deleteMatchCue(cueId, current.id, team.id);
+        _rerenderFocusPanel();
+      } catch (e) {
+        alert('Remove failed: ' + (e.message || e));
+      }
+    };
+  });
+}
+
+// ---------- Coach's Focus editor modal (add / edit a match cue) ----------
+// Called with { teamId, lineupId, playerId, cueId? }. If cueId is provided,
+// we're editing an existing row — its fields populate the form. Otherwise we're
+// adding a new cue for that player on that lineup.
+// Layout: framework-grouped cue picker (search + categories), custom-note field
+// (140 chars), is_primary toggle, visibility toggle (parent_visible | coach_only).
+// Save calls setMatchCue or updateMatchCue; on success we close + re-render the panel.
+function openFocusEditor({ teamId, lineupId, playerId, cueId }) {
+  const existing = document.querySelector('.focus-editor-overlay');
+  if (existing) existing.remove();
+
+  const players = editor?.players || [];
+  const player = players.find(p => p.id === playerId);
+  const playerName = player ? shortName(player.name || '') : '—';
+  const isEdit = !!cueId;
+  const row = isEdit ? getCachedMatchCues(lineupId).find(c => c.id === cueId) : null;
+
+  // Current form state
+  let selectedSlug  = row?.cue_slug || null;
+  let customNote    = row?.custom_note || '';
+  let isPrimary     = row?.is_primary ?? false;
+  let visibility    = row?.visibility || 'parent_visible';
+  let searchText    = '';
+
+  // If the catalog didn't load (offline), still let the coach save a custom note.
+  const catalog = getCachedCueCatalog();
+  // Auto-default the new cue to primary if the player has none yet and this is
+  // an add flow — primary is the star cue, and the first cue on a player should
+  // almost always be primary unless the coach explicitly unchecks.
+  if (!isEdit) {
+    const existingForPlayer = cuesForPlayer(lineupId, playerId);
+    if (existingForPlayer.length === 0) isPrimary = true;
+  }
+
+  // Framework-group order — mirrors the catalog's conceptual grouping so the
+  // picker reads "Four Corner Model" → ELM → ROOTS → Tank → Welfare → Role →
+  // Encouragement.
+  const FRAMEWORK_GROUPS = [
+    { key: 'FA',            label: '🧭 FA Four Corner Model', hint: 'Technical · Physical · Psychological · Social' },
+    { key: 'ELM',           label: '💪 ELM — Effort · Learning · Mistakes',  hint: 'Positive Coaching Alliance' },
+    { key: 'ROOTS',         label: '🌳 ROOTS — Rules · Opponents · Officials · Teammates · Self', hint: 'Sportsmanship' },
+    { key: 'TANK',          label: '❤️ Emotional Tank', hint: 'Fill teammates\u2019 tanks with encouragement' },
+    { key: 'WELFARE',       label: '🛟 Welfare', hint: 'Coach-only flags (wellbeing, injury watch)' },
+    { key: 'ROLE',          label: '🧩 Role / position', hint: 'Position-specific coaching points' },
+    { key: 'ENCOURAGEMENT', label: '✨ Encouragement', hint: 'General confidence boosters' },
+  ];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay focus-editor-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal focus-editor-modal" role="dialog" aria-label="Coach's Focus for ${escapeHtml(playerName)}">
+      <div class="picker-header">
+        <strong>🎯 ${isEdit ? 'Edit' : 'Set'} Focus — ${escapeHtml(playerName)}</strong>
+        <button class="btn-secondary" data-close type="button">✕</button>
+      </div>
+      <div class="picker-body" style="padding:0.6rem 0.8rem 0.8rem">
+        <div id="fe-selected-head" class="fe-selected-head muted" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.35rem"></div>
+
+        <input type="text" id="fe-search" placeholder="Search cues…" autocomplete="off"
+          style="width:100%;padding:0.5rem 0.6rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem;margin-bottom:0.45rem" />
+
+        <div id="fe-list" class="fe-list" style="max-height:40vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
+
+        <label style="display:block;margin-top:0.6rem;font-size:0.78rem;color:#555">Personalise (optional — up to 140 chars)</label>
+        <textarea id="fe-note" rows="2" maxlength="140" placeholder="e.g. Try a switch-of-play when their left-back pushes up"
+          style="width:100%;padding:0.45rem 0.55rem;border:1px solid var(--border);border-radius:6px;font-size:0.88rem;resize:vertical;font-family:inherit">${escapeHtml(customNote)}</textarea>
+        <div id="fe-note-count" class="muted" style="font-size:0.72rem;text-align:right;margin-top:-0.1rem">${customNote.length}/140</div>
+
+        <div class="fe-toggles" style="display:flex;flex-wrap:wrap;gap:0.7rem;margin-top:0.4rem;align-items:center">
+          <label style="display:flex;gap:0.3rem;align-items:center;font-size:0.85rem;cursor:pointer">
+            <input type="checkbox" id="fe-primary" ${isPrimary ? 'checked' : ''} />
+            <span>★ Primary (the one thing)</span>
+          </label>
+          <label style="display:flex;gap:0.3rem;align-items:center;font-size:0.85rem;cursor:pointer">
+            <input type="checkbox" id="fe-coach-only" ${visibility === 'coach_only' ? 'checked' : ''} />
+            <span>🔒 Coach-only (hide from parents)</span>
+          </label>
+        </div>
+
+        <div id="fe-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em;font-size:0.8rem"></div>
+        <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:0.6rem;align-items:center;flex-wrap:wrap">
+          <div>
+            ${isEdit ? `<button class="btn-secondary" id="fe-delete" type="button" style="color:#b00;border-color:#f3c9c9">Remove focus</button>` : ''}
+          </div>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn-secondary" data-close type="button">Cancel</button>
+            <button class="primary" id="fe-save">${isEdit ? 'Save changes' : 'Save focus'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const listEl        = overlay.querySelector('#fe-list');
+  const searchEl      = overlay.querySelector('#fe-search');
+  const noteEl        = overlay.querySelector('#fe-note');
+  const noteCountEl   = overlay.querySelector('#fe-note-count');
+  const primaryEl     = overlay.querySelector('#fe-primary');
+  const coachOnlyEl   = overlay.querySelector('#fe-coach-only');
+  const selectedHead  = overlay.querySelector('#fe-selected-head');
+  const msg           = overlay.querySelector('#fe-msg');
+  const saveBtn       = overlay.querySelector('#fe-save');
+  const deleteBtn     = overlay.querySelector('#fe-delete');
+
+  const renderSelectedHead = () => {
+    if (selectedSlug) {
+      const e = cueEntry(selectedSlug);
+      if (e) {
+        selectedHead.innerHTML = `Selected: <strong>${e.emoji} ${escapeHtml(e.label)}</strong> <span class="muted">— ${escapeHtml(e.description || '')}</span>`;
+      } else {
+        selectedHead.innerHTML = `<em class="muted">Selected a cue (loading…)</em>`;
+      }
+    } else if (customNote && customNote.trim()) {
+      selectedHead.innerHTML = `<em>Using your custom note only</em>`;
+    } else {
+      selectedHead.innerHTML = `<span class="muted">Pick a cue or write a custom note.</span>`;
+    }
+  };
+
+  const renderList = () => {
+    const q = searchText.trim().toLowerCase();
+    const allCues = Object.values(catalog);
+    if (!allCues.length) {
+      listEl.innerHTML = `<p class="muted" style="padding:0.6rem">Cue catalog not loaded yet — you can still save a custom note above.</p>`;
+      return;
+    }
+    const groupsHtml = FRAMEWORK_GROUPS.map(g => {
+      const items = allCues
+        .filter(c => c.framework === g.key)
+        .filter(c => !q || (c.label || '').toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q) || (c.slug || '').toLowerCase().includes(q))
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      if (!items.length) return '';
+      return `
+        <div class="fe-group">
+          <div class="fe-group-head">
+            <span class="fe-group-label">${g.label}</span>
+            <span class="fe-group-hint muted">${g.hint}</span>
+          </div>
+          <div class="fe-group-body">
+            ${items.map(c => {
+              const isSel = c.slug === selectedSlug;
+              const coachOnly = c.visibility === 'coach_only';
+              return `
+                <button type="button" class="fe-item ${isSel ? 'selected' : ''} ${coachOnly ? 'coach-only' : ''}" data-cue-slug="${escapeHtml(c.slug)}">
+                  <span class="fe-item-emoji" aria-hidden="true">${c.emoji || '🎯'}</span>
+                  <span class="fe-item-txt">
+                    <span class="fe-item-name">${escapeHtml(c.label || c.slug)}${coachOnly ? ' <span class="fe-item-lock" title="Coach-only">🔒</span>' : ''}</span>
+                    <span class="fe-item-desc muted">${escapeHtml(c.description || '')}</span>
+                  </span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+    listEl.innerHTML = groupsHtml || '<p class="muted" style="padding:0.6rem">No cues match that search.</p>';
+    listEl.querySelectorAll('[data-cue-slug]').forEach(btn => {
+      btn.onclick = () => {
+        selectedSlug = btn.dataset.cueSlug;
+        const ent = cueEntry(selectedSlug);
+        // If a coach-only cue is picked and the coach hasn't explicitly set a
+        // visibility, auto-mirror it so we don't accidentally leak a welfare
+        // cue to the parent page.
+        if (ent?.visibility === 'coach_only' && visibility !== 'coach_only') {
+          visibility = 'coach_only';
+          coachOnlyEl.checked = true;
+        }
+        renderSelectedHead();
+        renderList();
+      };
+    });
+  };
+
+  renderSelectedHead();
+  renderList();
+  setTimeout(() => searchEl.focus(), 30);
+
+  searchEl.addEventListener('input', () => { searchText = searchEl.value; renderList(); });
+  noteEl.addEventListener('input', () => {
+    customNote = noteEl.value;
+    noteCountEl.textContent = `${customNote.length}/140`;
+    renderSelectedHead();
+  });
+  primaryEl.addEventListener('change', () => { isPrimary = !!primaryEl.checked; });
+  coachOnlyEl.addEventListener('change', () => { visibility = coachOnlyEl.checked ? 'coach_only' : 'parent_visible'; });
+
+  overlay.querySelectorAll('[data-close]').forEach(b => b.onclick = () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  if (deleteBtn) {
+    deleteBtn.onclick = async () => {
+      if (!confirm('Remove this focus?')) return;
+      msg.textContent = 'Removing…'; msg.className = 'muted';
+      try {
+        await deleteMatchCue(cueId, lineupId, teamId);
+        overlay.remove();
+        _rerenderFocusPanel();
+      } catch (e) {
+        msg.textContent = 'Remove failed: ' + (e.message || e);
+        msg.className = 'error';
+      }
+    };
+  }
+
+  saveBtn.onclick = async () => {
+    if (!selectedSlug && !customNote.trim()) {
+      msg.textContent = 'Pick a cue or write a custom note first.';
+      msg.className = 'error';
+      return;
+    }
+    msg.textContent = 'Saving…'; msg.className = 'muted';
+    saveBtn.disabled = true;
+    try {
+      if (isEdit) {
+        await updateMatchCue(cueId, lineupId, {
+          cue_slug: selectedSlug,
+          custom_note: customNote,
+          is_primary: isPrimary,
+          visibility,
+        });
+      } else {
+        // Enforce the per-player cap client-side for a nicer error than the DB
+        // would give us (there's no hard DB cap; Phase 2 convention is 3).
+        const existingForPlayer = cuesForPlayer(lineupId, playerId);
+        if (existingForPlayer.length >= FOCUS_MAX_PER_PLAYER) {
+          throw new Error(`Max ${FOCUS_MAX_PER_PLAYER} focus cues per player.`);
+        }
+        await setMatchCue({
+          teamId, lineupId, playerId,
+          cueSlug: selectedSlug,
+          customNote,
+          isPrimary,
+          visibility,
+        });
+      }
+      overlay.remove();
+      _rerenderFocusPanel();
+    } catch (e) {
+      msg.textContent = 'Save failed: ' + (e.message || e);
+      msg.className = 'error';
+      saveBtn.disabled = false;
+    }
+  };
+}
+
 function newLineupState() {
   return {
     id: null,
@@ -5784,6 +6395,7 @@ const _LINEUP_PHONE_TABS = [
   { key: 'squad',     label: 'Squad',        icon: '' },
   { key: 'subs',      label: 'Subs',         icon: '' },
   { key: 'formation', label: 'Formation',    icon: '' },
+  { key: 'focus',     label: '🎯 Focus',     icon: '' },
   { key: 'info',      label: 'Info',         icon: '' },
 ];
 
@@ -6272,6 +6884,17 @@ function renderLineupsTab() {
     </div>
   `;
 
+  // Focus panel: one row per picked player (pitch starters + subs), each with a
+  // compact list of match cues (primary star first) + an "Add focus" button.
+  // The panel is driven entirely off the in-memory caches — _matchCues and
+  // _cueCatalog — and kicks off a re-fetch in a sibling effect (further down)
+  // when the cache is missing for this lineup.
+  const focusPanelHtml = canEdit && current?.id
+    ? renderFocusPanelHtml(current, team?.id, players)
+    : (!canEdit
+        ? `<p class="muted me-hint">Focus notes are coach-only here — parents will see any parent-visible cues on the shared match page.</p>`
+        : `<p class="muted me-hint">Save the match first, then pick your squad — you'll be able to set a Focus for each player.</p>`);
+
   tabEl.innerHTML = `
     <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
       <!-- Match header: title + stats + actions. Desktop only (hidden on phone). -->
@@ -6335,6 +6958,7 @@ function renderLineupsTab() {
             <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
             <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
             <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
+            <div data-phone-group="focus" class="me-panel-body">${focusPanelHtml}</div>
             <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
           </div>
         </div>
@@ -7861,6 +8485,10 @@ function wireLineupEvents() {
   const { canEdit, team, lineups } = editor;
   const tabEl = document.getElementById('tab-content');
 
+  // Focus panel click handlers (Add focus · chip edit · X remove).
+  // Wired on every renderLineupsTab so newly-inserted rows pick up handlers.
+  _wireFocusPanel();
+
   // Phone-only tab strip: toggle active group without re-rendering the editor
   // (keeps pitch DOM, tactics canvas state and event handlers intact).
   const layoutEl = tabEl.querySelector('.lineup-layout');
@@ -7876,6 +8504,10 @@ function wireLineupEvents() {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
+      // When the Focus tab is activated, regenerate the panel body — otherwise
+      // it can show a stale picked-players list (the coach may have just
+      // dragged someone onto the pitch in Squad tab without a full re-render).
+      if (key === 'focus') _rerenderFocusPanel();
       // On phone, bring the tab strip to the top of the viewport so the active
       // group is immediately visible below — otherwise the pitch can hide the
       // tab's content under the fold on tall phones.
