@@ -90,6 +90,74 @@ function ageGroupLabel(team, date = new Date()) {
 // All the options we support in dropdowns. Covers U7 through U18.
 const AGE_GROUP_OPTIONS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
+// ---------- Training schedule helpers (Slice 8) ----------
+// Day-of-week indexing follows JS Date.getDay(): 0=Sun, 1=Mon, ..., 6=Sat.
+const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+// Parse team.training_schedule (JSONB array) into a sane JS array. Tolerant of
+// null / garbage / single-object legacy shapes.
+function parseTrainingSchedule(team) {
+  if (!team) return [];
+  const raw = team.training_schedule;
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return arr.filter(s => s && typeof s === 'object' && Number.isInteger(s.day) && s.start && s.end);
+}
+// Format a "HH:MM" or "HH:MM:SS" time for display (drops seconds, keeps 24h).
+function fmtTimeHHMM(t) {
+  if (!t) return '';
+  const s = String(t);
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${m[1].padStart(2,'0')}:${m[2]}` : s;
+}
+// Given a schedule slot (day/start/end) and an anchor date, return the Date
+// object for the next (or current, if still within end+1h) occurrence.
+// "now" param allows testing; defaults to current time.
+function computeNextTrainingInstance(slot, now = new Date()) {
+  if (!slot || !Number.isInteger(slot.day) || !slot.start || !slot.end) return null;
+  const [eh, em] = fmtTimeHHMM(slot.end).split(':').map(Number);
+  const [sh, sm] = fmtTimeHHMM(slot.start).split(':').map(Number);
+  // Start candidate at today with start time.
+  const todayDay = now.getDay();
+  // Days until next matching day (0..6). 0 means today.
+  let delta = (slot.day - todayDay + 7) % 7;
+  let candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + delta, sh, sm, 0, 0);
+  // Cutoff = end time + 1h. If we're past that on today's instance, roll forward 7d.
+  const cutoff = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate(), eh, em, 0, 0);
+  cutoff.setHours(cutoff.getHours() + 1);
+  if (now >= cutoff) {
+    candidate = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate() + 7, sh, sm, 0, 0);
+  }
+  return candidate;
+}
+// Pick the soonest upcoming training instance across all slots in the schedule.
+// Returns { slot, date } or null.
+function nextUpcomingTraining(team, now = new Date()) {
+  const slots = parseTrainingSchedule(team);
+  if (!slots.length) return null;
+  let best = null;
+  for (const s of slots) {
+    const d = computeNextTrainingInstance(s, now);
+    if (!d) continue;
+    if (!best || d < best.date) best = { slot: s, date: d };
+  }
+  return best;
+}
+// Convert a Date to "YYYY-MM-DD" (local).
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+// Pretty-print a training session for headers (e.g. "Tuesday 21 Apr · 19:00–20:00").
+function fmtTrainingHeader(date, slot) {
+  const dayName = DAY_NAMES[date.getDay()];
+  const d = date.getDate();
+  const month = date.toLocaleString('en-GB', { month: 'short' });
+  return `${dayName} ${d} ${month} · ${fmtTimeHHMM(slot.start)}–${fmtTimeHHMM(slot.end)}`;
+}
+
 // ---------- Player stats aggregation (for the public card page) ----------
 // All stats are derived on the fly from lineups — no cached totals column, so
 // editing a match's result always reflects accurately the next time someone
@@ -730,6 +798,7 @@ function currentRoute() {
   if (h.startsWith('view/'))  return { name: 'view',  lineupId: h.slice(5),  mode: 'match' };
   if (h.startsWith('avail/')) return { name: 'view',  lineupId: h.slice(6),  mode: 'avail' };
   if (h.startsWith('card/'))  return { name: 'card',  teamId:   h.slice(5) };
+  if (h.startsWith('train/')) return { name: 'train', teamId:   h.slice(6) };
   return { name: 'home' };
 }
 window.addEventListener('hashchange', render);
@@ -777,6 +846,14 @@ async function render() {
     resetHeader();
     userBar.innerHTML = '';
     await renderPlayerCardPage(preRoute.teamId);
+    return;
+  }
+  // Public training view — no auth required. Permanent rolling link per team
+  // that always shows the next upcoming session (flips to next week 1h after end).
+  if (preRoute.name === 'train') {
+    resetHeader();
+    userBar.innerHTML = '';
+    await renderTrainingPublicView(preRoute.teamId);
     return;
   }
 
@@ -2058,6 +2135,320 @@ function renderPlayerCardBody() {
   });
   const seeAllBtn = document.querySelector('[data-badges-see-all]');
   if (seeAllBtn) seeAllBtn.onclick = () => openBadgesGridModal(badgeGroups, p);
+}
+
+// ---------- Public training view (#/train/{team_id}) ----------
+// Permanent rolling parent link. Always shows the next upcoming training
+// session (flips to next week 1h after end time). Parents unlock with the
+// existing kid / family access code — same mechanism as the availability
+// flow, just keyed by team rather than lineup.
+async function renderTrainingPublicView(teamId) {
+  if (!teamId) {
+    appEl.innerHTML = `<div class="card"><p class="error">Team id missing from URL.</p></div>`;
+    return;
+  }
+  document.body.classList.add('parent-view-active');
+  appEl.innerHTML = `<p class="loading">Loading training…</p>`;
+
+  // Fetch team (tolerant of training_schedule column not existing yet — returns
+  // the minimal shape and we'll show "not set up" below).
+  let teamRes = await supabase
+    .from('teams')
+    .select('id,name,training_schedule,home_ground_name,home_ground_postcode')
+    .eq('id', teamId).maybeSingle();
+  if (teamRes.error && /training_schedule/i.test(teamRes.error.message || '')) {
+    teamRes = await supabase
+      .from('teams')
+      .select('id,name,home_ground_name,home_ground_postcode')
+      .eq('id', teamId).maybeSingle();
+  }
+  if (teamRes.error || !teamRes.data) {
+    appEl.innerHTML = `
+      <div class="pv-wrap">
+        <div class="pv-card"><h2>Training unavailable</h2>
+        <p class="muted">We couldn't find that team.</p></div>
+      </div>`;
+    return;
+  }
+  const team = teamRes.data;
+  const slots = parseTrainingSchedule(team);
+
+  if (!slots.length) {
+    appEl.innerHTML = `
+      <div class="pv-wrap">
+        <div class="pv-card">
+          <h2>${escapeHtml(team.name || 'Team')} — Training</h2>
+          <p class="muted">The coach hasn't set up a weekly training schedule yet. Check back soon.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Resolve the next upcoming session locally (slot + date).
+  const next = nextUpcomingTraining(team);
+  if (!next) {
+    appEl.innerHTML = `
+      <div class="pv-wrap">
+        <div class="pv-card">
+          <h2>${escapeHtml(team.name || 'Team')} — Training</h2>
+          <p class="muted">No upcoming training session could be resolved from the schedule.</p>
+        </div>
+      </div>`;
+    return;
+  }
+  const dateStr = toLocalDateStr(next.date);
+
+  // Ensure a concrete training_sessions row exists for that date via the
+  // security-definer RPC. Falls back gracefully to a virtual session if the
+  // RPC isn't in place yet — in that case attendance can't be saved, but the
+  // page still renders usefully for parents.
+  let session = null;
+  let sessionRpcFailed = false;
+  {
+    const { data, error } = await supabase.rpc('ensure_training_session', {
+      p_team_id: team.id,
+      p_date:    dateStr
+    });
+    if (error) {
+      sessionRpcFailed = true;
+      console.warn('ensure_training_session failed:', error.message);
+    } else if (data) {
+      // RPC returns a row (or an array of one row depending on driver).
+      session = Array.isArray(data) ? data[0] : data;
+    }
+  }
+
+  // If the coach has cancelled or rescheduled this week's session, apply
+  // overrides from the row (session.status / session.scheduled_start/end /
+  // session.location).
+  const effectiveSlot = {
+    day: next.slot.day,
+    start: session?.scheduled_start || next.slot.start,
+    end:   session?.scheduled_end   || next.slot.end,
+    location: session?.location ?? next.slot.location ?? team.home_ground_name ?? ''
+  };
+  const cancelled = session && session.status === 'cancelled';
+
+  // Load unlocked player IDs for this team (localStorage). If none, show code entry.
+  const unlockedIds = getUnlockedPlayers(team.id);
+  let unlockedPlayers = [];
+  let existingAttendance = {}; // { player_id: { intent, note } }
+  if (unlockedIds.length) {
+    const { data: pubPlayers } = await supabase
+      .from('players')
+      .select('id,name,number,position,photo_url')
+      .eq('team_id', team.id)
+      .in('id', unlockedIds);
+    unlockedPlayers = (pubPlayers || []).sort((a, b) => {
+      const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
+      if (na !== nb) return na - nb;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    if (session?.id && unlockedPlayers.length) {
+      const { data: att } = await supabase
+        .from('training_attendance')
+        .select('player_id,intent,note,responded_by')
+        .eq('session_id', session.id)
+        .in('player_id', unlockedPlayers.map(p => p.id));
+      (att || []).forEach(r => { existingAttendance[r.player_id] = r; });
+    }
+  }
+
+  // Build the page.
+  const header = `
+    <div class="pv-card">
+      <h2 style="margin:0 0 0.25rem">${escapeHtml(team.name || 'Team')} — Training</h2>
+      <p class="muted" style="margin:0">${fmtTrainingHeader(next.date, effectiveSlot)}</p>
+      ${effectiveSlot.location ? `<p class="muted" style="margin:0.3rem 0 0">📍 ${escapeHtml(effectiveSlot.location)}</p>` : ''}
+      ${cancelled ? `<p class="error" style="margin:0.5rem 0 0"><strong>⚠ This session has been cancelled.</strong>${session?.notes ? ' ' + escapeHtml(session.notes) : ''}</p>` : ''}
+      ${(session?.status === 'moved' || (session && (session.scheduled_start !== next.slot.start || session.scheduled_end !== next.slot.end))) && !cancelled ? `<p class="muted" style="margin:0.4rem 0 0">ℹ Moved from the usual time — new details above.</p>` : ''}
+    </div>`;
+
+  const intentBtn = (pid, value, label, emoji, activeVal) => `
+    <button type="button" class="train-intent-btn" data-player="${pid}" data-intent="${value}"
+      style="flex:1;padding:0.5rem 0.3rem;border:1px solid ${activeVal === value ? '#2a7' : '#ccc'};background:${activeVal === value ? '#2a7' : '#fff'};color:${activeVal === value ? '#fff' : '#333'};font-size:0.8rem;cursor:pointer;border-radius:6px">
+      ${emoji} ${label}
+    </button>`;
+
+  const playerRowsHtml = unlockedPlayers.map(p => {
+    const cur = existingAttendance[p.id];
+    const photoHtml = p.photo_url
+      ? `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
+      : `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
+    const lastLine = cur
+      ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.intent}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
+      : `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
+    return `
+      <div class="avail-row" data-train-row="${p.id}" style="padding:0.6rem 0;border-top:1px solid #eee">
+        <div style="display:flex;gap:0.6rem;align-items:center">
+          ${photoHtml}
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
+            ${lastLine}
+          </div>
+        </div>
+        <div style="display:flex;gap:0.35rem;margin-top:0.5rem">
+          ${intentBtn(p.id, 'available',   'Available',   '✅', cur?.intent)}
+          ${intentBtn(p.id, 'maybe',       'Maybe',       '🤔', cur?.intent)}
+          ${intentBtn(p.id, 'unavailable', 'Unavailable', '❌', cur?.intent)}
+        </div>
+        <input type="text" class="train-note" data-train-note="${p.id}" value="${escapeHtml(cur?.note || '')}"
+          placeholder="Optional note"
+          style="margin-top:0.4rem;width:100%;padding:0.4rem;font-size:0.8rem;border:1px solid #ddd;border-radius:4px" />
+      </div>`;
+  }).join('');
+
+  const rememberedName = (() => { try { return localStorage.getItem('pv_responder_name') || ''; } catch { return ''; } })();
+
+  const attendanceCard = cancelled ? '' : `
+    <div class="pv-card">
+      <h3 class="pv-card-title" style="margin-top:0">Let the coach know</h3>
+      <p class="muted" style="font-size:0.85rem;margin-top:0">Mark whether your child will be at this training session. You can update this right up to the session.</p>
+      ${unlockedPlayers.length ? `
+        <label style="font-size:0.75rem;margin-top:0.5rem;display:block">Your name (optional)</label>
+        <input type="text" id="train-responder" value="${escapeHtml(rememberedName)}" placeholder="e.g. Sarah (Alex's mum)"
+          style="width:100%;padding:0.45rem;font-size:0.9rem;border:1px solid #ddd;border-radius:4px" />
+        <div id="train-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
+        <div id="train-list" style="margin-top:0.5rem">${playerRowsHtml}</div>
+        ${sessionRpcFailed ? `<p class="error" style="font-size:0.75rem;margin-top:0.4rem">⚠ Saving attendance isn't available yet — the coach needs to finish the Slice 8 database setup.</p>` : ''}
+        <button type="button" id="train-forget" class="btn-secondary" style="font-size:0.75rem;padding:0.3rem 0.55rem;margin-top:0.5rem">Forget this device</button>
+      ` : ''}
+      <div id="train-code-box" style="margin-top:0.6rem;padding:0.6rem 0.7rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
+        <label style="font-size:0.8rem;font-weight:600;display:block;margin-bottom:0.25rem">${unlockedPlayers.length ? 'Add another child' : 'Enter your child\u2019s code'}</label>
+        <p class="muted" style="font-size:0.75rem;margin:0 0 0.4rem">The coach can read your code from the player card. A 5-digit family code unlocks all linked siblings at once.</p>
+        <div style="display:flex;gap:0.4rem">
+          <input type="text" id="train-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
+            style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
+          <button type="button" class="primary" id="train-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
+        </div>
+        <div id="train-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+      </div>
+    </div>`;
+
+  appEl.innerHTML = `
+    <div class="pv-wrap">
+      ${header}
+      ${attendanceCard}
+    </div>`;
+
+  if (!cancelled) wireTrainingPublicView(team, session, unlockedPlayers, existingAttendance);
+}
+
+function wireTrainingPublicView(team, session, unlockedPlayers, existingAttendance) {
+  const msgEl = document.getElementById('train-msg');
+  const responderEl = document.getElementById('train-responder');
+  const flash = (txt, cls = 'muted') => {
+    if (!msgEl) return;
+    msgEl.textContent = txt; msgEl.className = cls;
+    setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2500);
+  };
+
+  const codesByPlayer = (() => {
+    try { return JSON.parse(localStorage.getItem('pv_codes_' + team.id) || '{}'); } catch { return {}; }
+  })();
+
+  const submit = async (playerId, intent) => {
+    if (!session?.id) { flash('Training session not ready — please refresh.', 'error'); return; }
+    const responderName = (responderEl?.value || '').trim();
+    if (responderName) {
+      try { localStorage.setItem('pv_responder_name', responderName); } catch {}
+    }
+    const noteEl = document.querySelector(`[data-train-note="${playerId}"]`);
+    const note = (noteEl?.value || '').trim() || null;
+    const code = codesByPlayer[playerId];
+    if (!code) { flash('No code stored for this player. Re-enter it below.', 'error'); return; }
+
+    const { error } = await supabase.rpc('submit_training_intent', {
+      p_session_id: session.id,
+      p_player_id:  playerId,
+      p_code:       code,
+      p_intent:     intent,
+      p_note:       note,
+      p_name:       responderName || null
+    });
+    if (error) { flash('Save failed: ' + error.message, 'error'); return; }
+
+    existingAttendance[playerId] = { intent, note, responded_by: responderName || null };
+    document.querySelectorAll(`.train-intent-btn[data-player="${playerId}"]`).forEach(btn => {
+      const active = btn.dataset.intent === intent;
+      btn.style.background = active ? '#2a7' : '#fff';
+      btn.style.color = active ? '#fff' : '#333';
+      btn.style.borderColor = active ? '#2a7' : '#ccc';
+    });
+    const row = document.querySelector(`[data-train-row="${playerId}"]`);
+    const line = row?.querySelector('.muted');
+    if (line) line.textContent = `Last response: ${intent}${responderName ? ' — ' + responderName : ''}`;
+    flash('✓ Saved', 'ok');
+  };
+
+  document.querySelectorAll('.train-intent-btn').forEach(btn => {
+    btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.intent));
+  });
+
+  document.querySelectorAll('.train-note').forEach(inp => {
+    inp.addEventListener('blur', async () => {
+      const pid = inp.dataset.trainNote;
+      const cur = existingAttendance[pid];
+      if (!cur) return;
+      const note = (inp.value || '').trim() || null;
+      if ((cur.note || null) === note) return;
+      const code = codesByPlayer[pid];
+      if (!code || !session?.id) return;
+      const responderName = (responderEl?.value || '').trim();
+      const { error } = await supabase.rpc('submit_training_intent', {
+        p_session_id: session.id, p_player_id: pid, p_code: code,
+        p_intent: cur.intent, p_note: note, p_name: responderName || cur.responded_by || null
+      });
+      if (error) { flash('Note save failed: ' + error.message, 'error'); return; }
+      cur.note = note;
+      flash('✓ Note saved', 'ok');
+    });
+  });
+
+  // Code-entry: unlock a player (or sibling group) on this device via the
+  // existing get_player_by_code RPC (keyed by team, not lineup).
+  const codeBtn = document.getElementById('train-code-submit');
+  const codeInput = document.getElementById('train-code-input');
+  const codeMsg = document.getElementById('train-code-msg');
+  const tryUnlock = async () => {
+    const raw = (codeInput?.value || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!raw) return;
+    codeMsg.textContent = 'Checking…'; codeMsg.className = 'muted';
+    const { data, error } = await supabase.rpc('get_player_by_code', {
+      p_team: team.id,
+      p_code: raw
+    });
+    if (error) { codeMsg.textContent = 'Check failed: ' + error.message; codeMsg.className = 'error'; return; }
+    const arr = Array.isArray(data) ? data : (data ? [data] : []);
+    if (!arr.length) { codeMsg.textContent = 'Code not recognised. Ask your coach.'; codeMsg.className = 'error'; return; }
+    const matchedIds = arr.map(p => p.id);
+    const matchedNames = arr.map(p => p.name);
+
+    const currentUnlocked = new Set(getUnlockedPlayers(team.id));
+    matchedIds.forEach(id => currentUnlocked.add(id));
+    setUnlockedPlayers(team.id, [...currentUnlocked]);
+
+    const codes = (() => { try { return JSON.parse(localStorage.getItem('pv_codes_' + team.id) || '{}'); } catch { return {}; } })();
+    matchedIds.forEach(id => { codes[id] = raw; });
+    try { localStorage.setItem('pv_codes_' + team.id, JSON.stringify(codes)); } catch {}
+
+    codeMsg.textContent = `✓ Unlocked ${matchedNames.join(', ') || matchedIds.length + ' player(s)'}`; codeMsg.className = 'ok';
+    setTimeout(() => location.reload(), 600);
+  };
+  if (codeBtn) codeBtn.addEventListener('click', tryUnlock);
+  if (codeInput) codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); } });
+
+  // Forget this device
+  const forgetBtn = document.getElementById('train-forget');
+  if (forgetBtn) {
+    forgetBtn.addEventListener('click', () => {
+      if (!confirm('Forget all unlocked players on this device? You will need to re-enter the code(s) next time.')) return;
+      clearUnlockedPlayers(team.id);
+      try { localStorage.removeItem('pv_codes_' + team.id); } catch {}
+      try { localStorage.removeItem('pv_responder_name'); } catch {}
+      location.reload();
+    });
+  }
 }
 
 // ---------- Badge view modals (public card — read-only) ----------
@@ -3816,6 +4207,47 @@ function renderSquadTab(team, canEdit, players) {
     </div>
   ` : '';
 
+  // Training schedule card — recurring weekly template. JSONB list so teams
+  // with two training nights (Tue+Thu) work out of the box. Each row:
+  // { day: 0-6, start: "HH:MM", end: "HH:MM", location: string }.
+  const trainingSlots = parseTrainingSchedule(team);
+  const trainingRowHtml = (slot, idx) => `
+    <div class="training-slot-row" data-ts-row="${idx}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.35rem;align-items:end;margin-bottom:0.4rem">
+      <div>
+        <label style="font-size:0.7rem">Day</label>
+        <select data-ts-day style="width:100%">
+          ${DAY_NAMES.map((name, d) => `<option value="${d}" ${slot.day === d ? 'selected' : ''}>${name}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.7rem">Start</label>
+        <input type="time" data-ts-start value="${fmtTimeHHMM(slot.start || '19:00')}" style="width:100%" />
+      </div>
+      <div>
+        <label style="font-size:0.7rem">End</label>
+        <input type="time" data-ts-end value="${fmtTimeHHMM(slot.end || '20:00')}" style="width:100%" />
+      </div>
+      <button type="button" class="btn-secondary" data-ts-remove title="Remove this session" style="padding:0.4rem 0.6rem">✕</button>
+      <div style="grid-column:1 / -1">
+        <label style="font-size:0.7rem">Location (optional)</label>
+        <input type="text" data-ts-loc value="${escapeHtml(slot.location || '')}" placeholder="e.g. Main pitch" style="width:100%" />
+      </div>
+    </div>`;
+  const trainingScheduleCard = canEdit ? `
+    <div class="card">
+      <h3 style="margin-top:0">Training schedule</h3>
+      <p class="muted" style="font-size:0.72rem;margin:0 0 0.5rem">
+        Recurring weekly sessions. Add one row per training night — the parent training link and coach attendance tracker use this to generate each week's session automatically.
+      </p>
+      <div id="ts-rows">
+        ${trainingSlots.length ? trainingSlots.map(trainingRowHtml).join('') : ''}
+      </div>
+      <button type="button" class="btn-secondary" id="ts-add" style="margin-top:0.2rem">+ Add session</button>
+      <div id="ts-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.4rem"></div>
+      <button class="primary" id="ts-save" style="margin-top:0.3rem">Save training schedule</button>
+    </div>
+  ` : '';
+
   const homeGroundCard = canEdit ? `
     <div class="card">
       <h3 style="margin-top:0">Home ground</h3>
@@ -3911,6 +4343,7 @@ function renderSquadTab(team, canEdit, players) {
       <nav class="lineup-phone-tabs sd-subtabs" role="tablist" aria-label="Squad details sections">
         <button class="lineup-phone-tab ${subTab === 'teaminfo' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'teaminfo' ? 'true' : 'false'}" data-squad-subtab="teaminfo">Team info</button>
         <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"    data-squad-subtab="squad">Squad</button>
+        <button class="lineup-phone-tab ${subTab === 'training' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'training' ? 'true' : 'false'}" data-squad-subtab="training">Training</button>
       </nav>
 
       <div data-squad-group="teaminfo" class="sd-panel">
@@ -3918,6 +4351,7 @@ function renderSquadTab(team, canEdit, players) {
           <div class="squad-main">
             ${teamInfoCard}
             ${homeGroundCard}
+            ${trainingScheduleCard}
           </div>
         </div>
       </div>
@@ -3932,6 +4366,14 @@ function renderSquadTab(team, canEdit, players) {
             </div>
           </div>
           <div class="squad-side">${filterHtml}</div>
+        </div>
+      </div>
+
+      <div data-squad-group="training" class="sd-panel">
+        <div class="squad-layout">
+          <div class="squad-main">
+            <div id="training-tracker-root"><p class="loading">Loading training…</p></div>
+          </div>
         </div>
       </div>
     </div>
@@ -3950,8 +4392,10 @@ function renderSquadTab(team, canEdit, players) {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
+      if (key === 'training') renderTrainingTracker(team, canEdit, players);
     };
   });
+  if (subTab === 'training') renderTrainingTracker(team, canEdit, players);
 
   tabEl.querySelectorAll('.filter-btn').forEach(b => {
     b.onclick = () => { currentFilter = b.dataset.filter; renderSquadTab(team, canEdit, players); };
@@ -4100,6 +4544,84 @@ function renderSquadTab(team, canEdit, players) {
       delete team._pending_hg_lat; delete team._pending_hg_lng;
       msg.textContent = '✓ Saved'; msg.className = 'ok';
       setTimeout(() => renderSquadTab(team, canEdit, players), 600);
+    };
+
+    // ----- Training schedule editor (Slice 8) -----
+    // Add/remove rows are pure DOM (no save until "Save training schedule").
+    const tsRows = document.getElementById('ts-rows');
+    const tsAddBtn = document.getElementById('ts-add');
+    const tsSaveBtn = document.getElementById('ts-save');
+    const tsMsg = document.getElementById('ts-msg');
+    const buildEmptyRowHtml = (idx) => `
+      <div class="training-slot-row" data-ts-row="${idx}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.35rem;align-items:end;margin-bottom:0.4rem">
+        <div>
+          <label style="font-size:0.7rem">Day</label>
+          <select data-ts-day style="width:100%">
+            ${DAY_NAMES.map((name, d) => `<option value="${d}" ${d === 2 ? 'selected' : ''}>${name}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem">Start</label>
+          <input type="time" data-ts-start value="19:00" style="width:100%" />
+        </div>
+        <div>
+          <label style="font-size:0.7rem">End</label>
+          <input type="time" data-ts-end value="20:00" style="width:100%" />
+        </div>
+        <button type="button" class="btn-secondary" data-ts-remove title="Remove this session" style="padding:0.4rem 0.6rem">✕</button>
+        <div style="grid-column:1 / -1">
+          <label style="font-size:0.7rem">Location (optional)</label>
+          <input type="text" data-ts-loc value="" placeholder="e.g. Main pitch" style="width:100%" />
+        </div>
+      </div>`;
+    if (tsRows) {
+      tsRows.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('[data-ts-remove]');
+        if (removeBtn) {
+          const row = removeBtn.closest('.training-slot-row');
+          if (row) row.remove();
+          if (tsMsg) { tsMsg.textContent = ''; tsMsg.className = 'muted'; tsMsg.style.fontSize = '0.75rem'; }
+        }
+      });
+    }
+    if (tsAddBtn) tsAddBtn.onclick = () => {
+      const idx = tsRows.querySelectorAll('.training-slot-row').length;
+      tsRows.insertAdjacentHTML('beforeend', buildEmptyRowHtml(idx));
+    };
+    if (tsSaveBtn) tsSaveBtn.onclick = async () => {
+      if (!tsMsg) return;
+      tsMsg.className = 'muted'; tsMsg.style.fontSize = '0.75rem';
+      const rows = Array.from(tsRows.querySelectorAll('.training-slot-row'));
+      const slots = [];
+      for (const r of rows) {
+        const day = parseInt(r.querySelector('[data-ts-day]').value, 10);
+        const start = (r.querySelector('[data-ts-start]').value || '').trim();
+        const end = (r.querySelector('[data-ts-end]').value || '').trim();
+        const location = (r.querySelector('[data-ts-loc]').value || '').trim();
+        if (!Number.isInteger(day) || day < 0 || day > 6) {
+          tsMsg.textContent = 'Pick a valid day for every session.'; tsMsg.className = 'error'; return;
+        }
+        if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+          tsMsg.textContent = 'Start and end times are required for every session.'; tsMsg.className = 'error'; return;
+        }
+        if (start >= end) {
+          tsMsg.textContent = `${DAY_NAMES[day]} session: end time must be after start time.`; tsMsg.className = 'error'; return;
+        }
+        slots.push({ day, start, end, location });
+      }
+      const payload = { training_schedule: slots.length ? slots : null };
+      const { data, error } = await supabase.from('teams').update(payload).eq('id', team.id).select().single();
+      if (error) {
+        if (/training_schedule/i.test(error.message || '')) {
+          tsMsg.textContent = 'Save failed — the training_schedule column is missing. Run the Slice 8 migration first.';
+        } else {
+          tsMsg.textContent = 'Save failed: ' + error.message;
+        }
+        tsMsg.className = 'error'; return;
+      }
+      Object.assign(team, data);
+      tsMsg.textContent = '✓ Saved'; tsMsg.className = 'ok';
+      setTimeout(() => renderSquadTab(team, canEdit, players), 700);
     };
   }
 
@@ -4394,6 +4916,383 @@ function renderSquadTab(team, canEdit, players) {
     const pid = cardEl.dataset.player;
     const openBtn = cardEl.querySelector('[data-open-modal]');
     if (openBtn) openBtn.onclick = () => openPlayerModal(pid);
+  });
+}
+
+// ---------- Training tracker (coach-side, Squad tab > Training subtab) ----------
+// Shows the next upcoming session with per-player intent + attended toggle,
+// plus a history list of past sessions, plus override controls
+// (cancel / move venue / time) for a single week.
+async function renderTrainingTracker(team, canEdit, players) {
+  const root = document.getElementById('training-tracker-root');
+  if (!root) return;
+  root.innerHTML = `<p class="loading">Loading training…</p>`;
+
+  const slots = parseTrainingSchedule(team);
+  if (!slots.length) {
+    root.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">Training</h3>
+        <p class="muted">No weekly training schedule set yet. Add one on the Team info tab to start tracking attendance.</p>
+      </div>`;
+    return;
+  }
+
+  // Resolve next upcoming session from the schedule + materialise the row.
+  const next = nextUpcomingTraining(team);
+  if (!next) { root.innerHTML = `<div class="card"><p class="muted">Could not resolve the next training session.</p></div>`; return; }
+  const dateStr = toLocalDateStr(next.date);
+
+  let session = null;
+  let migrationMissing = false;
+  {
+    const { data, error } = await supabase.rpc('ensure_training_session', {
+      p_team_id: team.id, p_date: dateStr
+    });
+    if (error) {
+      migrationMissing = /ensure_training_session|training_sessions/i.test(error.message || '');
+      console.warn('ensure_training_session failed:', error.message);
+    } else if (data) {
+      session = Array.isArray(data) ? data[0] : data;
+    }
+  }
+
+  if (migrationMissing) {
+    root.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">Training</h3>
+        <p class="error">The Slice 8 database migration hasn't been applied yet — training attendance can't be tracked until it is. Ask the developer.</p>
+      </div>`;
+    return;
+  }
+
+  // Fetch existing attendance for this session + history of past sessions.
+  let attendance = [];
+  let pastSessions = [];
+  if (session?.id) {
+    const { data: att } = await supabase
+      .from('training_attendance')
+      .select('player_id,intent,attended,note,responded_by,updated_at')
+      .eq('session_id', session.id);
+    attendance = att || [];
+  }
+  {
+    const { data: past } = await supabase
+      .from('training_sessions')
+      .select('id,scheduled_date,scheduled_start,scheduled_end,location,status,notes')
+      .eq('team_id', team.id)
+      .lt('scheduled_date', dateStr)
+      .order('scheduled_date', { ascending: false })
+      .limit(12);
+    pastSessions = past || [];
+  }
+
+  const effectiveSlot = {
+    day: next.slot.day,
+    start: session?.scheduled_start || next.slot.start,
+    end:   session?.scheduled_end   || next.slot.end,
+    location: session?.location ?? next.slot.location ?? team.home_ground_name ?? ''
+  };
+  const cancelled = session?.status === 'cancelled';
+  const moved = !cancelled && session && (session.scheduled_start !== next.slot.start || session.scheduled_end !== next.slot.end || (session.location ?? '') !== (next.slot.location ?? ''));
+
+  const byPlayer = Object.fromEntries(attendance.map(a => [a.player_id, a]));
+  const sortedPlayers = [...players].sort((a, b) => {
+    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
+    if (na !== nb) return na - nb;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  const chipPhoto = (p) => p.photo_url
+    ? `<div style="width:30px;height:30px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
+    : `<div style="width:30px;height:30px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;font-size:0.75rem;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
+
+  const rowHtml = (p) => {
+    const a = byPlayer[p.id];
+    const intent = a?.intent;
+    const intentPill = intent === 'available' ? `<span class="pill" style="background:#d4edda;color:#155724">✅ Available</span>`
+      : intent === 'maybe' ? `<span class="pill" style="background:#fff3cd;color:#856404">🤔 Maybe</span>`
+      : intent === 'unavailable' ? `<span class="pill" style="background:#f8d7da;color:#721c24">❌ Unavailable</span>`
+      : `<span class="muted" style="font-size:0.75rem">No response</span>`;
+    const responder = a?.responded_by ? `<span class="muted" style="font-size:0.7rem">· ${escapeHtml(a.responded_by)}</span>` : '';
+    const note = a?.note ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">${escapeHtml(a.note)}</div>` : '';
+    const att = a?.attended;
+    const attendedBtn = `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="true" style="padding:0.25rem 0.55rem;font-size:0.72rem;background:${att === true ? '#2a7' : '#fff'};color:${att === true ? '#fff' : '#333'};border:1px solid ${att === true ? '#2a7' : '#ccc'}">✓ Attended</button>`;
+    const noShowBtn = `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="false" style="padding:0.25rem 0.55rem;font-size:0.72rem;background:${att === false ? '#c33' : '#fff'};color:${att === false ? '#fff' : '#333'};border:1px solid ${att === false ? '#c33' : '#ccc'}">✕ No show</button>`;
+    const clearBtn = (att === true || att === false) ? `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="null" style="padding:0.25rem 0.55rem;font-size:0.72rem">Clear</button>` : '';
+    return `
+      <div class="tt-row" data-tt-row="${p.id}" style="display:flex;gap:0.6rem;align-items:center;padding:0.45rem 0;border-top:1px solid #eee">
+        ${chipPhoto(p)}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:0.88rem">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
+          <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap">${intentPill}${responder}</div>
+          ${note}
+        </div>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;justify-content:flex-end">${attendedBtn}${noShowBtn}${clearBtn}</div>
+      </div>`;
+  };
+
+  const counts = {
+    available: attendance.filter(a => a.intent === 'available').length,
+    maybe: attendance.filter(a => a.intent === 'maybe').length,
+    unavailable: attendance.filter(a => a.intent === 'unavailable').length,
+    attended: attendance.filter(a => a.attended === true).length,
+    noshow: attendance.filter(a => a.attended === false).length,
+  };
+
+  const base = location.origin + location.pathname;
+  const trainingUrl = `${base}#/train/${team.id}`;
+
+  const overrideControlsHtml = canEdit && !cancelled ? `
+    <details style="margin-top:0.5rem">
+      <summary style="cursor:pointer;font-size:0.82rem;color:#356">⚙ Override this session (cancel / move)</summary>
+      <div style="padding:0.5rem;border:1px solid #eee;border-radius:4px;margin-top:0.35rem">
+        <label style="font-size:0.72rem">Start</label>
+        <input type="time" id="tt-ov-start" value="${fmtTimeHHMM(effectiveSlot.start)}" style="width:100%;margin-bottom:0.3rem" />
+        <label style="font-size:0.72rem">End</label>
+        <input type="time" id="tt-ov-end" value="${fmtTimeHHMM(effectiveSlot.end)}" style="width:100%;margin-bottom:0.3rem" />
+        <label style="font-size:0.72rem">Location</label>
+        <input type="text" id="tt-ov-loc" value="${escapeHtml(effectiveSlot.location || '')}" placeholder="e.g. Indoor hall (weather)" style="width:100%;margin-bottom:0.3rem" />
+        <label style="font-size:0.72rem">Note (shown to parents)</label>
+        <input type="text" id="tt-ov-note" value="${escapeHtml(session?.notes || '')}" placeholder="Optional" style="width:100%;margin-bottom:0.4rem" />
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+          <button class="primary" id="tt-ov-save" type="button">💾 Save changes</button>
+          <button class="btn-secondary" id="tt-ov-cancel-session" type="button" style="color:#c33">🚫 Cancel this session</button>
+          ${moved ? `<button class="btn-secondary" id="tt-ov-reset" type="button">↺ Back to recurring</button>` : ''}
+        </div>
+        <div id="tt-ov-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.35rem"></div>
+      </div>
+    </details>` : '';
+
+  const cancelledHtml = cancelled && canEdit ? `
+    <div style="padding:0.6rem;border:1px solid #f8d7da;background:#fef1f2;border-radius:4px;margin-top:0.5rem">
+      <p style="margin:0 0 0.4rem;color:#721c24"><strong>This session is cancelled.</strong>${session?.notes ? ' ' + escapeHtml(session.notes) : ''}</p>
+      <button class="btn-secondary" id="tt-uncancel" type="button">↺ Un-cancel this session</button>
+    </div>` : '';
+
+  const pastRows = pastSessions.map(s => {
+    const d = new Date(s.scheduled_date + 'T00:00:00');
+    const label = `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })}`;
+    const statusChip = s.status === 'cancelled' ? `<span class="pill" style="background:#f8d7da;color:#721c24">Cancelled</span>` : '';
+    return `
+      <button type="button" class="tt-past-row" data-session="${s.id}" style="display:flex;width:100%;gap:0.5rem;align-items:center;padding:0.45rem 0.2rem;border:none;border-top:1px solid #eee;background:transparent;text-align:left;cursor:pointer">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:0.85rem">${label}</div>
+          <div class="muted" style="font-size:0.72rem">${fmtTimeHHMM(s.scheduled_start)}–${fmtTimeHHMM(s.scheduled_end)}${s.location ? ' · ' + escapeHtml(s.location) : ''}</div>
+        </div>
+        ${statusChip}
+        <span style="color:#888;font-size:0.8rem">›</span>
+      </button>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="card">
+      <h3 style="margin-top:0;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+        Next training
+        ${cancelled ? `<span class="pill" style="background:#f8d7da;color:#721c24">Cancelled</span>` : ''}
+        ${moved ? `<span class="pill" style="background:#fff3cd;color:#856404">Overridden</span>` : ''}
+      </h3>
+      <p class="muted" style="margin:0">${fmtTrainingHeader(next.date, effectiveSlot)}</p>
+      ${effectiveSlot.location ? `<p class="muted" style="margin:0.25rem 0 0">📍 ${escapeHtml(effectiveSlot.location)}</p>` : ''}
+      <p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Parent link: <a href="${trainingUrl}" target="_blank" rel="noopener">${trainingUrl}</a></p>
+      ${cancelledHtml}
+      ${overrideControlsHtml}
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.6rem;font-size:0.78rem">
+        <span>✅ ${counts.available} available</span>
+        <span>🤔 ${counts.maybe} maybe</span>
+        <span>❌ ${counts.unavailable} unavailable</span>
+        <span style="margin-left:auto">Attended: ${counts.attended} · No-show: ${counts.noshow}</span>
+      </div>
+      <div id="tt-list" style="margin-top:0.5rem">${sortedPlayers.map(rowHtml).join('')}</div>
+      <div id="tt-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
+    </div>
+    ${pastSessions.length ? `
+      <div class="card">
+        <h3 style="margin-top:0">Recent sessions</h3>
+        <div>${pastRows}</div>
+      </div>` : ''}
+  `;
+
+  // --- Wire attendance toggles ---
+  const msgEl = document.getElementById('tt-msg');
+  const flash = (txt, cls = 'muted') => {
+    if (!msgEl) return;
+    msgEl.textContent = txt; msgEl.className = cls;
+    setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2200);
+  };
+
+  root.querySelectorAll('.tt-att-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (!session?.id) return;
+      const pid = btn.dataset.player;
+      const val = btn.dataset.val;
+      const attended = val === 'true' ? true : (val === 'false' ? false : null);
+      const existing = byPlayer[pid];
+      // Upsert: need a row with (session_id, player_id). Keep intent if present.
+      const row = {
+        session_id: session.id,
+        player_id: pid,
+        attended,
+        intent: existing?.intent || null,
+        note: existing?.note || null,
+        responded_by: existing?.responded_by || null,
+      };
+      const { error } = await supabase.from('training_attendance')
+        .upsert(row, { onConflict: 'session_id,player_id' });
+      if (error) { flash('Save failed: ' + error.message, 'error'); return; }
+      byPlayer[pid] = { ...row };
+      flash('✓ Saved', 'ok');
+      renderTrainingTracker(team, canEdit, players);
+    };
+  });
+
+  // --- Wire override controls ---
+  const ovSave = document.getElementById('tt-ov-save');
+  const ovCancel = document.getElementById('tt-ov-cancel-session');
+  const ovReset = document.getElementById('tt-ov-reset');
+  const ovMsg = document.getElementById('tt-ov-msg');
+  const saveOverride = async (patch) => {
+    if (!session?.id) return;
+    const { error } = await supabase.from('training_sessions')
+      .update(patch).eq('id', session.id);
+    if (error) {
+      if (ovMsg) { ovMsg.textContent = 'Save failed: ' + error.message; ovMsg.className = 'error'; }
+      return false;
+    }
+    return true;
+  };
+  if (ovSave) ovSave.onclick = async () => {
+    const start = document.getElementById('tt-ov-start').value;
+    const end = document.getElementById('tt-ov-end').value;
+    const loc = document.getElementById('tt-ov-loc').value.trim();
+    const note = document.getElementById('tt-ov-note').value.trim();
+    if (!start || !end || start >= end) {
+      ovMsg.textContent = 'End time must be after start.'; ovMsg.className = 'error'; return;
+    }
+    // "moved" if it differs from the recurring template, else "scheduled" (reset).
+    const tpl = next.slot;
+    const differs = (start !== tpl.start) || (end !== tpl.end) || (loc !== (tpl.location || ''));
+    const ok = await saveOverride({
+      scheduled_start: start,
+      scheduled_end: end,
+      location: loc || null,
+      status: differs ? 'moved' : 'scheduled',
+      notes: note || null
+    });
+    if (ok) renderTrainingTracker(team, canEdit, players);
+  };
+  if (ovCancel) ovCancel.onclick = async () => {
+    if (!confirm('Cancel this training session? Parents viewing the training link will see a cancellation notice.')) return;
+    const note = document.getElementById('tt-ov-note')?.value.trim() || null;
+    const ok = await saveOverride({ status: 'cancelled', notes: note });
+    if (ok) renderTrainingTracker(team, canEdit, players);
+  };
+  if (ovReset) ovReset.onclick = async () => {
+    const ok = await saveOverride({
+      scheduled_start: next.slot.start,
+      scheduled_end: next.slot.end,
+      location: next.slot.location || null,
+      status: 'scheduled',
+      notes: null
+    });
+    if (ok) renderTrainingTracker(team, canEdit, players);
+  };
+  const uncancelBtn = document.getElementById('tt-uncancel');
+  if (uncancelBtn) uncancelBtn.onclick = async () => {
+    const ok = await saveOverride({ status: 'scheduled', notes: null });
+    if (ok) renderTrainingTracker(team, canEdit, players);
+  };
+
+  // --- Past session drill-down ---
+  root.querySelectorAll('.tt-past-row').forEach(btn => {
+    btn.onclick = () => openPastTrainingModal(btn.dataset.session, team, players);
+  });
+}
+
+// Modal showing attendance for a past training session (read + edit attended flag).
+async function openPastTrainingModal(sessionId, team, players) {
+  const { data: s } = await supabase
+    .from('training_sessions')
+    .select('id,scheduled_date,scheduled_start,scheduled_end,location,status,notes')
+    .eq('id', sessionId).maybeSingle();
+  if (!s) return;
+  const { data: att } = await supabase
+    .from('training_attendance')
+    .select('player_id,intent,attended,note,responded_by')
+    .eq('session_id', sessionId);
+  const byPlayer = Object.fromEntries((att || []).map(a => [a.player_id, a]));
+  const sortedPlayers = [...players].sort((a, b) => {
+    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
+    if (na !== nb) return na - nb;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  const d = new Date(s.scheduled_date + 'T00:00:00');
+  const header = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'long' })} · ${fmtTimeHHMM(s.scheduled_start)}–${fmtTimeHHMM(s.scheduled_end)}`;
+
+  const rowHtml = (p) => {
+    const a = byPlayer[p.id];
+    const intent = a?.intent ? `<span class="muted" style="font-size:0.72rem">Intent: ${a.intent}</span>` : `<span class="muted" style="font-size:0.72rem">No response</span>`;
+    const att = a?.attended;
+    return `
+      <div style="display:flex;gap:0.5rem;align-items:center;padding:0.4rem 0;border-top:1px solid #eee">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:0.85rem">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
+          ${intent}
+        </div>
+        <div style="display:flex;gap:0.3rem">
+          <button type="button" class="btn-secondary pt-att" data-player="${p.id}" data-val="true" style="padding:0.2rem 0.45rem;font-size:0.7rem;background:${att === true ? '#2a7' : '#fff'};color:${att === true ? '#fff' : '#333'}">✓</button>
+          <button type="button" class="btn-secondary pt-att" data-player="${p.id}" data-val="false" style="padding:0.2rem 0.45rem;font-size:0.7rem;background:${att === false ? '#c33' : '#fff'};color:${att === false ? '#fff' : '#333'}">✕</button>
+        </div>
+      </div>`;
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'map-modal-overlay';
+  overlay.innerHTML = `
+    <div class="map-modal" style="max-width:520px;width:94vw;max-height:90vh;overflow:auto">
+      <div class="map-modal-header">
+        <strong>${header}</strong>
+        <button class="btn-secondary" id="pt-close" type="button">✕</button>
+      </div>
+      <div class="map-modal-body" style="padding:0.8rem">
+        ${s.location ? `<p class="muted" style="margin:0 0 0.3rem">📍 ${escapeHtml(s.location)}</p>` : ''}
+        ${s.status === 'cancelled' ? `<p class="error">Cancelled${s.notes ? ' — ' + escapeHtml(s.notes) : ''}</p>` : ''}
+        <div id="pt-msg" class="muted" style="font-size:0.72rem;min-height:1em"></div>
+        <div>${sortedPlayers.map(rowHtml).join('')}</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#pt-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  const msgEl = overlay.querySelector('#pt-msg');
+  overlay.querySelectorAll('.pt-att').forEach(btn => {
+    btn.onclick = async () => {
+      const pid = btn.dataset.player;
+      const val = btn.dataset.val;
+      const attended = val === 'true';
+      const existing = byPlayer[pid];
+      const row = {
+        session_id: s.id,
+        player_id: pid,
+        attended: existing?.attended === attended ? null : attended,
+        intent: existing?.intent || null,
+        note: existing?.note || null,
+        responded_by: existing?.responded_by || null,
+      };
+      const { error } = await supabase.from('training_attendance')
+        .upsert(row, { onConflict: 'session_id,player_id' });
+      if (error) { msgEl.textContent = 'Save failed: ' + error.message; msgEl.className = 'error'; return; }
+      byPlayer[pid] = { ...row };
+      msgEl.textContent = '✓ Saved'; msgEl.className = 'ok';
+      // Update button styles in place
+      overlay.querySelectorAll(`.pt-att[data-player="${pid}"]`).forEach(b => {
+        const isTrue = b.dataset.val === 'true';
+        const isCurrent = row.attended === true && isTrue || row.attended === false && !isTrue;
+        b.style.background = isCurrent ? (isTrue ? '#2a7' : '#c33') : '#fff';
+        b.style.color = isCurrent ? '#fff' : '#333';
+      });
+    };
   });
 }
 
@@ -5578,6 +6477,11 @@ async function buildWhatsAppMessage(current, team) {
   const base = location.origin + location.pathname;
   const availUrl = `${base}#/avail/${current.id}`;
   const matchUrl = `${base}#/view/${current.id}`;
+  // Training link is appended only when the team has a recurring schedule set
+  // (Slice 8). The URL is permanent per team — rolls forward automatically —
+  // so pinning this message in WhatsApp covers both match + training.
+  const hasTrainingSchedule = parseTrainingSchedule(team).length > 0;
+  const trainingUrl = hasTrainingSchedule && team?.id ? `${base}#/train/${team.id}` : '';
 
   // Look up coach + admin names from profiles
   let coachNames = [];
@@ -5619,13 +6523,18 @@ async function buildWhatsAppMessage(current, team) {
     `Venue: ${venueLine}`,
     mapsUrl ? `Map: ${mapsUrl}` : null,
     '',
-    'Two links — let us know if your child can make it, and the other is the general match info:',
+    trainingUrl
+      ? 'Links — availability, match info, and training attendance:'
+      : 'Two links — let us know if your child can make it, and the other is the general match info:',
     '',
     'Availability:',
     availUrl,
     '',
     'Match info:',
     matchUrl,
+    trainingUrl ? '' : null,
+    trainingUrl ? 'Training (rolling link — always shows the next session):' : null,
+    trainingUrl || null,
     '',
     `The Availability link asks for your child's parent code the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
     '',
@@ -7354,13 +8263,6 @@ function applyAvailabilityDecorations() {
     dot.style.cssText = `position:absolute;bottom:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:${colour};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:3;pointer-events:none`;
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     chip.appendChild(dot);
-    // If a focus marker was already rendered before the avail dot arrived,
-    // tag it so the CSS fallback stacks it above the dot (matches the :has()
-    // rule for browsers that support it). Idempotent — the class may already
-    // be set if applyMatchDecorations ran after applyAvailabilityDecorations.
-    chip.querySelectorAll('.chip-focus-marker').forEach(m => {
-      m.classList.add('stacked-above-avail');
-    });
   });
 }
 
@@ -7506,12 +8408,13 @@ function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
         if (n <= 0) return;
         if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
         const mark = document.createElement('div');
-        // Stack above the avail dot when it's already present on this chip —
-        // :has() handles this in modern browsers, this class is a fallback.
-        const hasAvailDot = !!chip.querySelector('.avail-dot');
+        // Focus pill sits bottom-left; stack it above the match-badge row if
+        // badges were already drawn on this chip. :has() handles this in
+        // modern browsers, the class is a fallback for older ones.
+        const hasBadges = !!chip.querySelector('.chip-badges');
         mark.className = 'chip-focus-marker'
           + (primaryByPlayer[pid] ? ' has-primary' : '')
-          + (hasAvailDot ? ' stacked-above-avail' : '');
+          + (hasBadges ? ' stacked-above-badges' : '');
         const primary = primaryByPlayer[pid];
         const primaryLabel = primary
           ? (primary.cue_slug ? cueLabel(primary.cue_slug) : (primary.custom_note || '').split('\n')[0].slice(0, 40))
