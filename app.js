@@ -4233,18 +4233,59 @@ function renderSquadTab(team, canEdit, players) {
         <input type="text" data-ts-loc value="${escapeHtml(slot.location || '')}" placeholder="e.g. Main pitch" style="width:100%" />
       </div>
     </div>`;
+  // Summary block — shows what's currently saved, so the card doesn't look
+  // identical before and after save. Sorted by day-of-week.
+  const sortedSavedSlots = [...trainingSlots].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
+  const savedSummaryHtml = sortedSavedSlots.length
+    ? `
+      <div style="background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem">
+        <div style="font-size:0.72rem;font-weight:600;color:#556;margin-bottom:0.3rem">Currently saved</div>
+        <ul style="margin:0;padding-left:1.1rem;font-size:0.85rem">
+          ${sortedSavedSlots.map(s => `
+            <li><strong>${DAY_NAMES[s.day]}</strong> · ${fmtTimeHHMM(s.start)}–${fmtTimeHHMM(s.end)}${s.location ? ' · ' + escapeHtml(s.location) : ''}</li>
+          `).join('')}
+        </ul>
+      </div>`
+    : `
+      <div class="muted" style="font-size:0.75rem;margin-bottom:0.5rem">No sessions saved yet.</div>`;
+
+  // Shareable parent link — shown only once a schedule is saved, since the
+  // link is useless without one (the public page just says "no schedule yet").
+  const base = location.origin + location.pathname;
+  const trainingUrl = `${base}#/train/${team.id}`;
+  const trainingLinkHtml = sortedSavedSlots.length ? `
+    <div style="margin-top:0.6rem;padding:0.6rem 0.7rem;background:#fff;border:1px dashed #aac;border-radius:6px">
+      <div style="font-size:0.72rem;font-weight:600;color:#556;margin-bottom:0.3rem">Parent training link</div>
+      <p class="muted" style="font-size:0.72rem;margin:0 0 0.3rem">Permanent — always shows the next upcoming session. Share once, pin it, never think about it again.</p>
+      <div style="display:flex;gap:0.35rem;align-items:stretch">
+        <input type="text" readonly id="ts-link-url" value="${escapeHtml(trainingUrl)}"
+          style="flex:1;padding:0.4rem 0.5rem;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.8rem;border:1px solid #ccc;border-radius:4px;background:#fafafa" />
+        <button type="button" class="btn-secondary" id="ts-link-copy" style="padding:0.4rem 0.6rem;font-size:0.78rem">📋 Copy</button>
+        <a href="${escapeHtml(trainingUrl)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:0.4rem 0.6rem;font-size:0.78rem;text-decoration:none">↗ Open</a>
+      </div>
+      <button type="button" class="btn-secondary" id="ts-link-whatsapp" style="margin-top:0.35rem;padding:0.4rem 0.6rem;font-size:0.78rem">💬 Share on WhatsApp</button>
+      <div id="ts-link-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
+    </div>` : '';
+
   const trainingScheduleCard = canEdit ? `
     <div class="card">
       <h3 style="margin-top:0">Training schedule</h3>
       <p class="muted" style="font-size:0.72rem;margin:0 0 0.5rem">
         Recurring weekly sessions. Add one row per training night — the parent training link and coach attendance tracker use this to generate each week's session automatically.
       </p>
-      <div id="ts-rows">
-        ${trainingSlots.length ? trainingSlots.map(trainingRowHtml).join('') : ''}
-      </div>
-      <button type="button" class="btn-secondary" id="ts-add" style="margin-top:0.2rem">+ Add session</button>
-      <div id="ts-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.4rem"></div>
-      <button class="primary" id="ts-save" style="margin-top:0.3rem">Save training schedule</button>
+      ${savedSummaryHtml}
+      ${trainingLinkHtml}
+      <details style="margin-top:0.6rem">
+        <summary style="cursor:pointer;font-size:0.82rem;color:#356">${sortedSavedSlots.length ? '✎ Edit schedule' : '+ Set up schedule'}</summary>
+        <div style="padding-top:0.5rem">
+          <div id="ts-rows">
+            ${trainingSlots.length ? trainingSlots.map(trainingRowHtml).join('') : ''}
+          </div>
+          <button type="button" class="btn-secondary" id="ts-add" style="margin-top:0.2rem">+ Add session</button>
+          <div id="ts-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.4rem"></div>
+          <button class="primary" id="ts-save" style="margin-top:0.3rem">Save training schedule</button>
+        </div>
+      </details>
     </div>
   ` : '';
 
@@ -4622,6 +4663,34 @@ function renderSquadTab(team, canEdit, players) {
       Object.assign(team, data);
       tsMsg.textContent = '✓ Saved'; tsMsg.className = 'ok';
       setTimeout(() => renderSquadTab(team, canEdit, players), 700);
+    };
+
+    // Parent training link — copy + WhatsApp share handlers.
+    const tsLinkCopy = document.getElementById('ts-link-copy');
+    const tsLinkWA = document.getElementById('ts-link-whatsapp');
+    const tsLinkUrl = document.getElementById('ts-link-url');
+    const tsLinkMsg = document.getElementById('ts-link-msg');
+    const flashLink = (txt, cls = 'ok') => {
+      if (!tsLinkMsg) return;
+      tsLinkMsg.textContent = txt; tsLinkMsg.className = cls;
+      setTimeout(() => { if (tsLinkMsg.textContent === txt) { tsLinkMsg.textContent = ''; tsLinkMsg.className = 'muted'; } }, 2000);
+    };
+    if (tsLinkCopy && tsLinkUrl) tsLinkCopy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(tsLinkUrl.value);
+        flashLink('✓ Copied to clipboard');
+      } catch {
+        // Fallback for browsers without the async clipboard API
+        tsLinkUrl.select(); tsLinkUrl.setSelectionRange(0, 99999);
+        try { document.execCommand('copy'); flashLink('✓ Copied'); }
+        catch { flashLink('Copy failed — select the URL manually.', 'error'); }
+      }
+    };
+    if (tsLinkWA && tsLinkUrl) tsLinkWA.onclick = () => {
+      const teamName = team.name || 'the team';
+      const msg = `${teamName} — training attendance link (always shows the next session):\n\n${tsLinkUrl.value}\n\nEnter your child's parent code on first use.`;
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, '_blank', 'noopener');
     };
   }
 
