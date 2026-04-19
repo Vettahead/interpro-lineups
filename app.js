@@ -2569,6 +2569,7 @@ async function renderParentView(lineupId, opts = {}) {
           <div class="subs-row" id="fix-subs-row"></div>
         </div>
       </div>
+      ${chipLegendHtml()}
     </div>` : ''}
   `;
 
@@ -7353,6 +7354,13 @@ function applyAvailabilityDecorations() {
     dot.style.cssText = `position:absolute;bottom:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:${colour};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:3;pointer-events:none`;
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     chip.appendChild(dot);
+    // If a focus marker was already rendered before the avail dot arrived,
+    // tag it so the CSS fallback stacks it above the dot (matches the :has()
+    // rule for browsers that support it). Idempotent — the class may already
+    // be set if applyMatchDecorations ran after applyAvailabilityDecorations.
+    chip.querySelectorAll('.chip-focus-marker').forEach(m => {
+      m.classList.add('stacked-above-avail');
+    });
   });
 }
 
@@ -7498,7 +7506,12 @@ function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
         if (n <= 0) return;
         if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
         const mark = document.createElement('div');
-        mark.className = 'chip-focus-marker' + (primaryByPlayer[pid] ? ' has-primary' : '');
+        // Stack above the avail dot when it's already present on this chip —
+        // :has() handles this in modern browsers, this class is a fallback.
+        const hasAvailDot = !!chip.querySelector('.avail-dot');
+        mark.className = 'chip-focus-marker'
+          + (primaryByPlayer[pid] ? ' has-primary' : '')
+          + (hasAvailDot ? ' stacked-above-avail' : '');
         const primary = primaryByPlayer[pid];
         const primaryLabel = primary
           ? (primary.cue_slug ? cueLabel(primary.cue_slug) : (primary.custom_note || '').split('\n')[0].slice(0, 40))
@@ -8768,6 +8781,29 @@ function pitchSvgHtml() {
 // Inner SVG markup (pitch lines) — placed inside the outer <svg> in render
 // SVG uses viewBox "0 0 70 100" so it matches the container's 7:10 aspect ratio.
 // With matching aspects the SVG renders 1:1 — circles stay round, lines stay square.
+// Small click-to-expand legend describing every pill / marker that can appear
+// on a pitch chip — coach and parent views share the same chip renderer, so
+// one legend covers both. Rendered with native <details>/<summary> so no JS
+// listeners are needed; the popover closes when the user clicks anywhere
+// outside (handled by a one-liner in the pitch card render paths).
+function chipLegendHtml() {
+  return `
+    <details class="chip-legend">
+      <summary class="chip-legend-trigger" aria-label="Show chip marker key">
+        <span class="chip-legend-icon">ⓘ</span> What do the chip markers mean?
+      </summary>
+      <div class="chip-legend-popover" role="dialog" aria-label="Chip marker key">
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-focus">🎯 1</span><span class="chip-legend-text"><strong>Coach's Focus</strong> — cues set for the match. Gold tint means the <em>primary</em> cue is locked in.</span></div>
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-avail"></span><span class="chip-legend-text"><strong>Availability dot</strong> — green = available, amber = maybe, red = unavailable. Only visible in Availability / Published mode.</span></div>
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-motm">★</span><span class="chip-legend-text"><strong>Man of the Match</strong> — awarded post-match in the result wizard.</span></div>
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-goal">2</span><span class="chip-legend-text"><strong>Goal count</strong> — how many goals that player scored in this match.</span></div>
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-badges">🏅⚡</span><span class="chip-legend-text"><strong>Badge row</strong> — badges earned in this specific match. Hover for names + coach notes.</span></div>
+        <div class="chip-legend-row"><span class="chip-legend-sample cls-ring"></span><span class="chip-legend-text"><strong>Gold ring</strong> (parent view) — highlights your child's chip after you unlock with their access code.</span></div>
+      </div>
+    </details>
+  `;
+}
+
 function pitchSvgInner() {
   return `
       <!-- perimeter -->
@@ -11326,6 +11362,7 @@ function renderFixturesTab() {
             <div class="subs-row" id="fix-subs-row"></div>
           </div>
         </div>
+        ${chipLegendHtml()}
       ` : ''}
     </div>
   `;

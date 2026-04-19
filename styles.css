@@ -4064,10 +4064,13 @@ body.mw-open { overflow: hidden; }
 
 /* ---------- Pitch-chip Coach's Focus marker ---------- */
 /* Bottom-right 🎯 pill that shows how many cues are set for the player on the
-   current lineup. Bottom-right is free — MOTM star sits top-left, goals
-   top-right, badge row bottom-left. Gets a slight gold tint when the primary
-   cue is set so the coach can see at a glance which players have "the one
-   thing" locked in. */
+   current lineup. MOTM star sits top-left, goals top-right, badge row
+   bottom-left. Gets a slight gold tint when the primary cue is set so the
+   coach can see at a glance which players have "the one thing" locked in.
+   When the availability dot is also present (coach side, in availability /
+   published mode) it sits in the same bottom-right corner, so we stack the
+   focus pill ABOVE the dot via the :has() rule below. The .stacked-above-avail
+   class is applied as a JS fallback for browsers without :has() support. */
 .chip-focus-marker {
   position: absolute;
   bottom: -5px;
@@ -4096,6 +4099,130 @@ body.mw-open { overflow: hidden; }
 }
 .chip-focus-icon { font-size: 10px; line-height: 1; }
 .chip-focus-count { font-weight: 800; }
+/* Stack focus pill above availability dot when both are on the same chip. */
+.chip:has(.avail-dot) .chip-focus-marker,
+.chip-focus-marker.stacked-above-avail {
+  bottom: 18px;
+}
+
+/* ---------- Chip-marker key (under pitch card) ---------- */
+/* Native <details> popover that explains every chip pill / marker. Rendered
+   under the pitch card on both coach Lineup view and parent match view. The
+   trigger is small + greyed so it doesn't shout; the popover itself is a
+   light card with one row per marker (sample + plain-English meaning). */
+.chip-legend {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+}
+.chip-legend-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  list-style: none;
+  color: #4c5564;
+  padding: 0.25rem 0.45rem;
+  border-radius: 6px;
+  border: 1px dashed #c8ced8;
+  background: #f6f8fb;
+  user-select: none;
+}
+.chip-legend-trigger::-webkit-details-marker { display: none; }
+.chip-legend-trigger:hover { background: #eef2f7; color: #2c3340; }
+.chip-legend-icon { font-weight: 700; font-size: 0.85rem; color: #6a5acd; }
+.chip-legend[open] .chip-legend-trigger { background: #eef2f7; }
+.chip-legend-popover {
+  margin-top: 0.45rem;
+  padding: 0.6rem 0.7rem;
+  background: #fff;
+  border: 1px solid #d6dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  display: grid;
+  gap: 0.45rem;
+  max-width: 540px;
+}
+.chip-legend-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 0.55rem;
+  align-items: center;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: #2c3340;
+}
+.chip-legend-row strong { color: #1a1f29; font-weight: 700; }
+.chip-legend-row em { font-style: normal; color: #6a5acd; font-weight: 600; }
+.chip-legend-sample {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  background: #fff;
+  border: 1px solid #d6dbe3;
+  color: #333;
+}
+.chip-legend-sample.cls-focus {
+  border-color: #d4a017;
+  background: #fff8e1;
+  color: #6b4a00;
+}
+.chip-legend-sample.cls-avail {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 1px #d6dbe3;
+}
+.chip-legend-sample.cls-motm {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: #ffc107;
+  color: #3a2a00;
+  font-size: 1rem;
+  font-weight: 900;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #d6dbe3;
+}
+.chip-legend-sample.cls-goal {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: #fff;
+  color: #000;
+  font-size: 0.85rem;
+  font-weight: 900;
+  border: 2.5px solid #111;
+}
+.chip-legend-sample.cls-badges {
+  background: transparent;
+  border: none;
+  font-size: 0.95rem;
+  letter-spacing: -0.05em;
+}
+.chip-legend-sample.cls-ring {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid #f4c430;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
 
 /* ---------- Parent Your-Squad card focus block ---------- */
 /* Renders per-child parent-visible cues underneath each entry in the yellow
