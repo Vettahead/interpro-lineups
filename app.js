@@ -3387,8 +3387,47 @@ async function openAvailabilityModal(lineupId) {
 }
 
 // ---------- Team dashboard ----------
-// Default to Matches (the lineups tab) when opening a team — coach's most-used view.
-let activeTab = 'lineups';
+// Landing-tab preference. Primary source = team_members.landing_tab (per-user-per-team,
+// synced across devices). Secondary = localStorage (cache + fallback when the DB
+// column isn't yet migrated or the write fails). The coach picks which main tab
+// opens by default when entering a team — Matches / Squad / Tactics.
+const LANDING_TAB_OPTIONS = ['lineups', 'squad', 'plays'];
+const LANDING_TAB_DEFAULT = 'lineups';
+// Stashed from the most recent team_members fetch so renderSquadTab's picker can
+// render the right current value and the onchange handler knows what to update.
+let _currentMemberLanding = null;
+// Tripwire: when teamId differs from last-loaded, we re-apply the landing pref;
+// otherwise we respect any tab the user has navigated to within the session.
+let _lastLoadedTeamForLanding = null;
+function getLocalLandingFallback() {
+  try {
+    const v = localStorage.getItem('prefs_landing_tab');
+    if (v && LANDING_TAB_OPTIONS.includes(v)) return v;
+  } catch (_) {}
+  return null;
+}
+function cacheLocalLanding(tab) {
+  try {
+    if (!LANDING_TAB_OPTIONS.includes(tab)) return false;
+    localStorage.setItem('prefs_landing_tab', tab);
+    return true;
+  } catch (_) { return false; }
+}
+// Persist the coach's pick to team_members.landing_tab. Returns { ok, migrationMissing, error }.
+async function savePreferredLandingTabDb(teamId, userId, tab) {
+  if (!LANDING_TAB_OPTIONS.includes(tab) || !teamId || !userId) return { ok: false };
+  const r = await supabase
+    .from('team_members')
+    .update({ landing_tab: tab })
+    .eq('team_id', teamId)
+    .eq('user_id', userId);
+  if (r.error) {
+    const migrationMissing = /landing_tab/i.test(r.error.message || '');
+    return { ok: false, migrationMissing, error: r.error };
+  }
+  return { ok: true };
+}
+let activeTab = getLocalLandingFallback() || LANDING_TAB_DEFAULT;
 let _pendingLineupLoad = null; // play payload to apply next time the Lineups tab renders
 let _pendingLineupIdToOpen = null; // wizard-saved lineup id; Lineups tab should load it fully
 let currentFilter = 'All';
@@ -3471,7 +3510,15 @@ async function renderTeamDashboard(user, teamId) {
 
   const [teamRes, memberRes, playersRes, lineupsRes, playsRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', teamId).single(),
-    supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', user.id).maybeSingle(),
+    // role + landing_tab. If landing_tab column is missing (migration pending),
+    // the query falls back to just role via the catch below.
+    supabase.from('team_members').select('role, landing_tab').eq('team_id', teamId).eq('user_id', user.id).maybeSingle()
+      .then(r => {
+        if (r.error && /landing_tab/i.test(r.error.message || '')) {
+          return supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', user.id).maybeSingle();
+        }
+        return r;
+      }),
     supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }),
     supabase.from('plays').select('*').eq('team_id', teamId).order('created_at', { ascending: false }),
@@ -3490,6 +3537,20 @@ async function renderTeamDashboard(user, teamId) {
   const team = teamRes.data;
   const role = memberRes.data?.role || 'viewer';
   const canEdit = role === 'admin' || role === 'coach';
+
+  // Landing-tab pref: apply on fresh team entry only, so that once the coach is
+  // inside the team they can freely navigate between tabs without being snapped
+  // back to the landing tab on every re-render.
+  const memberLanding = memberRes.data?.landing_tab || null;
+  _currentMemberLanding = memberLanding;
+  if (_lastLoadedTeamForLanding !== teamId) {
+    const chosen = (memberLanding && LANDING_TAB_OPTIONS.includes(memberLanding))
+      ? memberLanding
+      : (getLocalLandingFallback() || LANDING_TAB_DEFAULT);
+    activeTab = chosen;
+    if (memberLanding) cacheLocalLanding(memberLanding);
+    _lastLoadedTeamForLanding = teamId;
+  }
   const players = playersRes.data || [];
   // Backfill any players missing an access_code (one-shot per session).
   if (canEdit) { try { await ensureAccessCodes(players); } catch (e) { console.warn('ensureAccessCodes failed', e); } }
@@ -3661,7 +3722,10 @@ async function renderTeamDashboard(user, teamId) {
           motm: Array.isArray(chosen.data?.motm) ? chosen.data.motm.map(m => ({ ...m })) : []
         };
         _lastSavedHash = _lineupContentHash(current);
-        _lineupPhoneTab = 'squad';
+        // Land on the Matches sub-tab (fixture list) so the coach sees all matches
+        // first. The nearest match is still auto-selected (highlighted in the list);
+        // tapping it jumps straight to the Squad picker via the existing card click handler.
+        _lineupPhoneTab = 'matches';
       } else {
         current = base;
         // Nothing eligible (no upcoming, no past within 24h) → show the card list.
@@ -4208,6 +4272,26 @@ function renderSquadTab(team, canEdit, players) {
     </div>
   ` : '';
 
+  // Landing-page picker — controls which top-level tab opens by default when you
+  // tap this team from the home screen. Stored per-user-per-team in
+  // team_members.landing_tab (syncs across devices). localStorage acts as a
+  // fallback when the DB write fails or the column isn't migrated yet.
+  const _currentLanding = _currentMemberLanding || getLocalLandingFallback() || LANDING_TAB_DEFAULT;
+  const landingPrefCard = `
+    <div class="card">
+      <h3 style="margin-top:0">Landing page</h3>
+      <p class="muted" style="font-size:0.72rem;margin:0 0 0.5rem">
+        Which tab should open when you tap this team from the home screen? Saves to your account, so it syncs across devices.
+      </p>
+      <select id="lp-select" style="width:100%">
+        <option value="lineups" ${_currentLanding === 'lineups' ? 'selected' : ''}>Matches (default)</option>
+        <option value="squad"   ${_currentLanding === 'squad'   ? 'selected' : ''}>Squad</option>
+        <option value="plays"   ${_currentLanding === 'plays'   ? 'selected' : ''}>Tactics</option>
+      </select>
+      <div id="lp-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
+    </div>
+  `;
+
   // Training schedule card — recurring weekly template. JSONB list so teams
   // with two training nights (Tue+Thu) work out of the box. Each row:
   // { day: 0-6, start: "HH:MM", end: "HH:MM", location: string }.
@@ -4394,6 +4478,7 @@ function renderSquadTab(team, canEdit, players) {
         <div class="squad-layout">
           <div class="squad-main">
             ${teamInfoCard}
+            ${landingPrefCard}
             ${homeGroundCard}
             ${trainingScheduleCard}
           </div>
@@ -4564,6 +4649,47 @@ function renderSquadTab(team, canEdit, players) {
       if (!msg.textContent.startsWith('⚠')) { msg.textContent = '✓ Saved'; msg.className = 'ok'; }
       setTimeout(() => renderSquadTab(team, canEdit, players), 700);
     };
+
+    // Landing-page picker — saves instantly on change to team_members.landing_tab
+    // (cross-device), with localStorage as a cache + fallback. Takes effect next
+    // time the coach opens a team from the home screen.
+    const lpSelect = document.getElementById('lp-select');
+    const lpMsg = document.getElementById('lp-msg');
+    if (lpSelect) {
+      lpSelect.onchange = async () => {
+        const val = lpSelect.value;
+        if (!lpMsg) return;
+        lpMsg.textContent = 'Saving…'; lpMsg.className = 'muted';
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const userId = authUser?.id || null;
+        let savedToDb = false;
+        let migrationMissing = false;
+        if (userId) {
+          const res = await savePreferredLandingTabDb(team.id, userId, val);
+          savedToDb = !!res.ok;
+          migrationMissing = !!res.migrationMissing;
+        }
+        // Always update localStorage cache so fallback works offline too.
+        cacheLocalLanding(val);
+        _currentMemberLanding = savedToDb ? val : _currentMemberLanding;
+        const labels = { lineups: 'Matches', squad: 'Squad', plays: 'Tactics' };
+        if (savedToDb) {
+          lpMsg.textContent = `✓ Saved — next time you open the team it'll land on ${labels[val] || val}.`;
+          lpMsg.className = 'ok';
+        } else if (migrationMissing) {
+          lpMsg.textContent = `⚠ Saved to this browser only — run the landing_tab migration to sync across devices.`;
+          lpMsg.className = 'error';
+        } else {
+          lpMsg.textContent = `⚠ Saved to this browser only — DB save failed.`;
+          lpMsg.className = 'error';
+        }
+        setTimeout(() => {
+          if (lpMsg.textContent.startsWith('✓') || lpMsg.textContent.startsWith('⚠')) {
+            lpMsg.textContent = ''; lpMsg.className = 'muted';
+          }
+        }, 4000);
+      };
+    }
 
     // Save home ground
     const hgSaveBtn = document.getElementById('hg-save');
