@@ -4259,9 +4259,9 @@ async function renderUpcomingTab() {
   const trainingUrl = `${location.origin}${location.pathname}#/train/${team.id}`;
   const playerNameById = new Map((players || []).map(p => [p.id, p.name || '']));
 
-  // Per-status name pills — one pill per player, colour-coded, reuses the same
-  // .ap pill styling as the count chips so they visually belong together.
-  // Skips the unresponded bucket on purpose (Chris: "not the unresponded ones").
+  // Per-status name pills — ONE pill per status, names comma-joined inside.
+  // Reuses the same .ap pill styling as the count chips so they visually belong
+  // together. Skips the unresponded bucket (Chris: "not the unresponded ones").
   function ucNamesLine(groups) {
     const fmt = (arr) => arr
       .map(id => playerNameById.get(id))
@@ -4271,11 +4271,10 @@ async function renderUpcomingTab() {
     const mb = fmt(groups.maybe || []);
     const un = fmt(groups.unavailable || []);
     if (!av.length && !mb.length && !un.length) return '';
-    const pills = [
-      ...av.map(n => `<span class="ap ap-av">${escapeHtml(n)}</span>`),
-      ...mb.map(n => `<span class="ap ap-mb">${escapeHtml(n)}</span>`),
-      ...un.map(n => `<span class="ap ap-un">${escapeHtml(n)}</span>`),
-    ];
+    const pills = [];
+    if (av.length) pills.push(`<span class="ap ap-av uc-name-pill"><span class="ap-ic">✓</span> ${av.map(escapeHtml).join(', ')}</span>`);
+    if (mb.length) pills.push(`<span class="ap ap-mb uc-name-pill"><span class="ap-ic">?</span> ${mb.map(escapeHtml).join(', ')}</span>`);
+    if (un.length) pills.push(`<span class="ap ap-un uc-name-pill"><span class="ap-ic">✗</span> ${un.map(escapeHtml).join(', ')}</span>`);
     return `<div class="avail-pills uc-name-pills">${pills.join('')}</div>`;
   }
 

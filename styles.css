@@ -4370,5 +4370,34 @@ body.mw-open { overflow: hidden; }
   opacity: 0.85;
 }
 .uc-nudge-btn:hover { opacity: 1; }
-/* Reuse the existing .avail-pills styles for the count chips. */
+.uc-wa-btn { opacity: 1 !important; }
+.uc-wa-btn:hover { filter: brightness(1.05); }
+.uc-wa-btn.uc-wa-disabled,
+.uc-wa-btn[disabled] {
+  background: #e0e0e0 !important;
+  border-color: #c9c9c9 !important;
+  color: #888 !important;
+  cursor: not-allowed;
+  opacity: 0.7 !important;
+  filter: none;
+}
+.uc-wa-btn.uc-wa-disabled:hover,
+.uc-wa-btn[disabled]:hover { filter: none; }
+
+/* Compact per-status name pills — reuses .avail-pills / .ap / .ap-av etc.
+   One pill per status with names comma-joined inside so the pill stretches
+   across the card width instead of 12 individual chips.
+   Skips unresponded (by design: coach only wants to see who's replied). */
+.uc-names-wrap { }
+.uc-name-pills {
+  margin-top: 0.35rem;
+  flex-direction: column; /* stack the 3 status rows vertically */
+  align-items: stretch;    /* let each pill span full width */
+}
+.uc-name-pills .uc-name-pill {
+  white-space: normal;     /* override .ap's nowrap so names wrap inside */
+  line-height: 1.4;
+  padding: 0.2rem 0.55rem; /* slightly more vertical room when it wraps */
+}
+/* Reuse the existing .avail-pills styles for the count chips + name pills. */
 
