@@ -4392,3 +4392,68 @@ body.mw-open { overflow: hidden; }
 }
 /* Reuse the existing .avail-pills styles for the count chips + name pills. */
 
+/* ---------- Nudge sheet (per-parent WhatsApp deep-links) ---------- */
+.nudge-modal .picker-body { padding-top: 0.25rem; }
+.nudge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.nudge-empty {
+  padding: 1rem 0.5rem;
+  text-align: center;
+  color: #666;
+  font-size: 0.88rem;
+}
+.nudge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.1rem;
+  border-bottom: 1px solid #eee;
+  flex-wrap: wrap;
+}
+.nudge-row:last-child { border-bottom: none; }
+.nudge-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.nudge-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.nudge-wa {
+  background: #25D366;
+  border: 1px solid #25D366;
+  color: #fff;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nudge-wa:hover { filter: brightness(1.05); }
+.nudge-wa-disabled,
+.nudge-wa[disabled] {
+  background: #e0e0e0;
+  border-color: #c9c9c9;
+  color: #888;
+  cursor: not-allowed;
+}
+.nudge-wa-disabled:hover,
+.nudge-wa[disabled]:hover { filter: none; }
+.nudge-add-link {
+  font-size: 0.82rem;
+  color: #b88800;
+  text-decoration: none;
+}
+.nudge-add-link:hover { text-decoration: underline; }
+

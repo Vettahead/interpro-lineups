@@ -3432,6 +3432,9 @@ async function savePreferredLandingTabDb(teamId, userId, tab) {
 let activeTab = getLocalLandingFallback() || LANDING_TAB_DEFAULT;
 let _pendingLineupLoad = null; // play payload to apply next time the Lineups tab renders
 let _pendingLineupIdToOpen = null; // wizard-saved lineup id; Lineups tab should load it fully
+// Per-render cache populated by the two async fetches in renderUpcomingTab so the
+// 🔔 Nudge button can open the per-parent WhatsApp sheet instantly without a refetch.
+let _upcomingNudgeData = { training: null, match: null };
 let currentFilter = 'All';
 // Squad details page sub-tab — 'teaminfo' (team info + home ground) or
 // 'squad' (players). Preserved across re-renders so the coach doesn't
@@ -4258,6 +4261,10 @@ async function renderUpcomingTab() {
   const rosterSize = Array.isArray(players) ? players.length : 0;
   const trainingUrl = `${location.origin}${location.pathname}#/train/${team.id}`;
   const playerNameById = new Map((players || []).map(p => [p.id, p.name || '']));
+  const playerById = new Map((players || []).map(p => [p.id, p]));
+
+  // Fresh cache for this render — populated by the two async fetches below.
+  _upcomingNudgeData = { training: null, match: null };
 
   // Per-status name pills — one pill per player, colour-coded, reuses the same
   // .ap pill styling as the count chips so they visually belong together.
@@ -4324,7 +4331,7 @@ async function renderUpcomingTab() {
         <div class="uc-counts" data-uc-training-counts>${next ? '<div class="uc-loading">Loading responses…</div>' : ''}</div>
         <div class="uc-names-wrap" data-uc-training-names></div>
         ${next ? `<div class="uc-actions">
-          <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="training" title="Coming soon">🔔 Nudge non-responders</button>
+          <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="training" title="Message parents who haven't replied yet">🔔 Nudge non-responders</button>
           <a class="btn-secondary" href="${escapeHtml(trainingUrl)}" target="_blank" rel="noopener">Open parent link ↗</a>
         </div>` : ''}
       </div>
@@ -4339,7 +4346,7 @@ async function renderUpcomingTab() {
             ? `<button type="button" class="btn-secondary uc-wa-btn uc-wa-disabled" disabled aria-disabled="true" title="Match is still Draft — open the match and set it to Availability first.">💬 WhatsApp (draft)</button>`
             : `<button type="button" class="btn-secondary uc-wa-btn" data-uc-wa-match="${escapeHtml(nextMatch.id)}" style="background:#25D366;border-color:#25D366;color:#fff">💬 WhatsApp</button>`;
           return `<div class="uc-actions">
-            <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="match" title="Coming soon">🔔 Nudge non-responders</button>
+            <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="match" title="Message parents who haven't replied yet">🔔 Nudge non-responders</button>
             ${waBtn}
             <button type="button" class="btn-secondary" data-uc-open-match="${escapeHtml(nextMatch.id)}">Open match →</button>
           </div>`;
@@ -4348,10 +4355,18 @@ async function renderUpcomingTab() {
     </div>
   `;
 
-  // Placeholder nudge action — surface the decision-pending state instead of doing anything.
+  // 🔔 Nudge non-responders — opens the per-parent WhatsApp deep-link sheet.
+  // Falls back to a gentle "still loading" message if the user taps before the
+  // async availability fetch finishes (the cache is populated on success).
   tabEl.querySelectorAll('[data-uc-nudge]').forEach(b => {
     b.onclick = () => {
-      alert("Nudge coming soon.\n\nWe're still picking the best channel (WhatsApp text, SMS, in-app push or email). For now, tap '💬 WhatsApp' on the match card to poke the group.");
+      const mode = b.dataset.ucNudge; // 'match' | 'training'
+      const cached = _upcomingNudgeData[mode];
+      if (!cached) {
+        alert("Still loading responses — give it a second and try again.");
+        return;
+      }
+      openNudgeSheet(mode, cached, team);
     };
   });
 
@@ -4420,14 +4435,23 @@ async function renderUpcomingTab() {
           .eq('session_id', sessId);
         const counts = { available: 0, maybe: 0, unavailable: 0 };
         const groups = { available: [], maybe: [], unavailable: [] };
+        const respondedIds = new Set();
         (atts || []).forEach(a => {
           if (counts[a.intent] != null) {
             counts[a.intent]++;
-            if (a.player_id) groups[a.intent].push(a.player_id);
+            if (a.player_id) {
+              groups[a.intent].push(a.player_id);
+              respondedIds.add(a.player_id);
+            }
           }
         });
         countsEl.innerHTML = availPillsHtml(counts, rosterSize);
         if (namesEl) namesEl.innerHTML = ucNamesLine(groups);
+        // Build non-responder list for the 🔔 nudge sheet.
+        const nonResponders = (players || [])
+          .filter(p => !respondedIds.has(p.id))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        _upcomingNudgeData.training = { players: nonResponders, session: next };
       } catch (_e) {
         const el = tabEl.querySelector('[data-uc-training-counts]');
         if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
@@ -4446,14 +4470,22 @@ async function renderUpcomingTab() {
         if (error) throw error;
         const counts = { available: 0, maybe: 0, unavailable: 0 };
         const groups = { available: [], maybe: [], unavailable: [] };
+        const respondedIds = new Set();
         (data || []).forEach(r => {
           if (counts[r.status] != null) {
             counts[r.status]++;
-            if (r.player_id) groups[r.status].push(r.player_id);
+            if (r.player_id) {
+              groups[r.status].push(r.player_id);
+              respondedIds.add(r.player_id);
+            }
           }
         });
         if (countsEl) countsEl.innerHTML = availPillsHtml(counts, rosterSize);
         if (namesEl) namesEl.innerHTML = ucNamesLine(groups);
+        const nonResponders = (players || [])
+          .filter(p => !respondedIds.has(p.id))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        _upcomingNudgeData.match = { players: nonResponders, match: nextMatch };
       } catch (_e) {
         const el = tabEl.querySelector('[data-uc-match-counts]');
         if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
@@ -7028,6 +7060,186 @@ async function buildWhatsAppMessage(current, team) {
     '',
     'Cheers!'
   ].filter(l => l !== null).join('\n');
+}
+
+// ---------- WhatsApp nudge (per-parent) ----------
+// Normalises any parent-entered UK phone number into the digits-only format wa.me
+// expects (no plus, no leading zero on the subscriber part). Returns '' when we
+// can't produce something plausibly dialable so the caller can show a "no number
+// on file" fallback rather than a broken link.
+// Handles: '+44 7123 456789', '07123 456789', '0044 ...', '44 ...', '7123 456789',
+// with or without spaces, dashes, brackets. Non-UK entries that already include a
+// country code are passed through as digits-only so international teams still work.
+function waPhone(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  const hasPlus = s.startsWith('+');
+  let digits = s.replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  // International access prefix — e.g. 0044... entered by someone abroad.
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (hasPlus || digits.startsWith('44')) {
+    // Fix the common "+44 07123..." mistake — trunk 0 after the country code is wrong.
+    if (digits.startsWith('440')) digits = '44' + digits.slice(3);
+    return digits;
+  }
+  // UK domestic: drop the leading 0 and prepend 44.
+  if (digits.startsWith('0')) return '44' + digits.slice(1);
+  // Bare subscriber number (they forgot the 0) — assume UK.
+  if (digits.length >= 9 && digits.length <= 11) return '44' + digits;
+  // Give back whatever we've got; WhatsApp will just fail to open if it's nonsense.
+  return digits;
+}
+
+// Pre-fills a short, friendly nudge for a single parent. Chris hits send without
+// editing — that's the whole point of the feature.
+function buildNudgeMatchMsg(player, parentFirst, match, team) {
+  const base = location.origin + location.pathname;
+  const availUrl = `${base}#/avail/${match.id}`;
+  const opp = (match.opponent || '').trim();
+  const who = opp ? `vs ${opp}` : 'the match';
+  const d = match.game_date ? new Date(match.game_date + 'T00:00:00') : null;
+  const dateStr = d
+    ? `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })}`
+    : 'TBC';
+  const ko = match.kickoff_time ? ` (${fmtTimeHHMM(match.kickoff_time)})` : '';
+  const firstName = (player?.name || '').split(/\s+/)[0] || "your child";
+  const greet = parentFirst ? `Hi ${parentFirst},` : 'Hi,';
+  const teamName = team?.name ? ` (${team.name})` : '';
+  return [
+    greet,
+    '',
+    `Quick nudge — can you let me know if ${firstName} is available for ${who} on ${dateStr}${ko}?`,
+    '',
+    `Tap here to respond${teamName}:`,
+    availUrl,
+    '',
+    'Thanks!'
+  ].join('\n');
+}
+
+function buildNudgeTrainingMsg(player, parentFirst, session, team) {
+  const base = location.origin + location.pathname;
+  const trainingUrl = team?.id ? `${base}#/train/${team.id}` : '';
+  const d = session?.date || null;
+  const dateStr = d
+    ? `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })}`
+    : 'the next session';
+  const timeStr = (session?.slot?.start && session?.slot?.end)
+    ? ` (${fmtTimeHHMM(session.slot.start)}–${fmtTimeHHMM(session.slot.end)})`
+    : '';
+  const firstName = (player?.name || '').split(/\s+/)[0] || "your child";
+  const greet = parentFirst ? `Hi ${parentFirst},` : 'Hi,';
+  const teamName = team?.name ? ` (${team.name})` : '';
+  return [
+    greet,
+    '',
+    `Can you let me know if ${firstName} will be at training on ${dateStr}${timeStr}?`,
+    '',
+    `Tap here to respond${teamName}:`,
+    trainingUrl || '(no training link yet — ask your coach)',
+    '',
+    'Thanks!'
+  ].join('\n');
+}
+
+// Opens a modal listing non-responded players, with a WhatsApp deep-link button
+// per parent-on-file. mode is 'match' or 'training'. data is { players, match? , session? }.
+function openNudgeSheet(mode, data, team) {
+  if (!data || !Array.isArray(data.players)) {
+    alert("Still loading responses — give it a second and try again.");
+    return;
+  }
+
+  const title = mode === 'match' ? 'Nudge non-responders — match' : 'Nudge non-responders — training';
+  const subtitle = mode === 'match'
+    ? "Opens WhatsApp with a pre-filled message for each parent. Tap to send."
+    : "Same deal — one tap per parent, message pre-filled.";
+
+  const nonResponded = data.players || [];
+
+  const rowsHtml = nonResponded.length === 0
+    ? `<div class="nudge-empty">Everyone's responded! Nothing to nudge.</div>`
+    : nonResponded.map(p => {
+        const parents = [];
+        if ((p.parent1_phone || '').trim()) {
+          parents.push({ name: (p.parent1_name || 'Parent 1'), phone: p.parent1_phone });
+        }
+        if ((p.parent2_phone || '').trim()) {
+          parents.push({ name: (p.parent2_name || 'Parent 2'), phone: p.parent2_phone });
+        }
+        if (parents.length === 0) {
+          return `<div class="nudge-row">
+            <div class="nudge-name">${escapeHtml(p.name || '—')}</div>
+            <div class="nudge-actions">
+              <a href="#" class="nudge-add-link" data-nudge-jump-squad>No number on file — add in Squad →</a>
+            </div>
+          </div>`;
+        }
+        const btns = parents.map((pr, idx) => {
+          const normalised = waPhone(pr.phone);
+          if (!normalised) {
+            return `<button type="button" class="nudge-wa nudge-wa-disabled" disabled title="Phone number doesn't look right — check Squad tab">${escapeHtml(pr.name)}: invalid</button>`;
+          }
+          const parentFirst = (pr.name || '').split(/\s+/)[0] || '';
+          return `<button type="button" class="nudge-wa" data-nudge-pid="${escapeHtml(p.id)}" data-nudge-phone="${escapeHtml(normalised)}" data-nudge-parent-idx="${idx}">💬 ${escapeHtml(parentFirst || pr.name)}</button>`;
+        }).join('');
+        return `<div class="nudge-row">
+          <div class="nudge-name">${escapeHtml(p.name || '—')}</div>
+          <div class="nudge-actions">${btns}</div>
+        </div>`;
+      }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  overlay.innerHTML = `
+    <div class="picker-modal nudge-modal" role="dialog" aria-label="${escapeHtml(title)}" style="max-width:480px">
+      <div class="picker-header">
+        <h3>${escapeHtml(title)}</h3>
+        <button type="button" class="picker-close" data-close aria-label="Close">×</button>
+      </div>
+      <div class="picker-body">
+        <p class="muted" style="margin:0 0 0.8rem;font-size:0.85rem">${escapeHtml(subtitle)}</p>
+        <div class="nudge-list">${rowsHtml}</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target?.hasAttribute?.('data-close')) close();
+  });
+
+  overlay.querySelectorAll('.nudge-wa').forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.nudgePid;
+      const phone = btn.dataset.nudgePhone;
+      const pidx = parseInt(btn.dataset.nudgeParentIdx, 10) || 0;
+      const player = nonResponded.find(x => x.id === pid);
+      if (!player) return;
+      const parentName = pidx === 0 ? (player.parent1_name || '') : (player.parent2_name || '');
+      const parentFirst = (parentName || '').split(/\s+/)[0] || '';
+      const text = mode === 'match'
+        ? buildNudgeMatchMsg(player, parentFirst, data.match, team)
+        : buildNudgeTrainingMsg(player, parentFirst, data.session, team);
+      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+      const win = window.open(waUrl, '_blank');
+      if (!win) location.href = waUrl;
+    };
+  });
+
+  overlay.querySelectorAll('[data-nudge-jump-squad]').forEach(a => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      close();
+      const btn = document.querySelector('.h-tab[data-tab="squad"]');
+      if (btn) btn.click();
+    };
+  });
 }
 
 // ---------- Match details (summary + modal) ----------

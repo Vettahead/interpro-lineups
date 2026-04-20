@@ -1,6 +1,119 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-20)
 
-## 🔖 Where we left off on 2026-04-20 (session 15 — read this first)
+## 🔖 Where we left off on 2026-04-20 (session 17 — read this first)
+
+**Per-parent WhatsApp nudge shipped.** Notifications-channel question finally got a v1 answer: WhatsApp deep-links, one per parent-on-file. Zero infra, zero recurring cost, works on every phone. Coach taps `🔔 Nudge non-responders` on either Upcoming-tab card; a sheet lists kids who haven't replied, with a green WhatsApp button per parent phone number on file. Tap → WhatsApp opens with a pre-filled message that includes the child's first name, the event date/time, and the availability link. Phone normaliser handles UK `+44` and domestic `0` prefixes (also `0044`, `44`, and bare subscriber numbers); Chris's nudge on this was explicit. Nothing else changed — the decision for email/SMS/push still deferred.
+
+### Shipped this session (session 17)
+
+1. **`waPhone(raw)` phone normaliser.** Converts any parent-entered UK format into the digits-only form `wa.me` expects. Handles `+44 7123 456789`, `07123 456789`, `0044 …`, `44 …`, `7123456789`, with any combination of spaces/dashes/brackets. Returns `''` when the input can't plausibly dial so the UI can show "No number on file" rather than a broken link. Non-UK entries with a country code pass through unchanged.
+2. **Nudge message builders.** `buildNudgeMatchMsg(player, parentFirst, match, team)` and `buildNudgeTrainingMsg(player, parentFirst, session, team)` — short friendly texts pre-filled with child's first name + event date/time + the availability/training URL. Short enough that Chris usually won't edit before sending.
+3. **`openNudgeSheet(mode, data, team)` modal.** Reuses the existing `.picker-overlay` / `.picker-modal` classes. Lists non-responded players alphabetically; each row has one WhatsApp-green button per parent-on-file (labelled with the parent's first name). Players with no phone get a `No number on file — add in Squad →` inline link that closes the sheet and jumps to the Squad tab. Invalid phones render a disabled grey button.
+4. **Wired the Upcoming tab.** Added module-scope `_upcomingNudgeData = { training, match }` cache, reset at the top of every `renderUpcomingTab` call. Both async availability fetches now also build a non-responders list (roster minus whoever submitted any intent/status) and stash it on the cache. The `🔔 Nudge non-responders` button's click handler was previously a "coming soon" alert — it now reads the cache and calls `openNudgeSheet`. Falls back to "still loading" if tapped before the fetch resolves.
+5. **CSS for the nudge sheet.** `.nudge-list` (flex column, `max-height: 60vh` + scroll), `.nudge-row` (flex, wraps on narrow), `.nudge-name` (600 weight), `.nudge-wa` (WhatsApp green, white text, pill-ish), disabled-state greying, `.nudge-add-link` (amber for the "add in Squad" fallback).
+
+### Files touched (session 17)
+
+- `app.js` — inserted five new helpers and one module-scope var right after `buildWhatsAppMessage` (`waPhone`, `buildNudgeMatchMsg`, `buildNudgeTrainingMsg`, `openNudgeSheet`, `_upcomingNudgeData`). Modified `renderUpcomingTab`: added `playerById` map, reset cache at top, populated `_upcomingNudgeData.training` / `.match` in each async fetch, replaced the placeholder nudge-button alert with a call to `openNudgeSheet`, updated the `title=` tooltip on both nudge buttons. ~213 new lines (13638 → 13851).
+- `styles.css` — added the `.nudge-*` block at the end of the file. ~65 new lines (4394 → 4459).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 17)
+
+**None.** `players.parent1_name` / `parent1_phone` / `parent2_name` / `parent2_phone` already exist on the schema and are already editable via the Squad tab player modal (lines 5083–5089). No new columns needed.
+
+### Design decisions locked in (session 17)
+
+- **v1 notifications channel = WhatsApp deep-links.** Cheaper than Twilio (zero recurring cost), more reliable than self-hosted SMS gateways, and parents already have WhatsApp. Trade-off: one tap per parent rather than a bulk blast — acceptable for a 12–16 kid squad. Email/SMS can layer on later without removing this.
+- **Phone-number entry lives in the Squad tab.** Not a new tab, not a separate onboarding step — Chris already enters players there; parent phones slot in alongside name/DOB. (Fields already existed in the schema + modal.)
+- **Nudge button only on the Upcoming tab for v1.** Deliberately NOT adding it to the Matches tab or Training attendance tracker yet — keep the surface area small until Chris has used it a few times and tells us where else it needs to live.
+
+### Sanity-check script (session 17)
+
+1. **Upcoming tab still loads.** Counts + name pills render as before.
+2. **Nudge button — match card.** Tap `🔔 Nudge non-responders` on the match card. A sheet opens titled "Nudge non-responders — match". Kids who haven't replied are listed alphabetically. Each row shows a green WhatsApp button per parent-on-file. Tapping a button opens WhatsApp with a pre-filled message that includes the child's first name + match details + availability link.
+3. **Nudge button — training card.** Same behaviour on the training card. Message references the training session + the rolling training link.
+4. **Phone-number edge cases.** Test parents with `+44 7700 900123`, `07700 900123`, `07700900123`, `0044 7700 900123` — all should open WhatsApp to the correct `+44 7700 900123`. A parent with no phone on file shows the `No number on file — add in Squad →` link instead of a button.
+5. **Empty state.** If every kid has responded, the sheet shows `Everyone's responded! Nothing to nudge.`
+6. **Tapped before loaded.** Rare but testable: tap the nudge button before the async fetch has filled the cache (e.g. very slow network) — an alert says "Still loading responses — give it a second and try again."
+
+### Still pending (for notifications, when the decision lands)
+
+- **Email notifications on publish.** Different channel, different audience (some parents prefer email). Not blocked by the WhatsApp nudge.
+- **SMS fallback for parents without WhatsApp.** Deferred — Twilio's too pricey; revisit if enough parents complain.
+- **Bulk blast vs per-parent taps.** If Chris ends up wanting a "send to everyone" option later, that's a different UI. For now per-parent is what we've got.
+
+### Next up (unchanged)
+
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+### Start-here on the new machine (session 17)
+
+1. Upload `app.js`, `styles.css`, and `HANDOFF.md` to GitHub via the web UI (same folder as before).
+2. Vercel auto-deploys.
+3. Hard-reload Interpro in the browser; clear cache if you see stale JS.
+4. Run the sanity-check script above.
+5. (Optional housekeeping) Delete `app.js.broken` from the workspace once you're happy the restored file is stable — it was kept as a forensics safety net.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 16)
+
+**File-rescue + Upcoming-tab polish.** The deployed `app.js` was discovered truncated at line 13277 mid-template-literal inside `renderAdminTab` — everything after that (rest of admin UI, `renderUpcomingTab`, boot code, event handlers) was missing, causing `Uncaught SyntaxError: Unexpected end of input` in the browser. Chris uploaded a clean copy of `app.js` from earlier today (post-session-14, 13404 lines); I swapped it in, re-applied all 8 session-15 edits (Upcoming tab + landing picker + tab-bar entries), then added three follow-on refinements Chris asked for on the Upcoming tab: WhatsApp button, per-status name pills, draft-guard on the WhatsApp button.
+
+### Shipped this session (session 16)
+
+1. **File rescue.** Swapped the truncated `app.js` for the uploaded clean copy, then re-applied session 15 fresh: `LANDING_TAB_OPTIONS = ['upcoming', …]`, `LANDING_TAB_DEFAULT = 'upcoming'`, Upcoming button on horizontal tab bar + nav drawer + desktop sidebar, dispatch branch in `renderTeamDashboard`, full `renderUpcomingTab` function (pulled out of `app.js.broken` since that function lived entirely above the truncation point), Admin picker `Upcoming (default)` option. Backed up the truncated file as `app.js.broken` in the workspace for forensics — safe to delete once Chris confirms the restored file is stable.
+2. **💬 WhatsApp button on the match card.** Reuses `buildWhatsAppMessage(nextMatch, team)` — same composer the Matches-tab Share modal uses. Builds the pre-filled text, copies to clipboard, opens `wa.me` in a new tab. Green WhatsApp brand colour (`#25D366`) to match the existing "Share to WhatsApp" button elsewhere. Deliberately does NOT auto-flip a draft to Availability (that's an explicit state change; see #4 below).
+3. **Per-status name pills below the count chips.** Both cards now show WHO responded yes/maybe/no underneath the count chips. One pill per kid, colour-coded (green / amber / red), no icon inside each pill (colour carries it). Alphabetised within each status, green → amber → red order. **Unresponded names are not shown** by design — just the `—` count chip represents them. Reuses the existing `.avail-pills` / `.ap` / `.ap-av` / `.ap-mb` / `.ap-un` classes verbatim so the styling matches the count chips exactly (same rounded shape, same 0.72rem font). Data fetches updated to select `player_id` alongside `intent` / `status` and group by bucket; player names resolved from `editor.players`. Tried a "one pill per status, names comma-joined inside" variant (full-width stretched pills) and reverted — Chris preferred the chip-per-kid look.
+4. **Draft-guard on the WhatsApp button.** When `nextMatch.lineup_status === 'draft'`, the button renders as disabled, greyed-out (`#e0e0e0` bg, `not-allowed` cursor, `0.7` opacity), labelled `💬 WhatsApp (draft)`, with a tooltip: *"Match is still Draft — open the match and set it to Availability first."* HTML `disabled` attribute so no click fires. The status-flip stays explicit — coach must open the match and change the status pill deliberately. Once flipped to Availability or Published, the pill reverts to the green active button.
+
+### Files touched (session 16)
+
+- `app.js` — full file-swap from the upload; then re-applied session-15 edits; then modified `renderUpcomingTab`: added `playerNameById` Map, `ucNamesLine(groups)` inner helper, WhatsApp button rendering with draft-guard IIFE, `[data-uc-wa-match]` click handler calling `buildWhatsAppMessage`, training + match async fetches now select `player_id` too and call `ucNamesLine`.
+- `styles.css` — added `.uc-wa-btn` / `.uc-wa-disabled` / `[disabled]` styles (greyed palette for draft state, brightness-filter on hover for active state); added `.uc-names-wrap` + `.uc-name-pills` (just `margin-top`; the pills themselves are styled by the existing `.avail-pills` block).
+- `app.js.broken` — preserved copy of the truncated file (can be deleted after confirmation).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 16)
+
+**None.** No schema changes.
+
+### Cause of the truncation (best guess)
+
+Workspace is not a git repo — files are uploaded to GitHub via the web UI. Truncation shape (clean cut mid-template-literal, exactly 127 lines lost off the tail) is consistent with either (a) an interrupted save in the GitHub web editor, (b) a copy/paste that hit a clipboard boundary, or (c) an editor that autosaved a partial buffer. **Avoid editing `app.js` directly in the GitHub web UI going forward** — the file's big enough (>13k lines) that the web editor has been unreliable.
+
+### Sanity-check script (session 16)
+
+1. **File loads without syntax error.** Open DevTools console, reload Interpro, sign in, tap a team. No `Uncaught SyntaxError` from `app.js`. `vendor.js` extension errors are unrelated and can be ignored.
+2. **Upcoming tab renders with count chips.** Both cards show the four-chip row (✓ / ? / ✗ / —).
+3. **Name pills under the chips.** Each responded player appears as a small coloured pill — green for Available, amber for Maybe, red for Unavailable. Alphabetised. Unresponded kids do NOT appear as pills (only in the — count).
+4. **Match WhatsApp button — Draft.** Create a new match or leave an existing one at Draft. The button renders greyed, labelled `💬 WhatsApp (draft)`, tooltip explains why. Clicking does nothing.
+5. **Match WhatsApp button — Availability.** Flip status to Availability via the Matches tab. Return to Upcoming. Button is green, labelled `💬 WhatsApp`. Tap it → WhatsApp opens in a new tab with the pre-filled match message; the same text is on the clipboard.
+6. **Tab jumps still work.** Open match → lands inside the match editor. Open parent link → new tab loads parent training page.
+
+### Still pending (for notifications, when the decision lands)
+
+Unchanged from session 15 — the 🔔 Nudge buttons stay as placeholders until the sitewide notifications channel decision is made.
+
+### Next up (unchanged)
+
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+- **Sitewide notifications design** — unblocks the nudge buttons and several deferred asks.
+
+### Start-here on the new machine (session 16)
+
+Pull `app.js` + `styles.css`. No DB changes. Smoke test: open a team → lands on Upcoming → both cards show count chips + coloured name pills underneath → if a match is Draft, WhatsApp button is greyed with "(draft)" label, otherwise it's green and opens `wa.me` with a pre-filled message.
+
+---
+
+## 🔖 Where we left off on 2026-04-20 (session 15)
 
 **New "Upcoming" tab shipped — at-a-glance next training + next match availability for coaches.** Tab bar gains a leftmost `Upcoming` tab; it's the new default landing page for anyone who hasn't explicitly picked a different landing tab. Two stacked summary cards: next training (from `teams.training_schedule` + `training_attendance`) and next match (next upcoming lineup + `player_availability`). Each card shows the existing count-pill row (✓ / ? / ✗ / —) and includes a **🔔 Nudge non-responders** placeholder button — intentionally not plumbed in, because the sitewide notifications decision (WhatsApp / SMS / push / email) is still parked. Tapping the nudge button shows a "coming soon" explainer; nothing is sent.
 
