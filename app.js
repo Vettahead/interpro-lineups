@@ -7094,11 +7094,13 @@ function waPhone(raw) {
 
 // Pre-fills a short, friendly nudge for a single parent. Chris hits send without
 // editing — that's the whole point of the feature.
+// The "early replies" line sells the ask: it isn't pester, it's *useful* for the
+// parent because it unlocks focus cues the kid can actually see before kick-off.
 function buildNudgeMatchMsg(player, parentFirst, match, team) {
   const base = location.origin + location.pathname;
   const availUrl = `${base}#/avail/${match.id}`;
   const opp = (match.opponent || '').trim();
-  const who = opp ? `vs ${opp}` : 'the match';
+  const who = opp ? `our game vs ${opp}` : 'our next game';
   const d = match.game_date ? new Date(match.game_date + 'T00:00:00') : null;
   const dateStr = d
     ? `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })}`
@@ -7110,9 +7112,11 @@ function buildNudgeMatchMsg(player, parentFirst, match, team) {
   return [
     greet,
     '',
-    `Quick nudge — can you let me know if ${firstName} is available for ${who} on ${dateStr}${ko}?`,
+    `Quick one — is ${firstName} available for ${who} on ${dateStr}${ko}?`,
     '',
-    `Tap here to respond${teamName}:`,
+    `Early replies help — we can line up focus cues in time for you to show ${firstName} theirs before kick-off.`,
+    '',
+    `Tap to respond${teamName}:`,
     availUrl,
     '',
     'Thanks!'
@@ -7135,9 +7139,11 @@ function buildNudgeTrainingMsg(player, parentFirst, session, team) {
   return [
     greet,
     '',
-    `Can you let me know if ${firstName} will be at training on ${dateStr}${timeStr}?`,
+    `Quick one — will ${firstName} be at training on ${dateStr}${timeStr}?`,
     '',
-    `Tap here to respond${teamName}:`,
+    `Early replies help us plan — numbers matter for drills and small-sided games.`,
+    '',
+    `Tap to respond${teamName}:`,
     trainingUrl || '(no training link yet — ask your coach)',
     '',
     'Thanks!'
