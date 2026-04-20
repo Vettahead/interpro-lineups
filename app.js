@@ -90,74 +90,6 @@ function ageGroupLabel(team, date = new Date()) {
 // All the options we support in dropdowns. Covers U7 through U18.
 const AGE_GROUP_OPTIONS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
-// ---------- Training schedule helpers (Slice 8) ----------
-// Day-of-week indexing follows JS Date.getDay(): 0=Sun, 1=Mon, ..., 6=Sat.
-const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-// Parse team.training_schedule (JSONB array) into a sane JS array. Tolerant of
-// null / garbage / single-object legacy shapes.
-function parseTrainingSchedule(team) {
-  if (!team) return [];
-  const raw = team.training_schedule;
-  if (!raw) return [];
-  const arr = Array.isArray(raw) ? raw : [raw];
-  return arr.filter(s => s && typeof s === 'object' && Number.isInteger(s.day) && s.start && s.end);
-}
-// Format a "HH:MM" or "HH:MM:SS" time for display (drops seconds, keeps 24h).
-function fmtTimeHHMM(t) {
-  if (!t) return '';
-  const s = String(t);
-  const m = s.match(/^(\d{1,2}):(\d{2})/);
-  return m ? `${m[1].padStart(2,'0')}:${m[2]}` : s;
-}
-// Given a schedule slot (day/start/end) and an anchor date, return the Date
-// object for the next (or current, if still within end+1h) occurrence.
-// "now" param allows testing; defaults to current time.
-function computeNextTrainingInstance(slot, now = new Date()) {
-  if (!slot || !Number.isInteger(slot.day) || !slot.start || !slot.end) return null;
-  const [eh, em] = fmtTimeHHMM(slot.end).split(':').map(Number);
-  const [sh, sm] = fmtTimeHHMM(slot.start).split(':').map(Number);
-  // Start candidate at today with start time.
-  const todayDay = now.getDay();
-  // Days until next matching day (0..6). 0 means today.
-  let delta = (slot.day - todayDay + 7) % 7;
-  let candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + delta, sh, sm, 0, 0);
-  // Cutoff = end time + 1h. If we're past that on today's instance, roll forward 7d.
-  const cutoff = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate(), eh, em, 0, 0);
-  cutoff.setHours(cutoff.getHours() + 1);
-  if (now >= cutoff) {
-    candidate = new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate() + 7, sh, sm, 0, 0);
-  }
-  return candidate;
-}
-// Pick the soonest upcoming training instance across all slots in the schedule.
-// Returns { slot, date } or null.
-function nextUpcomingTraining(team, now = new Date()) {
-  const slots = parseTrainingSchedule(team);
-  if (!slots.length) return null;
-  let best = null;
-  for (const s of slots) {
-    const d = computeNextTrainingInstance(s, now);
-    if (!d) continue;
-    if (!best || d < best.date) best = { slot: s, date: d };
-  }
-  return best;
-}
-// Convert a Date to "YYYY-MM-DD" (local).
-function toLocalDateStr(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-// Pretty-print a training session for headers (e.g. "Tuesday 21 Apr · 19:00–20:00").
-function fmtTrainingHeader(date, slot) {
-  const dayName = DAY_NAMES[date.getDay()];
-  const d = date.getDate();
-  const month = date.toLocaleString('en-GB', { month: 'short' });
-  return `${dayName} ${d} ${month} · ${fmtTimeHHMM(slot.start)}–${fmtTimeHHMM(slot.end)}`;
-}
-
 // ---------- Player stats aggregation (for the public card page) ----------
 // All stats are derived on the fly from lineups — no cached totals column, so
 // editing a match's result always reflects accurately the next time someone
@@ -275,522 +207,6 @@ async function logAudit(teamId, entityType, entityId, action, changes) {
   });
 }
 
-// ---------- Badges (Slice 9a: manual awards; auto entries stubbed for 9b) ----------
-// BADGE_CATALOG is the single source of truth for names, emoji icons, categories,
-// descriptions, and flavour (manual vs auto). Both the public FIFA card and the
-// Squad → player modal read from this catalog when rendering and when awarding.
-// All icons are emoji per Chris's 2026-04-17 call — no SVG / icon font needed.
-// Each entry: { name, description, emoji, category, flavour, criteria? }
-//   flavour = 'manual' (coach awards it explicitly) | 'auto' (derived — 9b)
-//   category = 'attacking' | 'skill' | 'defending' | 'attitude' | 'teamwork'
-//              | 'fun' | 'milestone'
-// Auto-flavour entries are kept in the catalog so 9b can wire criteria without
-// needing a catalog rewrite. They are not shown in the 9a award modal.
-const BADGE_CATALOG = {
-  // 🔥 Attacking & Scoring
-  on_fire:            { name: 'On Fire',          emoji: '🔥', category: 'attacking', flavour: 'auto',   description: 'Scored in 3 matches in a row.' },
-  goal_machine:       { name: 'Goal Machine',     emoji: '⚽', category: 'attacking', flavour: 'auto',   description: '5 goals this season.' },
-  hat_trick_hero:     { name: 'Hat-Trick Hero',   emoji: '🎩', category: 'attacking', flavour: 'auto',   description: '3+ goals in one match.' },
-  brace:              { name: 'Brace',            emoji: '✌️', category: 'attacking', flavour: 'auto',   description: '2 goals in one match.' },
-  opening_night:      { name: 'Opening Night',    emoji: '🌟', category: 'attacking', flavour: 'auto',   description: 'First goal of the season.' },
-  clinical_finisher:  { name: 'Clinical Finisher',emoji: '🎯', category: 'attacking', flavour: 'manual', description: 'Cool as ice in front of goal — a first-time finisher.' },
-  poacher:            { name: 'Poacher',          emoji: '🦊', category: 'attacking', flavour: 'manual', description: 'Always in the right place for rebounds and tap-ins.' },
-  long_shot_legend:   { name: 'Long-Shot Legend', emoji: '🚀', category: 'attacking', flavour: 'manual', description: 'Scored a screamer from outside the box.' },
-  weaker_foot_hero:   { name: 'Weaker-Foot Hero', emoji: '🦶', category: 'attacking', flavour: 'manual', description: 'Scored with their less-favoured foot.' },
-  ice_cold:           { name: 'Ice Cold',         emoji: '🧊', category: 'attacking', flavour: 'manual', description: 'Scored under pressure — a penalty or late equaliser.' },
-  solo_star:          { name: 'Solo Star',        emoji: '💫', category: 'attacking', flavour: 'manual', description: 'Beat two or more players before scoring.' },
-  top_scorer:         { name: 'Top Scorer',       emoji: '👑', category: 'attacking', flavour: 'auto',   description: 'Top goalscorer this season.' },
-  super_sub:          { name: 'Super Sub',        emoji: '🔁', category: 'attacking', flavour: 'auto',   description: 'Came off the bench and scored.' },
-
-  // ⚡ Speed, Skill & Physical
-  speedster:          { name: 'Speedster',        emoji: '⚡', category: 'skill',     flavour: 'manual', description: 'Lightning quick — burned the defender.' },
-  engine:             { name: 'The Engine',       emoji: '🛞', category: 'skill',     flavour: 'manual', description: 'Ran, and ran, and ran — a box-to-box motor.' },
-  dribble_king:       { name: 'Dribble King',     emoji: '🕺', category: 'skill',     flavour: 'manual', description: 'Weaves through challenges with the ball glued to their feet.' },
-  two_footed:         { name: 'Two-Footed',       emoji: '🦵', category: 'skill',     flavour: 'manual', description: 'Comfortable on either foot.' },
-  balance_master:     { name: 'Balance Master',   emoji: '⚖️', category: 'skill',     flavour: 'manual', description: 'Impossible to knock off the ball.' },
-  agility_ace:        { name: 'Agility Ace',      emoji: '🤸', category: 'skill',     flavour: 'manual', description: 'Turned on a sixpence.' },
-  shield_wall:        { name: 'Shield Wall',      emoji: '🛡️', category: 'skill',     flavour: 'manual', description: 'Shielded the ball brilliantly under pressure.' },
-  wingman:            { name: 'Wingman',          emoji: '🪁', category: 'skill',     flavour: 'manual', description: 'Owned the wing all match.' },
-  tireless:           { name: 'Tireless',         emoji: '🫁', category: 'skill',     flavour: 'manual', description: 'Played the full 90 without dropping a yard.' },
-
-  // 🧱 Defending & Goalkeeper
-  brick_wall:         { name: 'Brick Wall',       emoji: '🧱', category: 'defending', flavour: 'auto',   description: '3 clean sheets in a row.' },
-  iron_defence:       { name: 'Iron Defence',     emoji: '⚔️', category: 'defending', flavour: 'auto',   description: '5 clean sheets this season.' },
-  golden_glove:       { name: 'Golden Glove',     emoji: '🧤', category: 'defending', flavour: 'auto',   description: 'Fewest goals conceded this season.' },
-  safe_hands:         { name: 'Safe Hands',       emoji: '🙌', category: 'defending', flavour: 'manual', description: 'A save that kept the team in the game.' },
-  shot_stopper:       { name: 'Shot-Stopper',     emoji: '🧤', category: 'defending', flavour: 'manual', description: 'Big save at a crucial moment.' },
-  sweeper_keeper:     { name: 'Sweeper Keeper',   emoji: '🧹', category: 'defending', flavour: 'manual', description: 'Came out to clean up behind the defence.' },
-  last_line_hero:     { name: 'Last-Line Hero',   emoji: '🦸', category: 'defending', flavour: 'manual', description: 'Hero moment when the team needed it most.' },
-  tackle_master:      { name: 'Tackle Master',    emoji: '🦿', category: 'defending', flavour: 'manual', description: 'Timing and strength on the tackle.' },
-  interceptor:        { name: 'Interceptor',      emoji: '🎣', category: 'defending', flavour: 'manual', description: 'Read the game and nicked the ball before it arrived.' },
-  no_nonsense:        { name: 'No-Nonsense',      emoji: '💥', category: 'defending', flavour: 'manual', description: 'Cleared the danger without a second thought.' },
-  captain_back_line:  { name: 'Captain of the Back Line', emoji: '🎖️', category: 'defending', flavour: 'manual', description: 'Organised the defence and led from the back.' },
-  fearless:           { name: 'Fearless',         emoji: '🦁', category: 'defending', flavour: 'manual', description: 'Put their body on the line.' },
-  goal_line_hero:     { name: 'Goal-Line Hero',   emoji: '🚧', category: 'defending', flavour: 'manual', description: 'Heroic goal-line clearance.' },
-  last_ditch_hero:    { name: 'Last-Ditch Hero',  emoji: '🎬', category: 'defending', flavour: 'manual', description: 'Last-second challenge that saved the day.' },
-
-  // 🧠 Effort, Attitude & Coach's Choice
-  never_give_up:      { name: 'Never Give Up',    emoji: '💪', category: 'attitude',  flavour: 'manual', description: 'Kept running and battling to the final whistle.' },
-  training_star:      { name: 'Training Star',    emoji: '🌟', category: 'attitude',  flavour: 'manual', description: 'Standout attitude and effort in training.' },
-  coaches_choice:     { name: "Coach's Choice",   emoji: '🏅', category: 'attitude',  flavour: 'manual', description: "Coach's pick of the week." },
-  comeback_kid:       { name: 'Comeback Kid',     emoji: '🔄', category: 'attitude',  flavour: 'manual', description: 'Bounced back after a setback.' },
-  focus_pro:          { name: 'Focus Pro',        emoji: '🎯', category: 'attitude',  flavour: 'manual', description: 'Locked-in focus all match.' },
-  resilience:         { name: 'Resilience',       emoji: '🪨', category: 'attitude',  flavour: 'manual', description: 'Took the knocks and kept going.' },
-  calm_head:          { name: 'Calm Head',        emoji: '🧘', category: 'attitude',  flavour: 'manual', description: 'Kept their head when others lost theirs.' },
-  growth_mindset:     { name: 'Growth Mindset',   emoji: '🌱', category: 'attitude',  flavour: 'manual', description: 'Took coaching on board and visibly improved.' },
-  consistency_king:   { name: 'Consistency King', emoji: '📊', category: 'attitude',  flavour: 'auto',   description: 'Reliable every week — shows up and contributes.' },
-  ever_present:       { name: 'Ever-Present',     emoji: '📅', category: 'attitude',  flavour: 'auto',   description: 'Played every match this season.' },
-  bounce_back:        { name: 'Bounce Back',      emoji: '🎾', category: 'attitude',  flavour: 'manual', description: 'Best improvement after a tough game.' },
-  training_gem:       { name: 'Training-Ground Gem', emoji: '💎', category: 'attitude', flavour: 'manual', description: 'A real gem in training this week.' },
-
-  // 🤝 Teamwork & Sportsmanship
-  team_player:        { name: 'Team Player',      emoji: '🤝', category: 'teamwork',  flavour: 'manual', description: 'Put the team first all match.' },
-  helper:             { name: 'Helper',           emoji: '🙋', category: 'teamwork',  flavour: 'manual', description: 'Helped a teammate up / out / through it.' },
-  fair_play:          { name: 'Fair Play',        emoji: '🕊️', category: 'teamwork',  flavour: 'manual', description: 'Played the game the right way.' },
-  leader:             { name: 'Leader',           emoji: '🧭', category: 'teamwork',  flavour: 'manual', description: 'Led by example on and off the pitch.' },
-  communicator:       { name: 'Communicator',     emoji: '📣', category: 'teamwork',  flavour: 'manual', description: 'Talked non-stop — organised the team.' },
-  unsung_hero:        { name: 'Unsung Hero',      emoji: '🫶', category: 'teamwork',  flavour: 'manual', description: 'Did the dirty work that no-one noticed but everyone benefited from.' },
-  high_five_hero:     { name: 'High-Five Hero',   emoji: '🖐️', category: 'teamwork',  flavour: 'manual', description: 'Lifted everyone around them.' },
-  respect_badge:      { name: 'Respect',          emoji: '🤲', category: 'teamwork',  flavour: 'manual', description: 'Respectful to teammates, opponents, and officials.' },
-  buddy_badge:        { name: 'Buddy Badge',      emoji: '👯', category: 'teamwork',  flavour: 'manual', description: 'A great teammate to a younger or newer player.' },
-  handshake_hero:     { name: 'Handshake Hero',   emoji: '🤝', category: 'teamwork',  flavour: 'manual', description: 'First to shake hands, first to say well-played.' },
-  squad_boost:        { name: 'Squad Boost',      emoji: '📈', category: 'teamwork',  flavour: 'manual', description: 'Lifted the mood of the whole squad.' },
-
-  // 🎉 Fun & Seasonal
-  nutmeg_king:        { name: 'Nutmeg King',      emoji: '🥜', category: 'fun',       flavour: 'manual', description: 'Slipped one through an opponent\'s legs.' },
-  celebration_star:   { name: 'Celebration Star', emoji: '🎉', category: 'fun',       flavour: 'manual', description: 'Best celebration of the week.' },
-  rainbow_rocket:     { name: 'Rainbow Rocket',   emoji: '🌈', category: 'fun',       flavour: 'manual', description: 'Pulled off a rainbow flick.' },
-  thunder_boot:       { name: 'Thunder Boot',     emoji: '⚡', category: 'fun',       flavour: 'manual', description: 'An absolute thunderbolt of a shot.' },
-  rain_warrior:       { name: 'Rain Warrior',     emoji: '🌧️', category: 'fun',       flavour: 'manual', description: 'Played brilliantly in terrible weather.' },
-  smile_maker:        { name: 'Smile Maker',      emoji: '😄', category: 'fun',       flavour: 'manual', description: 'Made the whole squad smile.' },
-  boot_collector:     { name: 'Boot Collector',   emoji: '👟', category: 'fun',       flavour: 'manual', description: 'New boots, new form.' },
-  hair_of_match:      { name: 'Hair of the Match',emoji: '💇', category: 'fun',       flavour: 'manual', description: 'Best hair on the pitch today.' },
-  golden_boot_mini:   { name: 'Monthly Golden Boot', emoji: '🥾', category: 'fun',    flavour: 'auto',   description: 'Top scorer in the calendar month.' },
-  early_bird:         { name: 'Early Bird',       emoji: '🐦', category: 'fun',       flavour: 'manual', description: 'Always first to arrive.' },
-  lucky_charm:        { name: 'Lucky Charm',      emoji: '🍀', category: 'fun',       flavour: 'auto',   description: 'Team is unbeaten when this player plays.' },
-  birthday_kid:       { name: 'Birthday Kid',     emoji: '🎂', category: 'fun',       flavour: 'manual', description: 'Played a match on their birthday.' },
-
-  // 🏆 Milestones (all auto — 9b)
-  debut_match:        { name: 'Debut Match',      emoji: '🎬', category: 'milestone', flavour: 'auto',   description: 'Played their first match for the team.' },
-  games_10:           { name: '10 Games',         emoji: '🔟', category: 'milestone', flavour: 'auto',   description: 'Played 10 matches for the team.' },
-  games_25:           { name: '25 Games',         emoji: '🎖️', category: 'milestone', flavour: 'auto',   description: 'Played 25 matches for the team.' },
-  games_50:           { name: '50 Games',         emoji: '🏅', category: 'milestone', flavour: 'auto',   description: 'Played 50 matches for the team.' },
-  games_100:          { name: '100 Games',        emoji: '💯', category: 'milestone', flavour: 'auto',   description: '100 matches! A true club legend.' },
-  goals_1:            { name: 'First Goal',       emoji: '🥅', category: 'milestone', flavour: 'auto',   description: 'Scored their first goal for the team.' },
-  goals_10:           { name: '10 Goals',         emoji: '⚽', category: 'milestone', flavour: 'auto',   description: '10 career goals.' },
-  goals_25:           { name: '25 Goals',         emoji: '🎯', category: 'milestone', flavour: 'auto',   description: '25 career goals.' },
-  goals_50:           { name: '50 Goals',         emoji: '👑', category: 'milestone', flavour: 'auto',   description: '50 career goals.' },
-  motm_1:             { name: 'First MOTM',       emoji: '🏆', category: 'milestone', flavour: 'auto',   description: 'First Man of the Match award.' },
-  motm_5:             { name: '5× MOTM',          emoji: '🌟', category: 'milestone', flavour: 'auto',   description: '5 Man-of-the-Match awards.' },
-  motm_10:            { name: '10× MOTM',         emoji: '✨', category: 'milestone', flavour: 'auto',   description: '10 Man-of-the-Match awards.' },
-  clean_sheets_1:     { name: 'First Clean Sheet',emoji: '🧼', category: 'milestone', flavour: 'auto',   description: 'First clean sheet for the team.' },
-  clean_sheets_5:     { name: '5 Clean Sheets',   emoji: '🧱', category: 'milestone', flavour: 'auto',   description: '5 career clean sheets.' },
-  clean_sheets_10:    { name: '10 Clean Sheets',  emoji: '🏛️', category: 'milestone', flavour: 'auto',   description: '10 career clean sheets.' },
-  assists_1:          { name: 'First Assist',     emoji: '🎁', category: 'milestone', flavour: 'auto',   description: 'First assist for the team.' },
-  assists_10:         { name: '10 Assists',       emoji: '🪄', category: 'milestone', flavour: 'auto',   description: '10 career assists.' },
-  assists_25:         { name: '25 Assists',       emoji: '🎩', category: 'milestone', flavour: 'auto',   description: '25 career assists.' },
-
-  // 🥅 Goalkeeper specialists
-  penalty_saver:      { name: 'Penalty Saver',    emoji: '🥅', category: 'goalkeeper', flavour: 'manual', description: 'Saved a penalty — pure nerve and timing.' },
-  double_save:        { name: 'Double Save',      emoji: '✋', category: 'goalkeeper', flavour: 'manual', description: 'Parried the first shot, got up and saved the rebound.' },
-  fingertip_save:     { name: 'Fingertip Save',   emoji: '☝️', category: 'goalkeeper', flavour: 'manual', description: 'Flying save — just got enough on it.' },
-  commanding_area:    { name: 'Commanding the Area', emoji: '🧭', category: 'goalkeeper', flavour: 'manual', description: 'Dominated the six-yard box — came and claimed it.' },
-  one_v_one_hero:     { name: 'One-v-One Hero',   emoji: '🆚', category: 'goalkeeper', flavour: 'manual', description: 'Won a crucial 1-v-1 with the striker.' },
-  at_their_feet:      { name: 'At Their Feet',    emoji: '🦶', category: 'goalkeeper', flavour: 'manual', description: 'Brave save down low — right at the striker\'s boots.' },
-  distribution_king:  { name: 'Distribution King',emoji: '📡', category: 'goalkeeper', flavour: 'manual', description: 'Pinpoint kicks and throws started attacks all match.' },
-  claim_master:       { name: 'Claim Master',     emoji: '🙌', category: 'goalkeeper', flavour: 'manual', description: 'Plucked crosses out of the air with confidence.' },
-  keeper_captain:     { name: 'Keeper Captain',   emoji: '🗣️', category: 'goalkeeper', flavour: 'manual', description: 'Organised the back line from the sticks.' },
-  quick_release:      { name: 'Quick Release',    emoji: '⚡', category: 'goalkeeper', flavour: 'manual', description: 'Lightning throw-out launched a counter-attack.' },
-
-  // 🧱 Defender specialists
-  aerial_ace:         { name: 'Aerial Ace',       emoji: '🪽', category: 'defender', flavour: 'manual', description: 'Won everything in the air.' },
-  header_clearance:   { name: 'Header Clearance', emoji: '💨', category: 'defender', flavour: 'manual', description: 'Towering header to clear the danger.' },
-  clean_slide:        { name: 'Clean Slide',      emoji: '🧽', category: 'defender', flavour: 'manual', description: 'Perfect sliding tackle — all ball.' },
-  recovery_run:       { name: 'Recovery Run',     emoji: '🏃', category: 'defender', flavour: 'manual', description: 'Chased back from nowhere to stop a breakaway.' },
-  marking_master:     { name: 'Marking Master',   emoji: '👁️', category: 'defender', flavour: 'manual', description: 'Stuck to their man all match — never let them out of sight.' },
-  block_party:        { name: 'Block Party',      emoji: '🚫', category: 'defender', flavour: 'manual', description: 'Threw themselves in front of shots all game.' },
-  position_perfect:   { name: 'Position Perfect', emoji: '📐', category: 'defender', flavour: 'manual', description: 'Always in the right place — the defender\'s art.' },
-  long_ball_guru:     { name: 'Long-Ball Guru',   emoji: '🎯', category: 'defender', flavour: 'manual', description: 'Pinged a diagonal that split the opposition.' },
-  composed_defender:  { name: 'Composed Defender',emoji: '🧘', category: 'defender', flavour: 'manual', description: 'Played out from the back under pressure.' },
-  overlap_run:        { name: 'Overlap Run',      emoji: '↪️', category: 'defender', flavour: 'manual', description: 'Bombed forward to overlap the winger.' },
-  wingback_engine:    { name: 'Wing-Back Engine', emoji: '🚂', category: 'defender', flavour: 'manual', description: 'Up and down that flank all match.' },
-
-  // 🎛️ Midfielder specialists
-  metronome:          { name: 'Metronome',        emoji: '🎼', category: 'midfielder', flavour: 'manual', description: 'Set the tempo — kept the ball ticking over.' },
-  pass_master:        { name: 'Pass Master',      emoji: '🧵', category: 'midfielder', flavour: 'manual', description: 'Barely misplaced a pass all match.' },
-  playmaker:          { name: 'Playmaker',        emoji: '🎨', category: 'midfielder', flavour: 'manual', description: 'Pulled the strings — made the team tick.' },
-  key_pass:           { name: 'Key Pass',         emoji: '🗝️', category: 'midfielder', flavour: 'manual', description: 'The pass that unlocked the defence.' },
-  ball_winner:        { name: 'Ball Winner',      emoji: '🥊', category: 'midfielder', flavour: 'manual', description: 'Every loose ball ended up with them.' },
-  box_to_box:         { name: 'Box to Box',       emoji: '📦', category: 'midfielder', flavour: 'manual', description: 'Covered every blade of grass — end to end.' },
-  deep_architect:     { name: 'Deep-Lying Architect', emoji: '🏗️', category: 'midfielder', flavour: 'manual', description: 'Ran the game from deep — dictated everything.' },
-  number_ten:         { name: 'Number Ten',       emoji: '🔟', category: 'midfielder', flavour: 'manual', description: 'Found pockets of space between the lines.' },
-  turnover_ninja:     { name: 'Turnover Ninja',   emoji: '🥷', category: 'midfielder', flavour: 'manual', description: 'Won the ball high up and started the attack.' },
-  switch_of_play:     { name: 'Switch of Play',   emoji: '🔀', category: 'midfielder', flavour: 'manual', description: 'Crossfield ball switched the angle of attack.' },
-  eye_of_needle:      { name: 'Eye of the Needle',emoji: '🪡', category: 'midfielder', flavour: 'manual', description: 'Threaded a pass that shouldn\'t have been possible.' },
-
-  // 🏹 Forward specialists
-  target_man:         { name: 'Target Man',       emoji: '🎯', category: 'forward', flavour: 'manual', description: 'Held the ball up under pressure — gave the team a platform.' },
-  first_touch_wizard: { name: 'First-Touch Wizard', emoji: '✨', category: 'forward', flavour: 'manual', description: 'Silky first touch that took the defender out of the game.' },
-  chance_creator:     { name: 'Chance Creator',   emoji: '💡', category: 'forward', flavour: 'manual', description: 'Carved out chance after chance for teammates.' },
-  volley_virtuoso:    { name: 'Volley Virtuoso',  emoji: '🎻', category: 'forward', flavour: 'manual', description: 'Scored with a clean volley.' },
-  header_scorer:      { name: 'Header Scorer',    emoji: '🧠', category: 'forward', flavour: 'manual', description: 'Climbed to head one in.' },
-  chip_finish:        { name: 'Chip Finish',      emoji: '🥄', category: 'forward', flavour: 'manual', description: 'Dinked it over the keeper — ice cold.' },
-  bicycle_kick:       { name: 'Bicycle Kick',     emoji: '🚴', category: 'forward', flavour: 'manual', description: 'Pulled off a bicycle kick — attempted or scored.' },
-  pressing_monster:   { name: 'Pressing Monster', emoji: '👹', category: 'forward', flavour: 'manual', description: 'Harried defenders until they cracked.' },
-  link_up_play:       { name: 'Link-Up Play',     emoji: '🔗', category: 'forward', flavour: 'manual', description: 'Brought others into the game with clever lay-offs.' },
-  channel_runner:     { name: 'Channel Runner',   emoji: '🏃‍♂️', category: 'forward', flavour: 'manual', description: 'Made clever runs into the channels behind.' },
-
-  // 🔥 Attacking moments (expanded)
-  opener:             { name: 'The Opener',       emoji: '🔓', category: 'attacking', flavour: 'manual', description: 'Scored the first goal of the match.' },
-  equaliser:          { name: 'Equaliser',        emoji: '⚖️', category: 'attacking', flavour: 'manual', description: 'Scored the goal that levelled it up.' },
-  winning_goal:       { name: 'Winning Goal',     emoji: '🏆', category: 'attacking', flavour: 'manual', description: 'Scored the match-winner.' },
-  late_winner:        { name: 'Late Winner',      emoji: '⏰', category: 'attacking', flavour: 'manual', description: 'A late goal that sealed the three points.' },
-  comeback_scorer:    { name: 'Comeback Scorer',  emoji: '🔁', category: 'attacking', flavour: 'manual', description: 'Scored when the team was behind — sparked a comeback.' },
-  derby_goal:         { name: 'Derby Goal',       emoji: '🏟️', category: 'attacking', flavour: 'manual', description: 'Scored in a derby or rivalry match.' },
-  first_time_finish:  { name: 'First-Time Finish',emoji: '💥', category: 'attacking', flavour: 'manual', description: 'Hit it first-time and buried it.' },
-  assist_match:       { name: 'Assist',           emoji: '🎁', category: 'attacking', flavour: 'manual', description: 'Provided the pass for a goal.' },
-  double_assist:      { name: 'Double Assist',    emoji: '🎁🎁', category: 'attacking', flavour: 'manual', description: 'Two assists in one match.' },
-  hat_assist:         { name: 'Hat-Trick of Assists', emoji: '🎁🎁🎁', category: 'attacking', flavour: 'manual', description: 'Three assists in a single match.' },
-  through_ball:       { name: 'Through-Ball Artist', emoji: '🏹', category: 'attacking', flavour: 'manual', description: 'Defence-splitting through ball.' },
-  chance_factory:     { name: 'Chance Factory',   emoji: '🏭', category: 'attacking', flavour: 'manual', description: 'Created 3+ clear chances in one match.' },
-
-  // 🎱 Set pieces & dead balls
-  free_kick_ace:      { name: 'Free-Kick Ace',    emoji: '🎯', category: 'setpiece', flavour: 'manual', description: 'Curled a free-kick home or onto target.' },
-  corner_king:        { name: 'Corner King',      emoji: '🚩', category: 'setpiece', flavour: 'manual', description: 'Dangerous delivery from every corner.' },
-  penalty_taker_ace:  { name: 'Penalty Ace',      emoji: '🎯', category: 'setpiece', flavour: 'manual', description: 'Stepped up and calmly scored a penalty.' },
-  dead_ball_master:   { name: 'Dead-Ball Master', emoji: '🎱', category: 'setpiece', flavour: 'manual', description: 'Ran the set-pieces — free kicks, corners, the lot.' },
-  cross_master:       { name: 'Cross Master',     emoji: '➕', category: 'setpiece', flavour: 'manual', description: 'Whipped in cross after cross into dangerous areas.' },
-  long_throw_weapon:  { name: 'Long-Throw Weapon',emoji: '🏐', category: 'setpiece', flavour: 'manual', description: 'Long throws causing chaos in the box.' },
-
-  // ⚡ Skill tricks (expanded)
-  stepover_specialist: { name: 'Stepover Specialist', emoji: '🕺', category: 'skill', flavour: 'manual', description: 'Stepovers sent the defender the wrong way.' },
-  scissor_kick:       { name: 'Scissor Kick',     emoji: '✂️', category: 'skill', flavour: 'manual', description: 'Audacious scissor-kick attempt.' },
-  elastico:           { name: 'Elastico',         emoji: '🪀', category: 'skill', flavour: 'manual', description: 'Flicked the ball one way and went the other.' },
-  cruyff_turn:        { name: 'Cruyff Turn',      emoji: '🌀', category: 'skill', flavour: 'manual', description: 'Classic Cruyff turn to shake the marker.' },
-  backheel_hero:      { name: 'Backheel Hero',    emoji: '👠', category: 'skill', flavour: 'manual', description: 'Cheeky backheel that came off.' },
-  no_look_pass:       { name: 'No-Look Pass',     emoji: '🙈', category: 'skill', flavour: 'manual', description: 'Disguised pass to set up a teammate.' },
-
-  // 🧠 Attitude (expanded)
-  captain_armband:    { name: 'Captain\'s Armband', emoji: '🎽', category: 'attitude', flavour: 'manual', description: 'Wore the armband and led the team.' },
-  first_full_game:    { name: 'First Full Game',  emoji: '⏱️', category: 'attitude', flavour: 'manual', description: 'Played their first full 90 minutes.' },
-  late_bloomer:       { name: 'Late Bloomer',     emoji: '🌸', category: 'attitude', flavour: 'manual', description: 'Quiet first half, took over the second.' },
-  silent_hero:        { name: 'Silent Hero',      emoji: '🤫', category: 'attitude', flavour: 'manual', description: 'No fanfare — just quietly brilliant.' },
-  second_chance:      { name: 'Second Chance',    emoji: '🔄', category: 'attitude', flavour: 'manual', description: 'Missed a big chance, then made up for it.' },
-  bench_energy:       { name: 'Bench Energy',     emoji: '🔋', category: 'attitude', flavour: 'manual', description: 'Biggest cheerleader on the sidelines.' },
-
-  // 🎉 Fun (expanded — matchday character badges)
-  mud_magnet:         { name: 'Mud Magnet',       emoji: '🟫', category: 'fun', flavour: 'manual', description: 'Left the pitch unrecognisable — caked head to toe in mud.' },
-  goal_dance:         { name: 'Goal Dance',       emoji: '💃', category: 'fun', flavour: 'manual', description: 'Best celebration dance of the day.' },
-  keepy_up_king:      { name: 'Keepy-Up King',    emoji: '🤹', category: 'fun', flavour: 'manual', description: 'Pre-match keepy-up record holder.' },
-  warm_up_mvp:        { name: 'Warm-Up MVP',      emoji: '🏃', category: 'fun', flavour: 'manual', description: 'Set the tone in the warm-up — everyone else had to catch up.' },
-  post_match_pundit:  { name: 'Post-Match Pundit',emoji: '🎤', category: 'fun', flavour: 'manual', description: 'Best post-match analysis in the huddle.' },
-  bag_hero:           { name: 'Bag Hero',         emoji: '🎒', category: 'fun', flavour: 'manual', description: 'Helped pack the kit away without being asked.' },
-  snack_hero:         { name: 'Snack Hero',       emoji: '🍎', category: 'fun', flavour: 'manual', description: 'Brought the best half-time snacks.' },
-  water_boy:          { name: 'Water Carrier',    emoji: '💧', category: 'fun', flavour: 'manual', description: 'Kept the whole bench hydrated.' },
-  cone_carrier:       { name: 'Cone Carrier',     emoji: '🔺', category: 'fun', flavour: 'manual', description: 'First in, last out — helped set up and pack down.' },
-  dressing_room_dj:   { name: 'Dressing-Room DJ', emoji: '🎧', category: 'fun', flavour: 'manual', description: 'Brought the tunes — hyped the whole team up.' },
-  photo_finish:       { name: 'Photo Finish',     emoji: '📸', category: 'fun', flavour: 'manual', description: 'Star of the match-day team photo.' },
-  fresh_haircut:      { name: 'Fresh Haircut',    emoji: '💈', category: 'fun', flavour: 'manual', description: 'Fresh cut, fresh form.' },
-  sock_style:         { name: 'Sock Style',       emoji: '🧦', category: 'fun', flavour: 'manual', description: 'Best socks on the pitch.' },
-  matchday_mascot:    { name: 'Matchday Mascot',  emoji: '🐾', category: 'fun', flavour: 'manual', description: 'Brought the matchday energy from first whistle.' },
-  selfie_star:        { name: 'Selfie Star',      emoji: '🤳', category: 'fun', flavour: 'manual', description: 'Star of the post-match selfie.' },
-  tunnel_walk:        { name: 'Tunnel Walk',      emoji: '🚪', category: 'fun', flavour: 'manual', description: 'Walked out looking like a proper pro.' },
-  windmill_celly:     { name: 'Windmill Celly',   emoji: '🌪️', category: 'fun', flavour: 'manual', description: 'Spun away celebrating — pure joy.' },
-  ref_assistant:      { name: 'Ref\'s Assistant', emoji: '🚩', category: 'fun', flavour: 'manual', description: 'Stepped up to run the line when the ref needed a hand.' },
-  full_kit_hero:      { name: 'Full-Kit Hero',    emoji: '🎽', category: 'fun', flavour: 'manual', description: 'Turned up kitted out head to toe.' },
-  goal_commentator:   { name: 'Own Commentator',  emoji: '📻', category: 'fun', flavour: 'manual', description: 'Called their own goal as it went in.' },
-  mismatched_boots:   { name: 'Mismatched Boots', emoji: '👟', category: 'fun', flavour: 'manual', description: 'Turned up with mismatched boots and still bossed it.' },
-  kit_forgetful:      { name: 'Kit Scramble',     emoji: '🎽', category: 'fun', flavour: 'manual', description: 'Forgot something but still made it onto the pitch — barely.' },
-  half_time_hero:     { name: 'Half-Time Hero',   emoji: '🍊', category: 'fun', flavour: 'manual', description: 'Came out of the half-time chat a different player.' },
-  whistle_speedster:  { name: 'Whistle Sprinter', emoji: '🏁', category: 'fun', flavour: 'manual', description: 'Off like a rocket the second the whistle blew.' },
-  thunderclap:        { name: 'Thunder Clap',     emoji: '👏', category: 'fun', flavour: 'manual', description: 'Led the post-match cheer for the team.' },
-};
-
-const BADGE_CATEGORY_LABELS = {
-  goalkeeper:'🥅 Goalkeeper',
-  defender:  '🧱 Defender',
-  midfielder:'🎛️ Midfielder',
-  forward:   '🏹 Forward',
-  attacking: '🔥 Attacking',
-  skill:     '⚡ Skill',
-  defending: '🛡️ Defending',
-  setpiece:  '🎱 Set pieces',
-  attitude:  '🧠 Attitude',
-  teamwork:  '🤝 Teamwork',
-  fun:       '🎉 Fun',
-  milestone: '🏆 Milestone',
-};
-
-// All-time order for categories in the award modal + card display.
-const BADGE_CATEGORY_ORDER = ['goalkeeper','defender','midfielder','forward','attacking','skill','defending','setpiece','attitude','teamwork','fun','milestone'];
-
-// Max badge chips shown inline on the public card before overflow into "See all".
-const CARD_BADGES_MAX = 9;
-
-function badgeEntry(key) { return BADGE_CATALOG[key] || null; }
-function badgeEmoji(key) { return badgeEntry(key)?.emoji || '🏅'; }
-function badgeName(key)  { return badgeEntry(key)?.name  || key; }
-
-// Format an ISO timestamp as "5 Apr 2026" for the badge detail sheet.
-function formatBadgeDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-// Module-scope cache of badges per team. We read all team badges at once because
-// a player modal may be opened any time, and the public card will want every
-// unlocked sibling's badges available without a second round-trip.
-// Shape: { [teamId]: Array<{id, player_id, team_id, badge_key, awarded_at, awarded_by, lineup_id, season_start_year, note}> }
-let _teamBadges = {};
-
-// Fetch all badges for a team and cache them. Returns the array (possibly empty).
-// Swallows errors silently so a badge-table migration lag doesn't break the
-// public card or Squad modal — callers fall back to an empty list.
-async function fetchTeamBadges(teamId) {
-  if (!teamId) return [];
-  const { data, error } = await supabase
-    .from('player_badges')
-    .select('id,player_id,team_id,badge_key,awarded_at,awarded_by,lineup_id,season_start_year,note')
-    .eq('team_id', teamId)
-    .order('awarded_at', { ascending: false });
-  if (error) {
-    console.warn('fetchTeamBadges error', error.message || error);
-    _teamBadges[teamId] = [];
-    return [];
-  }
-  _teamBadges[teamId] = data || [];
-  return _teamBadges[teamId];
-}
-
-function getCachedTeamBadges(teamId) {
-  return _teamBadges[teamId] || [];
-}
-
-// Filter the cache to a single player, newest first. `seasonYear` null = all-time.
-function badgesForPlayer(teamId, playerId, seasonYear) {
-  const all = getCachedTeamBadges(teamId);
-  const filtered = all.filter(b => b.player_id === playerId);
-  if (seasonYear == null) return filtered;
-  return filtered.filter(b => {
-    if (b.season_start_year != null) return b.season_start_year === seasonYear;
-    // Older rows without season_start_year — derive from awarded_at as a fallback.
-    const d = b.awarded_at ? new Date(b.awarded_at) : null;
-    if (!d || isNaN(d.getTime())) return false;
-    return computeCurrentSeasonStartYear(d) === seasonYear;
-  });
-}
-
-// Insert a manual badge. Auto-fills awarded_by + season_start_year. Returns
-// the inserted row, or throws on error so callers can surface the message.
-async function awardManualBadge({ teamId, playerId, badgeKey, note, lineupId }) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in.');
-  const entry = badgeEntry(badgeKey);
-  if (!entry) throw new Error('Unknown badge.');
-  const row = {
-    team_id: teamId,
-    player_id: playerId,
-    badge_key: badgeKey,
-    awarded_by: user.id,
-    note: (note && note.trim()) ? note.trim() : null,
-    season_start_year: computeCurrentSeasonStartYear(),
-  };
-  if (lineupId) row.lineup_id = lineupId;
-  const { data, error } = await supabase.from('player_badges').insert(row).select().single();
-  if (error) throw error;
-  // Keep cache in sync so UI redraws without a refetch.
-  if (!_teamBadges[teamId]) _teamBadges[teamId] = [];
-  _teamBadges[teamId].unshift(data);
-  try { await logAudit(teamId, 'player_badge', data.id, 'create', { badge_key: badgeKey, player_id: playerId, note: row.note }); } catch {}
-  return data;
-}
-
-async function removeBadge(badgeId, teamId) {
-  const { error } = await supabase.from('player_badges').delete().eq('id', badgeId);
-  if (error) throw error;
-  if (_teamBadges[teamId]) {
-    _teamBadges[teamId] = _teamBadges[teamId].filter(b => b.id !== badgeId);
-  }
-  try { await logAudit(teamId, 'player_badge', badgeId, 'delete', {}); } catch {}
-}
-
-// ---------- Coach's Focus — match cues (Slice 10 Phase 2) ----------
-// The cue catalog is a seeded taxonomy (~86 entries) covering FA Four Corner Model,
-// ELM (Effort/Learning/Mistakes), ROOTS (Rules/Opponents/Officials/Teammates/Self),
-// Emotional Tank, welfare flags, player roles, and encouragement. It's effectively
-// static from the client's perspective — fetched once per session and held in a
-// module-scope map keyed by slug. Admin CRUD for the catalog is a later phase.
-// Shape per row:
-//   { slug, label, emoji, description, framework, corner, sub_concept,
-//     visibility, age_band, frequency_cap, default_pairs_with, active, sort_order }
-let _cueCatalog = null;        // map of slug -> row, or null if not loaded yet
-let _cueCatalogLoading = null; // in-flight promise so parallel callers share one fetch
-
-async function fetchCueCatalog() {
-  if (_cueCatalog) return _cueCatalog;
-  if (_cueCatalogLoading) return _cueCatalogLoading;
-  _cueCatalogLoading = (async () => {
-    const { data, error } = await supabase
-      .from('cue_catalog')
-      .select('slug,label,emoji,description,framework,corner,sub_concept,visibility,age_band,frequency_cap,default_pairs_with,active,sort_order')
-      .eq('active', true)
-      .order('sort_order', { ascending: true })
-      .order('slug', { ascending: true });
-    if (error) {
-      console.warn('fetchCueCatalog error', error.message || error);
-      _cueCatalogLoading = null;
-      return {};
-    }
-    const map = {};
-    (data || []).forEach(r => { map[r.slug] = r; });
-    _cueCatalog = map;
-    return map;
-  })();
-  return _cueCatalogLoading;
-}
-
-function getCachedCueCatalog() { return _cueCatalog || {}; }
-function cueEntry(slug)  { return (_cueCatalog && _cueCatalog[slug]) || null; }
-function cueLabel(slug)  { return cueEntry(slug)?.label || slug; }
-function cueEmoji(slug)  { return cueEntry(slug)?.emoji || '🎯'; }
-
-// Match cues cache. Shape: { [lineupId]: Array<row> }.
-// Rows include: id, team_id, lineup_id, player_id, cue_slug, custom_note,
-// is_primary, visibility, status, outcome_note, sort_order, set_by,
-// reviewed_by, created_at, updated_at.
-let _matchCues = {};
-// In-flight guard so concurrent applyMatchDecorations calls don't each fire a
-// fetch for the same lineup. Keyed by lineupId → Promise.
-let _matchCuesInflight = {};
-
-async function fetchMatchCues(teamId, lineupId) {
-  if (!teamId || !lineupId) return [];
-  const { data, error } = await supabase
-    .from('match_cues')
-    .select('id,team_id,lineup_id,player_id,cue_slug,custom_note,is_primary,visibility,status,outcome_note,sort_order,set_by,reviewed_by,created_at,updated_at')
-    .eq('team_id', teamId)
-    .eq('lineup_id', lineupId)
-    .order('is_primary', { ascending: false })
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true });
-  if (error) {
-    console.warn('fetchMatchCues error', error.message || error);
-    _matchCues[lineupId] = [];
-    return [];
-  }
-  _matchCues[lineupId] = data || [];
-  return _matchCues[lineupId];
-}
-
-function getCachedMatchCues(lineupId) {
-  return _matchCues[lineupId] || [];
-}
-
-function cuesForPlayer(lineupId, playerId) {
-  return getCachedMatchCues(lineupId).filter(c => c.player_id === playerId);
-}
-
-// Insert a new match cue. Accepts either cue_slug OR a free-text custom_note
-// (both is fine too — a slug-with-a-personalising-note is the sweet spot).
-// If is_primary is set and another primary already exists for this player on
-// this lineup, the existing one is demoted first (unique partial index on DB
-// would otherwise reject the insert).
-async function setMatchCue({ teamId, lineupId, playerId, cueSlug, customNote, isPrimary, visibility }) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in.');
-  if (!cueSlug && !(customNote && customNote.trim())) {
-    throw new Error('Pick a cue or write a custom note.');
-  }
-  // Resolve effective visibility — default to catalog's visibility if slug given.
-  let effVisibility = visibility;
-  if (!effVisibility) {
-    const entry = cueSlug ? cueEntry(cueSlug) : null;
-    effVisibility = entry?.visibility || 'parent_visible';
-  }
-
-  // If primary requested, demote any existing primary for this player on this lineup.
-  if (isPrimary) {
-    const existingPrimary = cuesForPlayer(lineupId, playerId).find(c => c.is_primary);
-    if (existingPrimary) {
-      await supabase.from('match_cues').update({ is_primary: false }).eq('id', existingPrimary.id);
-      const cache = _matchCues[lineupId] || [];
-      const idx = cache.findIndex(c => c.id === existingPrimary.id);
-      if (idx >= 0) cache[idx] = { ...cache[idx], is_primary: false };
-    }
-  }
-
-  // Sort_order: append at the end of this player's existing cues.
-  const existingForPlayer = cuesForPlayer(lineupId, playerId);
-  const nextSort = existingForPlayer.length
-    ? Math.max(...existingForPlayer.map(c => c.sort_order || 0)) + 1
-    : 0;
-
-  const row = {
-    team_id: teamId,
-    lineup_id: lineupId,
-    player_id: playerId,
-    cue_slug: cueSlug || null,
-    custom_note: (customNote && customNote.trim()) ? customNote.trim().slice(0, 200) : null,
-    is_primary: !!isPrimary,
-    visibility: effVisibility,
-    status: 'set',
-    sort_order: nextSort,
-    set_by: user.id,
-  };
-  const { data, error } = await supabase.from('match_cues').insert(row).select().single();
-  if (error) throw error;
-  if (!_matchCues[lineupId]) _matchCues[lineupId] = [];
-  _matchCues[lineupId].push(data);
-  try { await logAudit(teamId, 'match_cue', data.id, 'create', { player_id: playerId, cue_slug: cueSlug, is_primary: !!isPrimary }); } catch {}
-  return data;
-}
-
-// Update an existing cue row. Accepts partial patch — any of { cue_slug,
-// custom_note, is_primary, visibility, status, outcome_note }.
-async function updateMatchCue(cueId, lineupId, patch) {
-  if (!cueId) throw new Error('Missing cue id.');
-  const cache = _matchCues[lineupId] || [];
-  const existing = cache.find(c => c.id === cueId);
-
-  const p = {};
-  if ('cue_slug'    in patch) p.cue_slug    = patch.cue_slug || null;
-  if ('custom_note' in patch) p.custom_note = (patch.custom_note && patch.custom_note.trim()) ? patch.custom_note.trim().slice(0, 200) : null;
-  if ('is_primary'  in patch) p.is_primary  = !!patch.is_primary;
-  if ('visibility'  in patch) p.visibility  = patch.visibility;
-  if ('status'      in patch) p.status      = patch.status;
-  if ('outcome_note' in patch) p.outcome_note = (patch.outcome_note && patch.outcome_note.trim()) ? patch.outcome_note.trim().slice(0, 300) : null;
-
-  // If flipping is_primary true, demote the current primary first.
-  if (p.is_primary === true && existing) {
-    const currentPrimary = cache.find(c => c.is_primary && c.player_id === existing.player_id && c.id !== cueId);
-    if (currentPrimary) {
-      await supabase.from('match_cues').update({ is_primary: false }).eq('id', currentPrimary.id);
-      const idx = cache.findIndex(c => c.id === currentPrimary.id);
-      if (idx >= 0) cache[idx] = { ...cache[idx], is_primary: false };
-    }
-  }
-
-  const { data, error } = await supabase.from('match_cues').update(p).eq('id', cueId).select().single();
-  if (error) throw error;
-  const idx = cache.findIndex(c => c.id === cueId);
-  if (idx >= 0) cache[idx] = data;
-  const teamId = data.team_id;
-  try { await logAudit(teamId, 'match_cue', cueId, 'update', p); } catch {}
-  return data;
-}
-
-async function deleteMatchCue(cueId, lineupId, teamId) {
-  if (!cueId) return;
-  const { error } = await supabase.from('match_cues').delete().eq('id', cueId);
-  if (error) throw error;
-  if (_matchCues[lineupId]) {
-    _matchCues[lineupId] = _matchCues[lineupId].filter(c => c.id !== cueId);
-  }
-  try { await logAudit(teamId, 'match_cue', cueId, 'delete', {}); } catch {}
-}
-
 // ---------- Router ----------
 function currentRoute() {
   const h = location.hash.replace(/^#\/?/, '');
@@ -798,7 +214,6 @@ function currentRoute() {
   if (h.startsWith('view/'))  return { name: 'view',  lineupId: h.slice(5),  mode: 'match' };
   if (h.startsWith('avail/')) return { name: 'view',  lineupId: h.slice(6),  mode: 'avail' };
   if (h.startsWith('card/'))  return { name: 'card',  teamId:   h.slice(5) };
-  if (h.startsWith('train/')) return { name: 'train', teamId:   h.slice(6) };
   return { name: 'home' };
 }
 window.addEventListener('hashchange', render);
@@ -827,11 +242,10 @@ function resetHeader() {
 }
 
 async function render() {
-  // Clear the body classes that public-facing routes set. If we're still on the
-  // relevant route they get re-added below; if we're navigating away this
-  // removes the header-hide CSS.
+  // Clear the body class that public card mode sets. If we're still on the
+  // card route it gets re-added below; if we're navigating away this removes
+  // the header-hide CSS.
   document.body.classList.remove('public-card-view');
-  document.body.classList.remove('parent-view-active');
 
   // Public parent view — no auth required
   const preRoute = currentRoute();
@@ -846,14 +260,6 @@ async function render() {
     resetHeader();
     userBar.innerHTML = '';
     await renderPlayerCardPage(preRoute.teamId);
-    return;
-  }
-  // Public training view — no auth required. Permanent rolling link per team
-  // that always shows the next upcoming session (flips to next week 1h after end).
-  if (preRoute.name === 'train') {
-    resetHeader();
-    userBar.innerHTML = '';
-    await renderTrainingPublicView(preRoute.teamId);
     return;
   }
 
@@ -1853,10 +1259,8 @@ async function renderPlayerCardPage(teamId) {
   document.body.classList.add('public-card-view');
   appEl.innerHTML = `<p class="loading">Loading…</p>`;
 
-  // Fetch team + team's visible lineups (published/availability only, per the RLS policy)
-  // + team badges. Run reads in parallel; team fetch falls back to minimal columns
-  // if age_group isn't migrated yet. Badge fetch swallows errors silently (table
-  // may not be migrated yet).
+  // Fetch team + team's visible lineups (published/availability only, per the RLS policy).
+  // Run both reads in parallel; fall back to minimal columns if age_group isn't migrated yet.
   const [teamRes, lineupRes] = await Promise.all([
     (async () => {
       let r = await supabase.from('teams').select('id,name,age_group,age_group_season_year,home_ground_name').eq('id', teamId).maybeSingle();
@@ -1865,8 +1269,7 @@ async function renderPlayerCardPage(teamId) {
       }
       return r;
     })(),
-    supabase.from('lineups').select('id,team_id,game_date,kickoff_time,opponent,home_away,lineup_status,published,our_score_ft,opp_score_ft,data').eq('team_id', teamId),
-    fetchTeamBadges(teamId)
+    supabase.from('lineups').select('id,team_id,game_date,kickoff_time,opponent,home_away,lineup_status,published,our_score_ft,opp_score_ft,data').eq('team_id', teamId)
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -1986,55 +1389,6 @@ function renderPlayerCardBody() {
     : 'All-time';
   const ageTag = ageGroupLabel(team);
 
-  // Earned badges for this sibling, filtered to the selected season. Falls
-  // back to an empty list if the player_badges migration hasn't been run yet.
-  // We GROUP by badge_key so multiple awards of the same badge (e.g. Fair Play
-  // x2) render as a single stacked chip with a count pill in the corner. The
-  // cache is sorted DESC by awarded_at so group.latest is always the newest.
-  const allPlayerBadges = badgesForPlayer(team.id, p.id, seasonYear);
-  const groupsByKey = new Map();
-  for (const b of allPlayerBadges) {
-    if (!groupsByKey.has(b.badge_key)) {
-      groupsByKey.set(b.badge_key, { key: b.badge_key, items: [b], latest: b });
-    } else {
-      const g = groupsByKey.get(b.badge_key);
-      g.items.push(b);
-      // cache is already sorted DESC but be defensive in case of mixed fetches
-      if (!g.latest || (b.awarded_at > g.latest.awarded_at)) g.latest = b;
-    }
-  }
-  const badgeGroups = Array.from(groupsByKey.values());
-  const groupsToShow = badgeGroups.slice(0, CARD_BADGES_MAX);
-  const overflowCount = Math.max(0, badgeGroups.length - CARD_BADGES_MAX);
-  const badgesRowHtml = badgeGroups.length === 0
-    ? ''
-    : `
-      <div class="pc-badges-row" aria-label="Earned badges">
-        ${groupsToShow.map(g => {
-          const e = badgeEntry(g.key);
-          const name = e ? e.name : g.key;
-          const count = g.items.length;
-          const latest = g.latest;
-          // Tooltip shows name + optional latest coach note, plus a "×N" hint
-          // when the badge has been earned more than once.
-          const suffix = count > 1 ? ` (×${count})` : '';
-          const tip = latest?.note ? `${name}${suffix} — ${latest.note}` : `${name}${suffix}`;
-          const stackClass = count > 1 ? ' has-stack' : '';
-          const countPill = count > 1
-            ? `<span class="pc-badge-count" aria-label="${count} times">×${count}</span>`
-            : '';
-          // We pass the LATEST badge's id on data-badge-id so the click still
-          // opens a detail sheet; that sheet now renders the full stack list
-          // when the group has multiple items.
-          return `<button type="button" class="pc-badge-chip${stackClass}" data-badge-id="${escapeHtml(latest.id)}" data-badge-key="${escapeHtml(g.key)}" aria-label="${escapeHtml(name)}${count > 1 ? ' (' + count + ' times)' : ''}" title="${escapeHtml(tip)}"><span class="pc-badge-emoji">${badgeEmoji(g.key)}</span>${countPill}</button>`;
-        }).join('')}
-        ${overflowCount > 0
-          ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all ${badgeGroups.length} badges">+${overflowCount}</button>`
-          : (badgeGroups.length > 4
-              ? `<button type="button" class="pc-badge-more" data-badges-see-all aria-label="See all badges" title="See all badges">All</button>`
-              : '')}
-      </div>`;
-
   appEl.innerHTML = `
     <div class="player-card-wrap">
       <div class="pc-topline">
@@ -2054,31 +1408,28 @@ function renderPlayerCardBody() {
         <button type="button" class="pc-arrow" id="pc-next-season" ${hasNext ? '' : 'disabled'} aria-label="Next season">›</button>
       </div>
 
-      <div class="pc-card-shell">
-        <div class="pc-card">
-          <!-- Background is the GOLD_FIFA_22.png template; everything below is
-               absolutely-positioned overlay. -->
-          <div class="pc-num-col">
-            <div class="pc-num">${ss}</div>
-            <div class="pc-pos">${escapeHtml(pos)}</div>
-            <div class="pc-crest" aria-hidden="true">
-              <img src="logo.png" alt="" />
-            </div>
-          </div>
-          <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
-            ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
-          </div>
-          <div class="pc-name">${escapeHtml(p.name || '—')}</div>
-          <div class="pc-stats-grid">
-            <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
-            <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOTM</span></div>
-            <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
-            <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Subs</span></div>
-            <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Apps</span></div>
-            <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
+      <div class="pc-card">
+        <!-- Background is the GOLD_FIFA_22.png template; everything below is
+             absolutely-positioned overlay. -->
+        <div class="pc-num-col">
+          <div class="pc-num">${ss}</div>
+          <div class="pc-pos">${escapeHtml(pos)}</div>
+          <div class="pc-crest" aria-hidden="true">
+            <img src="logo.png" alt="" />
           </div>
         </div>
-        ${badgesRowHtml}
+        <div class="pc-photo ${p.photo_url ? 'has-photo' : ''}" style="${photoStyle}">
+          ${p.photo_url ? '' : '<span class="pc-photo-letter">' + escapeHtml((p.name?.[0] || '?').toUpperCase()) + '</span>'}
+        </div>
+        <div class="pc-name">${escapeHtml(p.name || '—')}</div>
+        <div class="pc-stats-grid">
+          <div class="pc-stat"><span class="pc-stat-val">${stats.goals}</span><span class="pc-stat-lbl">Goals</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.motm}</span><span class="pc-stat-lbl">MOTM</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.starts}</span><span class="pc-stat-lbl">Starts</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.bench}</span><span class="pc-stat-lbl">Subs</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.apps}</span><span class="pc-stat-lbl">Apps</span></div>
+          <div class="pc-stat"><span class="pc-stat-val">${stats.wins}-${stats.draws}-${stats.losses}</span><span class="pc-stat-lbl">W-D-L</span></div>
+        </div>
       </div>
 
       ${seasonsAvailable.length === 0
@@ -2122,622 +1473,6 @@ function renderPlayerCardBody() {
     _cardState.selectedPlayerIdx = 0;
     renderPlayerCardBody();
   };
-
-  // Badge chip tap → bottom-sheet detail. "See all" → full grid. Both are
-  // read-only views — no admin controls on the public card (parents/kids only).
-  // Stacked chips pass the whole group so the sheet can list every award.
-  document.querySelectorAll('.pc-badge-chip[data-badge-key]').forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.badgeKey;
-      const group = groupsByKey.get(key);
-      if (group) openBadgeDetailSheet(group.latest, group);
-    };
-  });
-  const seeAllBtn = document.querySelector('[data-badges-see-all]');
-  if (seeAllBtn) seeAllBtn.onclick = () => openBadgesGridModal(badgeGroups, p);
-}
-
-// ---------- Public training view (#/train/{team_id}) ----------
-// Permanent rolling parent link. Always shows the next upcoming training
-// session (flips to next week 1h after end time). Parents unlock with the
-// existing kid / family access code — same mechanism as the availability
-// flow, just keyed by team rather than lineup.
-async function renderTrainingPublicView(teamId) {
-  if (!teamId) {
-    appEl.innerHTML = `<div class="card"><p class="error">Team id missing from URL.</p></div>`;
-    return;
-  }
-  document.body.classList.add('parent-view-active');
-  appEl.innerHTML = `<p class="loading">Loading training…</p>`;
-
-  // Fetch team (tolerant of training_schedule column not existing yet — returns
-  // the minimal shape and we'll show "not set up" below).
-  let teamRes = await supabase
-    .from('teams')
-    .select('id,name,training_schedule,home_ground_name,home_ground_postcode')
-    .eq('id', teamId).maybeSingle();
-  if (teamRes.error && /training_schedule/i.test(teamRes.error.message || '')) {
-    teamRes = await supabase
-      .from('teams')
-      .select('id,name,home_ground_name,home_ground_postcode')
-      .eq('id', teamId).maybeSingle();
-  }
-  if (teamRes.error || !teamRes.data) {
-    appEl.innerHTML = `
-      <div class="pv-wrap">
-        <div class="pv-card"><h2>Training unavailable</h2>
-        <p class="muted">We couldn't find that team.</p></div>
-      </div>`;
-    return;
-  }
-  const team = teamRes.data;
-  const slots = parseTrainingSchedule(team);
-
-  if (!slots.length) {
-    appEl.innerHTML = `
-      <div class="pv-wrap">
-        <div class="pv-card">
-          <h2>${escapeHtml(team.name || 'Team')} — Training</h2>
-          <p class="muted">The coach hasn't set up a weekly training schedule yet. Check back soon.</p>
-        </div>
-      </div>`;
-    return;
-  }
-
-  // Resolve the next upcoming session locally (slot + date).
-  const next = nextUpcomingTraining(team);
-  if (!next) {
-    appEl.innerHTML = `
-      <div class="pv-wrap">
-        <div class="pv-card">
-          <h2>${escapeHtml(team.name || 'Team')} — Training</h2>
-          <p class="muted">No upcoming training session could be resolved from the schedule.</p>
-        </div>
-      </div>`;
-    return;
-  }
-  const dateStr = toLocalDateStr(next.date);
-
-  // Ensure a concrete training_sessions row exists for that date via the
-  // security-definer RPC. Falls back gracefully to a virtual session if the
-  // RPC isn't in place yet — in that case attendance can't be saved, but the
-  // page still renders usefully for parents.
-  let session = null;
-  let sessionRpcFailed = false;
-  {
-    const { data, error } = await supabase.rpc('ensure_training_session', {
-      p_team_id: team.id,
-      p_date:    dateStr
-    });
-    if (error) {
-      sessionRpcFailed = true;
-      console.warn('ensure_training_session failed:', error.message);
-    } else if (data) {
-      // RPC returns a row (or an array of one row depending on driver).
-      session = Array.isArray(data) ? data[0] : data;
-    }
-  }
-
-  // If the coach has cancelled or rescheduled this week's session, apply
-  // overrides from the row (session.status / session.scheduled_start/end /
-  // session.location).
-  const effectiveSlot = {
-    day: next.slot.day,
-    start: session?.scheduled_start || next.slot.start,
-    end:   session?.scheduled_end   || next.slot.end,
-    location: session?.location ?? next.slot.location ?? team.home_ground_name ?? ''
-  };
-  const cancelled = session && session.status === 'cancelled';
-
-  // Load unlocked player IDs for this team (localStorage). If none, show code entry.
-  const unlockedIds = getUnlockedPlayers(team.id);
-  let unlockedPlayers = [];
-  let existingAttendance = {}; // { player_id: { intent, note } }
-  if (unlockedIds.length) {
-    const { data: pubPlayers } = await supabase
-      .from('players')
-      .select('id,name,number,position,photo_url')
-      .eq('team_id', team.id)
-      .in('id', unlockedIds);
-    unlockedPlayers = (pubPlayers || []).sort((a, b) => {
-      const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
-      if (na !== nb) return na - nb;
-      return (a.name || '').localeCompare(b.name || '');
-    });
-    if (session?.id && unlockedPlayers.length) {
-      const { data: att } = await supabase
-        .from('training_attendance')
-        .select('player_id,intent,note,responded_by')
-        .eq('session_id', session.id)
-        .in('player_id', unlockedPlayers.map(p => p.id));
-      (att || []).forEach(r => { existingAttendance[r.player_id] = r; });
-    }
-  }
-
-  // Build the page.
-  const header = `
-    <div class="pv-card">
-      <h2 style="margin:0 0 0.25rem">${escapeHtml(team.name || 'Team')} — Training</h2>
-      <p class="muted" style="margin:0">${fmtTrainingHeader(next.date, effectiveSlot)}</p>
-      ${effectiveSlot.location ? `<p class="muted" style="margin:0.3rem 0 0">📍 ${escapeHtml(effectiveSlot.location)}</p>` : ''}
-      ${cancelled ? `<p class="error" style="margin:0.5rem 0 0"><strong>⚠ This session has been cancelled.</strong>${session?.notes ? ' ' + escapeHtml(session.notes) : ''}</p>` : ''}
-      ${(session?.status === 'moved' || (session && (session.scheduled_start !== next.slot.start || session.scheduled_end !== next.slot.end))) && !cancelled ? `<p class="muted" style="margin:0.4rem 0 0">ℹ Moved from the usual time — new details above.</p>` : ''}
-    </div>`;
-
-  const intentBtn = (pid, value, label, emoji, activeVal) => `
-    <button type="button" class="train-intent-btn" data-player="${pid}" data-intent="${value}"
-      style="flex:1;padding:0.5rem 0.3rem;border:1px solid ${activeVal === value ? '#2a7' : '#ccc'};background:${activeVal === value ? '#2a7' : '#fff'};color:${activeVal === value ? '#fff' : '#333'};font-size:0.8rem;cursor:pointer;border-radius:6px">
-      ${emoji} ${label}
-    </button>`;
-
-  const playerRowsHtml = unlockedPlayers.map(p => {
-    const cur = existingAttendance[p.id];
-    const photoHtml = p.photo_url
-      ? `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
-      : `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
-    const lastLine = cur
-      ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.intent}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
-      : `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
-    return `
-      <div class="avail-row" data-train-row="${p.id}" style="padding:0.6rem 0;border-top:1px solid #eee">
-        <div style="display:flex;gap:0.6rem;align-items:center">
-          ${photoHtml}
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:600">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
-            ${lastLine}
-          </div>
-        </div>
-        <div style="display:flex;gap:0.35rem;margin-top:0.5rem">
-          ${intentBtn(p.id, 'available',   'Available',   '✅', cur?.intent)}
-          ${intentBtn(p.id, 'maybe',       'Maybe',       '🤔', cur?.intent)}
-          ${intentBtn(p.id, 'unavailable', 'Unavailable', '❌', cur?.intent)}
-        </div>
-        <input type="text" class="train-note" data-train-note="${p.id}" value="${escapeHtml(cur?.note || '')}"
-          placeholder="Optional note"
-          style="margin-top:0.4rem;width:100%;padding:0.4rem;font-size:0.8rem;border:1px solid #ddd;border-radius:4px" />
-      </div>`;
-  }).join('');
-
-  const rememberedName = (() => { try { return localStorage.getItem('pv_responder_name') || ''; } catch { return ''; } })();
-
-  const attendanceCard = cancelled ? '' : `
-    <div class="pv-card">
-      <h3 class="pv-card-title" style="margin-top:0">Let the coach know</h3>
-      <p class="muted" style="font-size:0.85rem;margin-top:0">Mark whether your child will be at this training session. You can update this right up to the session.</p>
-      ${unlockedPlayers.length ? `
-        <label style="font-size:0.75rem;margin-top:0.5rem;display:block">Your name (optional)</label>
-        <input type="text" id="train-responder" value="${escapeHtml(rememberedName)}" placeholder="e.g. Sarah (Alex's mum)"
-          style="width:100%;padding:0.45rem;font-size:0.9rem;border:1px solid #ddd;border-radius:4px" />
-        <div id="train-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
-        <div id="train-list" style="margin-top:0.5rem">${playerRowsHtml}</div>
-        ${sessionRpcFailed ? `<p class="error" style="font-size:0.75rem;margin-top:0.4rem">⚠ Saving attendance isn't available yet — the coach needs to finish the Slice 8 database setup.</p>` : ''}
-        <button type="button" id="train-forget" class="btn-secondary" style="font-size:0.75rem;padding:0.3rem 0.55rem;margin-top:0.5rem">Forget this device</button>
-      ` : ''}
-      <div id="train-code-box" style="margin-top:0.6rem;padding:0.6rem 0.7rem;background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px">
-        <label style="font-size:0.8rem;font-weight:600;display:block;margin-bottom:0.25rem">${unlockedPlayers.length ? 'Add another child' : 'Enter your child\u2019s code'}</label>
-        <p class="muted" style="font-size:0.75rem;margin:0 0 0.4rem">The coach can read your code from the player card. A 5-digit family code unlocks all linked siblings at once.</p>
-        <div style="display:flex;gap:0.4rem">
-          <input type="text" id="train-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
-            style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
-          <button type="button" class="primary" id="train-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
-        </div>
-        <div id="train-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
-      </div>
-    </div>`;
-
-  appEl.innerHTML = `
-    <div class="pv-wrap">
-      ${header}
-      ${attendanceCard}
-    </div>`;
-
-  if (!cancelled) wireTrainingPublicView(team, session, unlockedPlayers, existingAttendance);
-}
-
-function wireTrainingPublicView(team, session, unlockedPlayers, existingAttendance) {
-  const msgEl = document.getElementById('train-msg');
-  const responderEl = document.getElementById('train-responder');
-  const flash = (txt, cls = 'muted') => {
-    if (!msgEl) return;
-    msgEl.textContent = txt; msgEl.className = cls;
-    setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2500);
-  };
-
-  const codesByPlayer = (() => {
-    try { return JSON.parse(localStorage.getItem('pv_codes_' + team.id) || '{}'); } catch { return {}; }
-  })();
-
-  const submit = async (playerId, intent) => {
-    if (!session?.id) { flash('Training session not ready — please refresh.', 'error'); return; }
-    const responderName = (responderEl?.value || '').trim();
-    if (responderName) {
-      try { localStorage.setItem('pv_responder_name', responderName); } catch {}
-    }
-    const noteEl = document.querySelector(`[data-train-note="${playerId}"]`);
-    const note = (noteEl?.value || '').trim() || null;
-    const code = codesByPlayer[playerId];
-    if (!code) { flash('No code stored for this player. Re-enter it below.', 'error'); return; }
-
-    const { error } = await supabase.rpc('submit_training_intent', {
-      p_session_id: session.id,
-      p_player_id:  playerId,
-      p_code:       code,
-      p_intent:     intent,
-      p_note:       note,
-      p_name:       responderName || null
-    });
-    if (error) { flash('Save failed: ' + error.message, 'error'); return; }
-
-    existingAttendance[playerId] = { intent, note, responded_by: responderName || null };
-    document.querySelectorAll(`.train-intent-btn[data-player="${playerId}"]`).forEach(btn => {
-      const active = btn.dataset.intent === intent;
-      btn.style.background = active ? '#2a7' : '#fff';
-      btn.style.color = active ? '#fff' : '#333';
-      btn.style.borderColor = active ? '#2a7' : '#ccc';
-    });
-    const row = document.querySelector(`[data-train-row="${playerId}"]`);
-    const line = row?.querySelector('.muted');
-    if (line) line.textContent = `Last response: ${intent}${responderName ? ' — ' + responderName : ''}`;
-    flash('✓ Saved', 'ok');
-  };
-
-  document.querySelectorAll('.train-intent-btn').forEach(btn => {
-    btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.intent));
-  });
-
-  document.querySelectorAll('.train-note').forEach(inp => {
-    inp.addEventListener('blur', async () => {
-      const pid = inp.dataset.trainNote;
-      const cur = existingAttendance[pid];
-      if (!cur) return;
-      const note = (inp.value || '').trim() || null;
-      if ((cur.note || null) === note) return;
-      const code = codesByPlayer[pid];
-      if (!code || !session?.id) return;
-      const responderName = (responderEl?.value || '').trim();
-      const { error } = await supabase.rpc('submit_training_intent', {
-        p_session_id: session.id, p_player_id: pid, p_code: code,
-        p_intent: cur.intent, p_note: note, p_name: responderName || cur.responded_by || null
-      });
-      if (error) { flash('Note save failed: ' + error.message, 'error'); return; }
-      cur.note = note;
-      flash('✓ Note saved', 'ok');
-    });
-  });
-
-  // Code-entry: unlock a player (or sibling group) on this device via the
-  // existing get_player_by_code RPC (keyed by team, not lineup).
-  const codeBtn = document.getElementById('train-code-submit');
-  const codeInput = document.getElementById('train-code-input');
-  const codeMsg = document.getElementById('train-code-msg');
-  const tryUnlock = async () => {
-    const raw = (codeInput?.value || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!raw) return;
-    codeMsg.textContent = 'Checking…'; codeMsg.className = 'muted';
-    const { data, error } = await supabase.rpc('get_player_by_code', {
-      p_team: team.id,
-      p_code: raw
-    });
-    if (error) { codeMsg.textContent = 'Check failed: ' + error.message; codeMsg.className = 'error'; return; }
-    const arr = Array.isArray(data) ? data : (data ? [data] : []);
-    if (!arr.length) { codeMsg.textContent = 'Code not recognised. Ask your coach.'; codeMsg.className = 'error'; return; }
-    const matchedIds = arr.map(p => p.id);
-    const matchedNames = arr.map(p => p.name);
-
-    const currentUnlocked = new Set(getUnlockedPlayers(team.id));
-    matchedIds.forEach(id => currentUnlocked.add(id));
-    setUnlockedPlayers(team.id, [...currentUnlocked]);
-
-    const codes = (() => { try { return JSON.parse(localStorage.getItem('pv_codes_' + team.id) || '{}'); } catch { return {}; } })();
-    matchedIds.forEach(id => { codes[id] = raw; });
-    try { localStorage.setItem('pv_codes_' + team.id, JSON.stringify(codes)); } catch {}
-
-    codeMsg.textContent = `✓ Unlocked ${matchedNames.join(', ') || matchedIds.length + ' player(s)'}`; codeMsg.className = 'ok';
-    setTimeout(() => location.reload(), 600);
-  };
-  if (codeBtn) codeBtn.addEventListener('click', tryUnlock);
-  if (codeInput) codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); tryUnlock(); } });
-
-  // Forget this device
-  const forgetBtn = document.getElementById('train-forget');
-  if (forgetBtn) {
-    forgetBtn.addEventListener('click', () => {
-      if (!confirm('Forget all unlocked players on this device? You will need to re-enter the code(s) next time.')) return;
-      clearUnlockedPlayers(team.id);
-      try { localStorage.removeItem('pv_codes_' + team.id); } catch {}
-      try { localStorage.removeItem('pv_responder_name'); } catch {}
-      location.reload();
-    });
-  }
-}
-
-// ---------- Badge view modals (public card — read-only) ----------
-// Bottom-sheet detail for a single earned badge. Shows emoji + name + description
-// + optional coach note (public per Chris's 2026-04-17 call) + awarded date.
-// When `group` has more than one item, renders a stacked list — one row per
-// award with its own date + note.
-function openBadgeDetailSheet(badge, group) {
-  const entry = badgeEntry(badge.badge_key);
-  const name = entry?.name || badge.badge_key;
-  const desc = entry?.description || '';
-  const emoji = entry?.emoji || '🏅';
-  const items = (group && Array.isArray(group.items) && group.items.length > 0) ? group.items : [badge];
-  const count = items.length;
-
-  // Stacked list (count > 1): one row per award with date + note. Ordered
-  // newest-first, matching the cache's DESC sort.
-  const stackRowsHtml = count > 1
-    ? `<div class="pc-badge-stack-list">
-         ${items.map((b, i) => `
-           <div class="pc-badge-stack-row">
-             <div class="pc-badge-stack-row-head">
-               <span class="pc-badge-stack-idx">#${count - i}</span>
-               <span class="muted" style="font-size:0.78rem">${escapeHtml(formatBadgeDate(b.awarded_at))}</span>
-             </div>
-             ${b.note ? `<div class="pc-badge-note" style="margin-top:0.35rem"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(b.note)}</p></div>` : ''}
-           </div>
-         `).join('')}
-       </div>`
-    : '';
-
-  const headerDate = count > 1
-    ? `Earned ${count} times`
-    : escapeHtml(formatBadgeDate(badge.awarded_at));
-
-  const overlay = document.createElement('div');
-  overlay.className = 'picker-overlay pc-badge-sheet-overlay';
-  overlay.innerHTML = `
-    <div class="picker-modal pc-badge-sheet" role="dialog" aria-label="${escapeHtml(name)}">
-      <div class="pc-badge-sheet-head">
-        <div class="pc-badge-sheet-emoji" aria-hidden="true">${emoji}</div>
-        <div class="pc-badge-sheet-title">
-          <h3 style="margin:0 0 0.15rem">${escapeHtml(name)}${count > 1 ? ` <span class="pc-badge-sheet-count">×${count}</span>` : ''}</h3>
-          <div class="muted" style="font-size:0.78rem">${headerDate}</div>
-        </div>
-        <button class="btn-secondary" data-close type="button" aria-label="Close">✕</button>
-      </div>
-      <div class="pc-badge-sheet-body">
-        ${desc ? `<p style="margin:0.4rem 0 0.5rem">${escapeHtml(desc)}</p>` : ''}
-        ${count === 1 && badge.note ? `<div class="pc-badge-note"><span class="pc-badge-note-label">Coach's note</span><p style="margin:0.1rem 0 0">${escapeHtml(badge.note)}</p></div>` : ''}
-        ${stackRowsHtml}
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelector('[data-close]').onclick = close;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-}
-
-// Full-grid modal of every badge this player has earned in the current season
-// scope. Tapping a chip opens the detail sheet. `groups` is an array of
-// `{ key, items, latest }` — the same shape used by the card chips — so that
-// duplicate awards collapse into a single cell with a "×N" count pill.
-// (Backward-compat: if called with flat `{ id, badge_key, ... }` rows it wraps
-//  each into a pseudo-group of one.)
-function openBadgesGridModal(groupsOrBadges, player) {
-  const groups = (groupsOrBadges || []).map(x => {
-    if (x && Array.isArray(x.items)) return x; // already a group
-    return { key: x.badge_key, items: [x], latest: x };
-  });
-  const groupsByKey = new Map(groups.map(g => [g.key, g]));
-
-  const overlay = document.createElement('div');
-  overlay.className = 'picker-overlay pc-badge-grid-overlay';
-  overlay.innerHTML = `
-    <div class="picker-modal pc-badge-grid-modal" role="dialog" aria-label="All badges">
-      <div class="picker-header">
-        <strong>${escapeHtml(shortName(player?.name || ''))}'s badges</strong>
-        <button class="btn-secondary" data-close type="button">✕</button>
-      </div>
-      <div class="picker-body" style="padding:0.6rem 0.8rem 1rem">
-        ${groups.length === 0
-          ? '<p class="muted">No badges yet.</p>'
-          : `<div class="pc-badge-grid">
-               ${groups.map(g => {
-                 const e = badgeEntry(g.key);
-                 const nm = e ? e.name : g.key;
-                 const count = g.items.length;
-                 const stackClass = count > 1 ? ' has-stack' : '';
-                 const countPill = count > 1
-                   ? `<span class="pc-badge-count" aria-label="${count} times">×${count}</span>`
-                   : '';
-                 return `<button type="button" class="pc-badge-grid-cell${stackClass}" data-badge-key="${escapeHtml(g.key)}" aria-label="${escapeHtml(nm)}${count > 1 ? ' (' + count + ' times)' : ''}">
-                           <span class="pc-badge-grid-emoji">${badgeEmoji(g.key)}</span>
-                           ${countPill}
-                           <span class="pc-badge-grid-name">${escapeHtml(nm)}</span>
-                         </button>`;
-               }).join('')}
-             </div>`}
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelector('[data-close]').onclick = close;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelectorAll('[data-badge-key]').forEach(btn => {
-    btn.onclick = () => {
-      const key = btn.dataset.badgeKey;
-      const group = groupsByKey.get(key);
-      if (group) openBadgeDetailSheet(group.latest, group);
-    };
-  });
-}
-
-// ---------- Badge award modal (coach-facing) ----------
-// Searchable picker of manual-flavour badges, grouped by category. Tap a badge
-// to select it, (optional) type a public-visible note, then Save to insert.
-// Calls `onAwarded(newBadge)` once the row is persisted — the caller rerenders
-// and optionally opens the WhatsApp share confirm prompt.
-// lineupId (optional) attaches the award to a specific match — used by the
-// post-match result wizard so 9b auto-derivations and UI filters can link
-// awards to lineups.
-function openAwardBadgeModal({ team, player, onAwarded, lineupId }) {
-  const existing = document.querySelector('.badge-award-overlay');
-  if (existing) existing.remove();
-
-  // 9a shows MANUAL badges only. Auto badges appear in 9b once criteria run.
-  // Group by category in the fixed order so the modal scrolls consistently.
-  const manualByCat = {};
-  for (const key of Object.keys(BADGE_CATALOG)) {
-    const e = BADGE_CATALOG[key];
-    if (e.flavour !== 'manual') continue;
-    (manualByCat[e.category] = manualByCat[e.category] || []).push({ key, ...e });
-  }
-
-  let selectedKey = null;
-  let searchText = '';
-
-  const overlay = document.createElement('div');
-  overlay.className = 'picker-overlay badge-award-overlay';
-  overlay.innerHTML = `
-    <div class="picker-modal badge-award-modal" role="dialog" aria-label="Award a badge">
-      <div class="picker-header">
-        <strong>Award a badge — ${escapeHtml(shortName(player.name || ''))}</strong>
-        <button class="btn-secondary" data-close type="button">✕</button>
-      </div>
-      <div class="picker-body" style="padding:0.6rem 0.8rem 0.8rem">
-        <input type="text" id="ba-search" placeholder="Search badges…" autocomplete="off"
-          style="width:100%;padding:0.5rem 0.6rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem" />
-        <div id="ba-list" class="ba-list" style="margin-top:0.5rem;max-height:50vh;overflow-y:auto"></div>
-        <div id="ba-selected-wrap" style="margin-top:0.6rem" hidden>
-          <div id="ba-selected-head" style="font-size:0.85rem;margin-bottom:0.3rem"></div>
-          <label style="font-size:0.78rem;color:#555">Why? (optional — shown on the public card)</label>
-          <input type="text" id="ba-note" maxlength="140" placeholder="e.g. Screamer from 30 yards"
-            style="width:100%;padding:0.45rem 0.55rem;border:1px solid var(--border);border-radius:6px;font-size:0.88rem" />
-        </div>
-        <div id="ba-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em;font-size:0.8rem"></div>
-        <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.6rem">
-          <button class="btn-secondary" data-close type="button">Cancel</button>
-          <button class="primary" id="ba-save" disabled>Award badge</button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  const listEl = overlay.querySelector('#ba-list');
-  const searchEl = overlay.querySelector('#ba-search');
-  const selectedWrap = overlay.querySelector('#ba-selected-wrap');
-  const selectedHead = overlay.querySelector('#ba-selected-head');
-  const noteEl = overlay.querySelector('#ba-note');
-  const saveBtn = overlay.querySelector('#ba-save');
-  const msg = overlay.querySelector('#ba-msg');
-
-  const renderList = () => {
-    const q = searchText.trim().toLowerCase();
-    const groupsHtml = BADGE_CATEGORY_ORDER
-      .map(cat => {
-        const items = (manualByCat[cat] || []).filter(b =>
-          !q || b.name.toLowerCase().includes(q) || b.description.toLowerCase().includes(q)
-        );
-        if (!items.length) return '';
-        return `
-          <div class="ba-group">
-            <div class="ba-group-title">${BADGE_CATEGORY_LABELS[cat] || cat}</div>
-            <div class="ba-group-body">
-              ${items.map(b => `
-                <button type="button" class="ba-item ${selectedKey === b.key ? 'selected' : ''}" data-badge-key="${escapeHtml(b.key)}">
-                  <span class="ba-item-emoji">${b.emoji}</span>
-                  <span class="ba-item-txt">
-                    <span class="ba-item-name">${escapeHtml(b.name)}</span>
-                    <span class="ba-item-desc muted">${escapeHtml(b.description)}</span>
-                  </span>
-                </button>
-              `).join('')}
-            </div>
-          </div>`;
-      })
-      .join('');
-    listEl.innerHTML = groupsHtml || '<p class="muted">No badges match that search.</p>';
-    listEl.querySelectorAll('[data-badge-key]').forEach(btn => {
-      btn.onclick = () => {
-        selectedKey = btn.dataset.badgeKey;
-        const e = badgeEntry(selectedKey);
-        selectedHead.innerHTML = `Selected: <strong>${e.emoji} ${escapeHtml(e.name)}</strong> <span class="muted">— ${escapeHtml(e.description)}</span>`;
-        selectedWrap.hidden = false;
-        saveBtn.disabled = false;
-        renderList();
-      };
-    });
-  };
-
-  renderList();
-  setTimeout(() => searchEl.focus(), 30);
-
-  searchEl.addEventListener('input', () => { searchText = searchEl.value; renderList(); });
-
-  overlay.querySelectorAll('[data-close]').forEach(b => b.onclick = () => overlay.remove());
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-  saveBtn.onclick = async () => {
-    if (!selectedKey) return;
-    msg.textContent = 'Saving…'; msg.className = 'muted';
-    saveBtn.disabled = true;
-    try {
-      const newBadge = await awardManualBadge({
-        teamId: team.id,
-        playerId: player.id,
-        badgeKey: selectedKey,
-        note: noteEl.value,
-        lineupId: lineupId || null,
-      });
-      overlay.remove();
-      if (onAwarded) onAwarded(newBadge);
-    } catch (e) {
-      msg.textContent = 'Save failed: ' + (e.message || e);
-      msg.className = 'error';
-      saveBtn.disabled = false;
-    }
-  };
-}
-
-// ---------- Post-award share confirm (WhatsApp) ----------
-// Opens after a coach awards a new badge. Lets them send the "just earned X"
-// message straight to the team chat with the card link + access code pre-filled.
-// Declining just closes the dialog — the badge is already saved.
-function openBadgeShareConfirm(team, player, badge) {
-  const entry = badgeEntry(badge.badge_key);
-  const emoji = entry?.emoji || '🏅';
-  const name  = entry?.name  || badge.badge_key;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'picker-overlay badge-share-confirm-overlay';
-  overlay.innerHTML = `
-    <div class="picker-modal" role="dialog" aria-label="Share new badge">
-      <div class="picker-header">
-        <strong>🎉 ${escapeHtml(shortName(player.name || ''))} earned ${emoji} ${escapeHtml(name)}</strong>
-      </div>
-      <div class="picker-body" style="padding:0.8rem">
-        <p style="margin:0 0 0.75rem">Share this with the parents' WhatsApp?</p>
-        <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-          <button class="btn-secondary" data-close type="button">Not now</button>
-          <button class="primary" id="bsc-share" type="button">💬 Share to WhatsApp</button>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelector('[data-close]').onclick = close;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector('#bsc-share').onclick = () => {
-    const base = location.origin + location.pathname;
-    const cardUrl = `${base}#/card/${team.id}`;
-    const code = player.family_code || player.access_code || '—';
-    const lines = [
-      `🎉 ${shortName(player.name)} just earned a badge: ${emoji} ${name}!`,
-      badge.note ? `"${badge.note}"` : '',
-      '',
-      `See the full card: ${cardUrl}`,
-      `Access code: ${code}`,
-    ].filter(Boolean);
-    const text = lines.join('\n');
-    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, '_blank', 'noopener');
-    close();
-  };
 }
 
 // ---------- Parent / public view ----------
@@ -2759,11 +1494,6 @@ let _coachAvailabilityPoll = null;
 let _coachAvailabilityPollLineupId = null;
 
 async function renderParentView(lineupId, opts = {}) {
-  // Hide the app's main header/sidebar/drawer on this public route so the
-  // match-details page is the only thing on-screen — no admin chrome
-  // leaking into a page meant for a parent. Same pattern as the public
-  // player-card route. `render()` removes the class when navigating away.
-  document.body.classList.add('parent-view-active');
   // Stop any existing poll if we're navigating away or re-rendering fresh
   if (!opts.fromPoll) {
     if (_parentViewPoll) { clearInterval(_parentViewPoll); _parentViewPoll = null; }
@@ -2795,19 +1525,10 @@ async function renderParentView(lineupId, opts = {}) {
 
   // Fetch team + players + custom formations (RLS allows read when team has a published lineup).
   // Explicit column list — never expose access_code / family_code to anon clients.
-  // Also fetch team badges so applyMatchDecorations can overlay match-specific
-  // awards on each chip — RLS allows anon SELECT via team_has_published_lineup.
-  // Match cues + cue catalog populate caches so highlightMyChildrenOnPitch can
-  // render each unlocked child's parent-visible focus cues in the Your Squad
-  // card — anon SELECT on match_cues is gated to visibility='parent_visible'
-  // by RLS, so coach-only cues never reach parent clients.
   const [teamRes, playersRes, formationsRes] = await Promise.all([
     supabase.from('teams').select('*').eq('id', lineup.team_id).maybeSingle(),
     supabase.from('players').select('id,team_id,name,number,position,photo_url').eq('team_id', lineup.team_id),
-    supabase.from('formations').select('*').eq('team_id', lineup.team_id),
-    fetchTeamBadges(lineup.team_id).catch(() => []),
-    fetchMatchCues(lineup.team_id, lineup.id).catch(() => []),
-    fetchCueCatalog().catch(() => ({}))
+    supabase.from('formations').select('*').eq('team_id', lineup.team_id)
   ]);
   const team = teamRes.data || { name: '' };
   const players = playersRes.data || [];
@@ -2891,79 +1612,6 @@ async function renderParentView(lineupId, opts = {}) {
   }
   const availByPlayer = Object.fromEntries(availability.map(a => [a.player_id, a]));
 
-  // Side column holds all the info/context panels: Match details, Your Squad
-  // banner, Coach notes, Availability form and the match-code unlock box.
-  // The main column holds ONLY the pitch. This groups all text/info
-  // together so on desktop the pitch can breathe in its own column
-  // without the info feeling disconnected from the match details card.
-  // #pv-child-notice is injected into by highlightMyChildrenOnPitch after
-  // the DOM renders — it just needs to exist somewhere on the page.
-  const sideBlock = `
-    <div class="pv-card">
-      <h3 class="pv-card-title">Match details</h3>
-      <dl class="pv-details">
-        ${dateStr ? `<dt>Date</dt><dd>${escapeHtml(dateStr)}</dd>` : ''}
-        ${kickoff ? `<dt>Kick off</dt><dd>${escapeHtml(kickoff)}</dd>` : ''}
-        ${arrival ? `<dt>Team arrival</dt><dd>${escapeHtml(arrival)}</dd>` : ''}
-        ${(venue.name || venue.postcode) ? `<dt>Venue</dt><dd>${escapeHtml(venue.name || '')}${venue.name && venue.postcode ? ' · ' : ''}${escapeHtml(venue.postcode || '')}</dd>` : ''}
-      </dl>
-      ${(mapHref || w3wHref) ? `
-        <div class="pv-links">
-          ${mapHref ? `<a class="pv-link" href="${mapHref}" target="_blank" rel="noopener">🗺️ Open map</a>` : ''}
-          ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
-        </div>
-      ` : ''}
-      ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
-    </div>
-
-    ${showPitch ? `<div id="pv-child-notice"></div>` : ''}
-
-    ${notes ? `
-      <div class="pv-card">
-        <h3 class="pv-card-title">Coach notes</h3>
-        <p class="pv-notes">${escapeHtml(notes)}</p>
-      </div>
-    ` : ''}
-
-    ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
-
-    ${viewMode === 'avail' && status === 'draft' ? `
-      <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
-    ` : ''}
-
-    ${pvShowMatchCodeBox ? `
-    <div class="pv-card" id="mv-code-card">
-      <h3 class="pv-card-title">Is your child in the squad?</h3>
-      <p class="muted" style="font-size:0.85rem;margin-top:0">Enter your child's access code to see which position they're playing today.</p>
-      <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
-        <input type="text" id="mv-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
-          style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
-        <button type="button" class="primary" id="mv-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
-      </div>
-      <div id="mv-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
-    </div>` : ''}
-  `;
-
-  const mainBlock = `
-    ${showPitch ? `
-    <div class="pv-card">
-      <h3 class="pv-card-title">Lineup</h3>
-      <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">
-        <div class="pitch" id="fix-pitch">
-          <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
-          <div class="slots-layer" id="fix-slots-layer"></div>
-          <canvas class="tactics-canvas" id="fix-tactics"></canvas>
-          <div class="ball-el" id="fix-ball" style="display:none"></div>
-        </div>
-        <div class="subs-bar">
-          <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
-          <div class="subs-row" id="fix-subs-row"></div>
-        </div>
-      </div>
-      ${chipLegendHtml()}
-    </div>` : ''}
-  `;
-
   appEl.innerHTML = `
     <div class="parent-view">
       <div class="pv-header">
@@ -2975,10 +1623,65 @@ async function renderParentView(lineupId, opts = {}) {
         </div>
       </div>
 
-      <div class="pv-body">
-        <div class="pv-side">${sideBlock}</div>
-        <div class="pv-main">${mainBlock}</div>
+      <div class="pv-card">
+        <h3 class="pv-card-title">Match details</h3>
+        <dl class="pv-details">
+          ${dateStr ? `<dt>Date</dt><dd>${escapeHtml(dateStr)}</dd>` : ''}
+          ${kickoff ? `<dt>Kick off</dt><dd>${escapeHtml(kickoff)}</dd>` : ''}
+          ${arrival ? `<dt>Team arrival</dt><dd>${escapeHtml(arrival)}</dd>` : ''}
+          ${(venue.name || venue.postcode) ? `<dt>Venue</dt><dd>${escapeHtml(venue.name || '')}${venue.name && venue.postcode ? ' · ' : ''}${escapeHtml(venue.postcode || '')}</dd>` : ''}
+        </dl>
+        ${(mapHref || w3wHref) ? `
+          <div class="pv-links">
+            ${mapHref ? `<a class="pv-link" href="${mapHref}" target="_blank" rel="noopener">🗺️ Open map</a>` : ''}
+            ${w3wHref ? `<a class="pv-link" href="${w3wHref}" target="_blank" rel="noopener">///what3words</a>` : ''}
+          </div>
+        ` : ''}
+        ${lineup.game_date ? `<button id="pv-add-cal" class="btn-secondary" style="margin-top:0.6rem;width:100%;font-weight:500">📅 Add to calendar</button>` : ''}
       </div>
+
+      ${notes ? `
+        <div class="pv-card">
+          <h3 class="pv-card-title">Coach notes</h3>
+          <p class="pv-notes">${escapeHtml(notes)}</p>
+        </div>
+      ` : ''}
+
+      ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
+
+      ${viewMode === 'avail' && status === 'draft' ? `
+        <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
+      ` : ''}
+
+      ${pvShowMatchCodeBox ? `
+      <div class="pv-card" id="mv-code-card">
+        <h3 class="pv-card-title">Is your child in the squad?</h3>
+        <p class="muted" style="font-size:0.85rem;margin-top:0">Enter your child's access code to see which position they're playing today.</p>
+        <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
+          <input type="text" id="mv-code-input" placeholder="e.g. JE1234 or 12345" autocapitalize="characters" autocorrect="off" spellcheck="false"
+            style="flex:1;padding:0.5rem;font-size:0.95rem;border:1px solid #ccc;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase" />
+          <button type="button" class="primary" id="mv-code-submit" style="padding:0.5rem 0.9rem">Unlock</button>
+        </div>
+        <div id="mv-code-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.3rem"></div>
+      </div>` : ''}
+
+      ${showPitch ? `
+      <div id="pv-child-notice"></div>
+      <div class="pv-card">
+        <h3 class="pv-card-title">Lineup</h3>
+        <div class="card pitch-card" style="padding:0;border:none;box-shadow:none;margin:0;max-width:100%;width:100%;box-sizing:border-box">
+          <div class="pitch" id="fix-pitch">
+            <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
+            <div class="slots-layer" id="fix-slots-layer"></div>
+            <canvas class="tactics-canvas" id="fix-tactics"></canvas>
+            <div class="ball-el" id="fix-ball" style="display:none"></div>
+          </div>
+          <div class="subs-bar">
+            <div class="subs-label" id="fix-subs-label">SUBSTITUTES (0/${MAX_SUBS})</div>
+            <div class="subs-row" id="fix-subs-row"></div>
+          </div>
+        </div>
+      </div>` : ''}
 
       <div class="pv-footer">
         <button id="pv-refresh" class="btn-secondary" style="font-size:0.8rem">↻ Refresh</button>
@@ -3474,12 +2177,7 @@ async function renderTeamDashboard(user, teamId) {
     supabase.from('players').select('*').eq('team_id', teamId).order('number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('lineups').select('*').eq('team_id', teamId).order('game_date', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }),
     supabase.from('plays').select('*').eq('team_id', teamId).order('created_at', { ascending: false }),
-    supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true }),
-    // Badge fetch — swallows errors internally; cache populated for synchronous
-    // reads in renderSquadTab's player modal. Safe when the migration is pending.
-    fetchTeamBadges(teamId),
-    // Cue catalog — once per session. Swallows errors (Focus panel just shows empty picker).
-    fetchCueCatalog().catch(() => ({}))
+    supabase.from('formations').select('*').eq('team_id', teamId).order('created_at', { ascending: true })
   ]);
 
   if (teamRes.error || !teamRes.data) {
@@ -3839,23 +2537,21 @@ const HELP_SECTIONS = [
       <p>Tap any match card on the <strong>Matches</strong> sub-tab to load. Hover/tap a card and click <strong>×</strong> to delete.</p>
       <h4>Add to calendar</h4>
       <p>On the <strong>Info</strong> sub-tab click <strong>📅 Add to calendar</strong>. A chooser offers <strong>Google Calendar</strong> (pre-filled event page in a new tab), <strong>Apple Calendar</strong> (native Add-to-Calendar prompt on iOS/macOS) or <strong>Outlook / Download .ics</strong> (for any other calendar app).</p>
-      <h4>Recording the result — the 5-step wizard</h4>
-      <p>Once kick-off has passed, a big amber <strong>⚽ Enter result</strong> button appears above the sub-tabs. Tap it to open a 5-step wizard:</p>
+      <h4>Recording the result — the 4-step wizard</h4>
+      <p>Once kick-off has passed, a big amber <strong>⚽ Enter result</strong> button appears above the sub-tabs. Tap it to open a 4-step wizard:</p>
       <ol>
         <li><strong>Half-time score</strong> — Us and Opponent. Leave blank if you didn't track HT.</li>
         <li><strong>Full-time score</strong> — same layout, with a "HT was X-Y" hint if you entered HT.</li>
         <li><strong>Goalscorers</strong> — tap <strong>+ Add goalscorer</strong>, pick a player, they're added with count 1. Tap again to add more or re-pick the same player to increment. Live total-vs-FT check warns if numbers don't match.</li>
         <li><strong>Man of the Match</strong> — tap <strong>+ Add Man of the Match</strong>, pick a player, optionally write a "Why?" reason. Joint MOTM supported — already-selected players are disabled in the picker.</li>
-        <li><strong>Badges (optional)</strong> — every matchday player has a <strong>+ Award badge</strong> button. Tap to open the badge picker (same as the Squad tab) and give recognition — scored a screamer, great attitude, clean sheet moment. Skip this step entirely by tapping <strong>Save &amp; skip badges</strong> on step 4. Badges awarded here are tied to this match (so they're filterable later) and save immediately.</li>
       </ol>
-      <p>Tap ✓ Save result on step 5 (or Save &amp; skip badges on step 4) — the score / scorers / MOTM persist in one go. After saving, the big button collapses into a small green <strong>✎ Edit</strong> pill on the result card — tap that to re-open the wizard. The original Result section inside ✎ Edit match still exists as a single-screen fallback.</p>
+      <p>Save persists everything in one go. After saving, the big button collapses into a small green <strong>✎ Edit</strong> pill on the result card — tap that to re-open the wizard. The original Result section inside ✎ Edit match still exists as a single-screen fallback.</p>
       <h4>What do the icons on player chips mean?</h4>
       <p>Four corners carry different signals:</p>
       <ul>
         <li><strong>Bottom-right dot</strong> — availability (green Available, red Unavailable, amber Maybe, no dot = no response)</li>
         <li><strong>Top-left gold ★</strong> — Man of the Match for this game</li>
         <li><strong>Top-right white circle with a number</strong> — goals scored in this game</li>
-        <li><strong>Bottom-left emoji row</strong> — badges awarded in this game (only; their permanent collection lives on the player card)</li>
       </ul>
       <p>The same icons show on the parent view pitch once the lineup is published.</p>
     `
@@ -3903,69 +2599,6 @@ const HELP_SECTIONS = [
       <p>Yes — the arrows above the card cycle through every season with played matches. Seasons run 1 September → 7 June.</p>
       <h4>Forgetting a device</h4>
       <p>If the device is being handed off, the <strong>Forget</strong> button clears the saved unlocks. Next visit they'll need to enter the access code again.</p>
-    `
-  },
-  {
-    id: 'badges', title: 'Badges & achievements', adminOnly: false,
-    body: `
-      <h4>What are badges?</h4>
-      <p>FIFA Ultimate Team-style achievements that appear on a player's public stats card. Each one has an emoji icon, a name and a short description — kids collect them across the season.</p>
-      <h4>Who awards them?</h4>
-      <p>Coaches and admins. Open the <strong>Squad</strong> tab → tap a player's card → the <strong>🏅 Badges</strong> section shows everything they've already earned, plus a <strong>+ Award badge…</strong> button. Pick one from the grouped list (Attacking, Skill, Defending, Attitude, Teamwork, Fun, Milestone), type an optional "why?" note, and save. The note is <strong>shown on the public card</strong>, so parents/kids see exactly why a badge was awarded.</p>
-      <h4>Manual vs. auto badges</h4>
-      <p>Right now all badges are awarded manually. In a future update, some will be <strong>auto-derived</strong> from match data — Hat-Trick Hero, Top Scorer, Ever-Present, milestones like 10 games / 25 goals, and so on. The catalog already lists them; coaches simply won't see the auto ones in the Award menu until that rollout.</p>
-      <h4>Where do badges show up?</h4>
-      <p>On the <strong>public stats card</strong>: a row of up to 9 icons sits beneath the stats grid, with an "All" button for overflow. Tapping any badge opens a detail sheet with its name, description, date awarded and the coach's note.</p>
-      <h4>Removing a badge</h4>
-      <p>In the player modal, each earned-badge chip has a small ✕ — tap it to remove. (Coach/admin only.) There's no "edit" — to refresh a badge's date, remove it and re-award.</p>
-      <h4>Sharing a just-earned badge</h4>
-      <p>Straight after awarding, a popup offers <strong>💬 Share to WhatsApp</strong> — it pre-fills a message with the new badge name, your note, the card link and the player's access code. Great for the team group chat.</p>
-    `
-  },
-  {
-    id: 'focus', title: "Coach's Focus (pre-match cues)", adminOnly: false,
-    body: `
-      <h4>What is Coach's Focus?</h4>
-      <p>A <strong>pre-match</strong> companion to badges. Where badges celebrate what a kid did <em>after</em> the game, Coach's Focus is <strong>the one thing you want them to focus on going in</strong> — a technical, physical, psychological, social or welfare cue. Set before kick-off, the parent sees it on their child's match page, and after the game you can revisit how it went. Capped at <strong>3 cues per player per match</strong>, one of which is the <strong>primary</strong> ("the one thing") so kids aren't overloaded.</p>
-
-      <h4>The frameworks it's built on</h4>
-      <p>The catalog of ~86 cues is grounded in the coaching models we lean on for youth development:</p>
-      <ul>
-        <li><strong>The FA Four Corner Model</strong> — England FA's player-development framework. Every cue is tagged to one of <strong>Technical · Physical · Psychological · Social</strong>, so you're balancing the corners across the squad rather than always hammering technical.</li>
-        <li><strong>ELM (Effort · Learning · Mistakes)</strong> — Positive Coaching Alliance's mental-game model. Praises effort and learning over outcome, so kids stay brave and take risks.</li>
-        <li><strong>ROOTS (Rules · Opponents · Officials · Teammates · Self)</strong> — PCA's sportsmanship and character framework: shaking the ref's hand, picking a teammate up after a mistake, respecting the rules.</li>
-        <li><strong>Emotional Tank</strong> — Jim Thompson's metaphor: kids play well when their tank is full. Cues focus on filling teammates' tanks through encouragement, celebration and picking each other up.</li>
-        <li><strong>Welfare</strong> — coach-only flags for wellbeing (tired today, came in upset, minding an injury). <strong>Never visible to parents</strong> by design.</li>
-        <li><strong>Role / position</strong> — position-specific coaching points (e.g. "Stay wide" for a winger, "Communicate with your back four" for a keeper).</li>
-        <li><strong>Encouragement</strong> — general confidence boosters for kids who need a lift.</li>
-      </ul>
-
-      <h4>Where do I set a focus?</h4>
-      <p>Open a match → <strong>🎯 Focus</strong> sub-tab (between Formation and Info). The default is <strong>Focus mode</strong> — a tap-to-select flow made for phones: tap a player on the pitch, only that player's row appears, add up to 3 cues, tap the next player. Flip to <strong>📋 Full picked squad</strong> if you'd rather see everyone at once.</p>
-
-      <h4>Primary cue ("the one thing")</h4>
-      <p>One of each player's cues can be marked <strong>primary</strong> — it gets a gold ★ and represents the single most important message for that kid this match. The first cue you add is auto-primary; set a new one as primary and the old one quietly demotes (so there's always zero or one primary, never two).</p>
-
-      <h4>Pitch markers — who's still waiting for a focus?</h4>
-      <p>Every filled pitch / subs chip shows a small <strong>🎯 pill in the bottom-right corner</strong> when that player has ≥1 cue set. Gold when a primary is set, purple otherwise. A quick glance at the pitch tells you who still needs one.</p>
-
-      <h4>What parents see</h4>
-      <p>On the parent's match page, the yellow <strong>Your squad</strong> card gains a <strong>"🎯 Coach's focus for this match"</strong> block per unlocked child. Primary cue is gold with a ★, others are purple. Your personal note shows in italics underneath; if you skipped the note, the catalog's default description shows so parents still get context.</p>
-
-      <h4>Coach-only welfare cues</h4>
-      <p>Picking a <strong>Welfare</strong> cue auto-ticks the <strong>🔒 Coach-only</strong> checkbox — it's hidden from parents both at the database layer (RLS) and on the client. It still counts toward the chip pill so you see it on the pitch.</p>
-
-      <h4>Why cap at 3?</h4>
-      <p>Youth-coaching best practice: a kid playing a 30–40 minute half can't act on five things. One clear primary + two optional fallbacks is enough to steer the match without overwhelming.</p>
-
-      <h4>Edit or remove</h4>
-      <p>Tap a chip to re-open the editor (change cue / note / primary flag / visibility). Tap the small <strong>✕</strong> to remove after a confirm. Everything saves immediately.</p>
-
-      <h4>Carryover between matches</h4>
-      <p>Each cue is tied to one match + player, so nothing carries over. Kids start each match with a clean Focus panel. A post-match "how did the focus go?" step is planned as a later phase.</p>
-
-      <h4>Focus vs. badges</h4>
-      <p>Different time horizons, different purposes. <strong>Badges</strong> are celebratory, awarded after the fact, visible forever on the player's stats card. <strong>Focus</strong> is directional, set before the match, visible for that one match, and meant to steer behaviour in the moment.</p>
     `
   },
   {
@@ -4090,7 +2723,7 @@ const HELP_SECTIONS = [
         <li><strong>Wed/Thu</strong> — Watch the <strong>Availability responses</strong> panel fill in (coloured dots appear on pitch chips). Tweak the lineup. Add tactics arrows.</li>
         <li><strong>Friday</strong> — Tap the status pill → <strong>Published</strong>. Same parent link now shows the pitch — no need to re-share.</li>
         <li><strong>Match day</strong> — If anyone drops out, edit the lineup; parent view picks up changes within ~6s.</li>
-        <li><strong>Post-match</strong> — Open Matches (the app auto-lands on today's just-played match while within 24h of KO). Tap the amber <strong>⚽ Enter result</strong> button above the sub-tabs → step through the 5-step wizard (HT → FT → Goalscorers → MOTM → Badges [optional]) → Save. The match card flips green with an <strong>FT 3-2 W</strong>-style chip. If you skip it, the card shows red with <strong>⚠ Needs score</strong> until you do.</li>
+        <li><strong>Post-match</strong> — Open Matches (the app auto-lands on today's just-played match while within 24h of KO). Tap the amber <strong>⚽ Enter result</strong> button above the sub-tabs → step through the 4-step wizard (HT → FT → Goalscorers → MOTM) → Save. The match card flips green with an <strong>FT 3-2 W</strong>-style chip. If you skip it, the card shows red with <strong>⚠ Needs score</strong> until you do.</li>
       </ol>
     `
   },
@@ -4207,88 +2840,6 @@ function renderSquadTab(team, canEdit, players) {
     </div>
   ` : '';
 
-  // Training schedule card — recurring weekly template. JSONB list so teams
-  // with two training nights (Tue+Thu) work out of the box. Each row:
-  // { day: 0-6, start: "HH:MM", end: "HH:MM", location: string }.
-  const trainingSlots = parseTrainingSchedule(team);
-  const trainingRowHtml = (slot, idx) => `
-    <div class="training-slot-row" data-ts-row="${idx}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.35rem;align-items:end;margin-bottom:0.4rem">
-      <div>
-        <label style="font-size:0.7rem">Day</label>
-        <select data-ts-day style="width:100%">
-          ${DAY_NAMES.map((name, d) => `<option value="${d}" ${slot.day === d ? 'selected' : ''}>${name}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="font-size:0.7rem">Start</label>
-        <input type="time" data-ts-start value="${fmtTimeHHMM(slot.start || '19:00')}" style="width:100%" />
-      </div>
-      <div>
-        <label style="font-size:0.7rem">End</label>
-        <input type="time" data-ts-end value="${fmtTimeHHMM(slot.end || '20:00')}" style="width:100%" />
-      </div>
-      <button type="button" class="btn-secondary" data-ts-remove title="Remove this session" style="padding:0.4rem 0.6rem">✕</button>
-      <div style="grid-column:1 / -1">
-        <label style="font-size:0.7rem">Location (optional)</label>
-        <input type="text" data-ts-loc value="${escapeHtml(slot.location || '')}" placeholder="e.g. Main pitch" style="width:100%" />
-      </div>
-    </div>`;
-  // Summary block — shows what's currently saved, so the card doesn't look
-  // identical before and after save. Sorted by day-of-week.
-  const sortedSavedSlots = [...trainingSlots].sort((a, b) => a.day - b.day || a.start.localeCompare(b.start));
-  const savedSummaryHtml = sortedSavedSlots.length
-    ? `
-      <div style="background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px;padding:0.6rem 0.7rem;margin-bottom:0.6rem">
-        <div style="font-size:0.72rem;font-weight:600;color:#556;margin-bottom:0.3rem">Currently saved</div>
-        <ul style="margin:0;padding-left:1.1rem;font-size:0.85rem">
-          ${sortedSavedSlots.map(s => `
-            <li><strong>${DAY_NAMES[s.day]}</strong> · ${fmtTimeHHMM(s.start)}–${fmtTimeHHMM(s.end)}${s.location ? ' · ' + escapeHtml(s.location) : ''}</li>
-          `).join('')}
-        </ul>
-      </div>`
-    : `
-      <div class="muted" style="font-size:0.75rem;margin-bottom:0.5rem">No sessions saved yet.</div>`;
-
-  // Shareable parent link — shown only once a schedule is saved, since the
-  // link is useless without one (the public page just says "no schedule yet").
-  const base = location.origin + location.pathname;
-  const trainingUrl = `${base}#/train/${team.id}`;
-  const trainingLinkHtml = sortedSavedSlots.length ? `
-    <div style="margin-top:0.6rem;padding:0.6rem 0.7rem;background:#fff;border:1px dashed #aac;border-radius:6px">
-      <div style="font-size:0.72rem;font-weight:600;color:#556;margin-bottom:0.3rem">Parent training link</div>
-      <p class="muted" style="font-size:0.72rem;margin:0 0 0.3rem">Permanent — always shows the next upcoming session. Share once, pin it, never think about it again.</p>
-      <div style="display:flex;gap:0.35rem;align-items:stretch">
-        <input type="text" readonly id="ts-link-url" value="${escapeHtml(trainingUrl)}"
-          style="flex:1;padding:0.4rem 0.5rem;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.8rem;border:1px solid #ccc;border-radius:4px;background:#fafafa" />
-        <button type="button" class="btn-secondary" id="ts-link-copy" style="padding:0.4rem 0.6rem;font-size:0.78rem">📋 Copy</button>
-        <a href="${escapeHtml(trainingUrl)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:0.4rem 0.6rem;font-size:0.78rem;text-decoration:none">↗ Open</a>
-      </div>
-      <button type="button" class="btn-secondary" id="ts-link-whatsapp" style="margin-top:0.35rem;padding:0.4rem 0.6rem;font-size:0.78rem">💬 Share on WhatsApp</button>
-      <div id="ts-link-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
-    </div>` : '';
-
-  const trainingScheduleCard = canEdit ? `
-    <div class="card">
-      <h3 style="margin-top:0">Training schedule</h3>
-      <p class="muted" style="font-size:0.72rem;margin:0 0 0.5rem">
-        Recurring weekly sessions. Add one row per training night — the parent training link and coach attendance tracker use this to generate each week's session automatically.
-      </p>
-      ${savedSummaryHtml}
-      ${trainingLinkHtml}
-      <details style="margin-top:0.6rem">
-        <summary style="cursor:pointer;font-size:0.82rem;color:#356">${sortedSavedSlots.length ? '✎ Edit schedule' : '+ Set up schedule'}</summary>
-        <div style="padding-top:0.5rem">
-          <div id="ts-rows">
-            ${trainingSlots.length ? trainingSlots.map(trainingRowHtml).join('') : ''}
-          </div>
-          <button type="button" class="btn-secondary" id="ts-add" style="margin-top:0.2rem">+ Add session</button>
-          <div id="ts-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.4rem"></div>
-          <button class="primary" id="ts-save" style="margin-top:0.3rem">Save training schedule</button>
-        </div>
-      </details>
-    </div>
-  ` : '';
-
   const homeGroundCard = canEdit ? `
     <div class="card">
       <h3 style="margin-top:0">Home ground</h3>
@@ -4384,7 +2935,6 @@ function renderSquadTab(team, canEdit, players) {
       <nav class="lineup-phone-tabs sd-subtabs" role="tablist" aria-label="Squad details sections">
         <button class="lineup-phone-tab ${subTab === 'teaminfo' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'teaminfo' ? 'true' : 'false'}" data-squad-subtab="teaminfo">Team info</button>
         <button class="lineup-phone-tab ${subTab === 'squad' ? 'active' : ''}"    role="tab" aria-selected="${subTab === 'squad' ? 'true' : 'false'}"    data-squad-subtab="squad">Squad</button>
-        <button class="lineup-phone-tab ${subTab === 'training' ? 'active' : ''}" role="tab" aria-selected="${subTab === 'training' ? 'true' : 'false'}" data-squad-subtab="training">Training</button>
       </nav>
 
       <div data-squad-group="teaminfo" class="sd-panel">
@@ -4392,7 +2942,6 @@ function renderSquadTab(team, canEdit, players) {
           <div class="squad-main">
             ${teamInfoCard}
             ${homeGroundCard}
-            ${trainingScheduleCard}
           </div>
         </div>
       </div>
@@ -4407,14 +2956,6 @@ function renderSquadTab(team, canEdit, players) {
             </div>
           </div>
           <div class="squad-side">${filterHtml}</div>
-        </div>
-      </div>
-
-      <div data-squad-group="training" class="sd-panel">
-        <div class="squad-layout">
-          <div class="squad-main">
-            <div id="training-tracker-root"><p class="loading">Loading training…</p></div>
-          </div>
         </div>
       </div>
     </div>
@@ -4433,10 +2974,8 @@ function renderSquadTab(team, canEdit, players) {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
-      if (key === 'training') renderTrainingTracker(team, canEdit, players);
     };
   });
-  if (subTab === 'training') renderTrainingTracker(team, canEdit, players);
 
   tabEl.querySelectorAll('.filter-btn').forEach(b => {
     b.onclick = () => { currentFilter = b.dataset.filter; renderSquadTab(team, canEdit, players); };
@@ -4586,112 +3125,6 @@ function renderSquadTab(team, canEdit, players) {
       msg.textContent = '✓ Saved'; msg.className = 'ok';
       setTimeout(() => renderSquadTab(team, canEdit, players), 600);
     };
-
-    // ----- Training schedule editor (Slice 8) -----
-    // Add/remove rows are pure DOM (no save until "Save training schedule").
-    const tsRows = document.getElementById('ts-rows');
-    const tsAddBtn = document.getElementById('ts-add');
-    const tsSaveBtn = document.getElementById('ts-save');
-    const tsMsg = document.getElementById('ts-msg');
-    const buildEmptyRowHtml = (idx) => `
-      <div class="training-slot-row" data-ts-row="${idx}" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.35rem;align-items:end;margin-bottom:0.4rem">
-        <div>
-          <label style="font-size:0.7rem">Day</label>
-          <select data-ts-day style="width:100%">
-            ${DAY_NAMES.map((name, d) => `<option value="${d}" ${d === 2 ? 'selected' : ''}>${name}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label style="font-size:0.7rem">Start</label>
-          <input type="time" data-ts-start value="19:00" style="width:100%" />
-        </div>
-        <div>
-          <label style="font-size:0.7rem">End</label>
-          <input type="time" data-ts-end value="20:00" style="width:100%" />
-        </div>
-        <button type="button" class="btn-secondary" data-ts-remove title="Remove this session" style="padding:0.4rem 0.6rem">✕</button>
-        <div style="grid-column:1 / -1">
-          <label style="font-size:0.7rem">Location (optional)</label>
-          <input type="text" data-ts-loc value="" placeholder="e.g. Main pitch" style="width:100%" />
-        </div>
-      </div>`;
-    if (tsRows) {
-      tsRows.addEventListener('click', (e) => {
-        const removeBtn = e.target.closest('[data-ts-remove]');
-        if (removeBtn) {
-          const row = removeBtn.closest('.training-slot-row');
-          if (row) row.remove();
-          if (tsMsg) { tsMsg.textContent = ''; tsMsg.className = 'muted'; tsMsg.style.fontSize = '0.75rem'; }
-        }
-      });
-    }
-    if (tsAddBtn) tsAddBtn.onclick = () => {
-      const idx = tsRows.querySelectorAll('.training-slot-row').length;
-      tsRows.insertAdjacentHTML('beforeend', buildEmptyRowHtml(idx));
-    };
-    if (tsSaveBtn) tsSaveBtn.onclick = async () => {
-      if (!tsMsg) return;
-      tsMsg.className = 'muted'; tsMsg.style.fontSize = '0.75rem';
-      const rows = Array.from(tsRows.querySelectorAll('.training-slot-row'));
-      const slots = [];
-      for (const r of rows) {
-        const day = parseInt(r.querySelector('[data-ts-day]').value, 10);
-        const start = (r.querySelector('[data-ts-start]').value || '').trim();
-        const end = (r.querySelector('[data-ts-end]').value || '').trim();
-        const location = (r.querySelector('[data-ts-loc]').value || '').trim();
-        if (!Number.isInteger(day) || day < 0 || day > 6) {
-          tsMsg.textContent = 'Pick a valid day for every session.'; tsMsg.className = 'error'; return;
-        }
-        if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
-          tsMsg.textContent = 'Start and end times are required for every session.'; tsMsg.className = 'error'; return;
-        }
-        if (start >= end) {
-          tsMsg.textContent = `${DAY_NAMES[day]} session: end time must be after start time.`; tsMsg.className = 'error'; return;
-        }
-        slots.push({ day, start, end, location });
-      }
-      const payload = { training_schedule: slots.length ? slots : null };
-      const { data, error } = await supabase.from('teams').update(payload).eq('id', team.id).select().single();
-      if (error) {
-        if (/training_schedule/i.test(error.message || '')) {
-          tsMsg.textContent = 'Save failed — the training_schedule column is missing. Run the Slice 8 migration first.';
-        } else {
-          tsMsg.textContent = 'Save failed: ' + error.message;
-        }
-        tsMsg.className = 'error'; return;
-      }
-      Object.assign(team, data);
-      tsMsg.textContent = '✓ Saved'; tsMsg.className = 'ok';
-      setTimeout(() => renderSquadTab(team, canEdit, players), 700);
-    };
-
-    // Parent training link — copy + WhatsApp share handlers.
-    const tsLinkCopy = document.getElementById('ts-link-copy');
-    const tsLinkWA = document.getElementById('ts-link-whatsapp');
-    const tsLinkUrl = document.getElementById('ts-link-url');
-    const tsLinkMsg = document.getElementById('ts-link-msg');
-    const flashLink = (txt, cls = 'ok') => {
-      if (!tsLinkMsg) return;
-      tsLinkMsg.textContent = txt; tsLinkMsg.className = cls;
-      setTimeout(() => { if (tsLinkMsg.textContent === txt) { tsLinkMsg.textContent = ''; tsLinkMsg.className = 'muted'; } }, 2000);
-    };
-    if (tsLinkCopy && tsLinkUrl) tsLinkCopy.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(tsLinkUrl.value);
-        flashLink('✓ Copied to clipboard');
-      } catch {
-        // Fallback for browsers without the async clipboard API
-        tsLinkUrl.select(); tsLinkUrl.setSelectionRange(0, 99999);
-        try { document.execCommand('copy'); flashLink('✓ Copied'); }
-        catch { flashLink('Copy failed — select the URL manually.', 'error'); }
-      }
-    };
-    if (tsLinkWA && tsLinkUrl) tsLinkWA.onclick = () => {
-      const teamName = team.name || 'the team';
-      const msg = `${teamName} — training attendance link (always shows the next session):\n\n${tsLinkUrl.value}\n\nEnter your child's parent code on first use.`;
-      const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, '_blank', 'noopener');
-    };
   }
 
   // Build the details form HTML for a player (used by modal)
@@ -4748,38 +3181,8 @@ function renderSquadTab(team, canEdit, players) {
       ` : ''}
       <div class="muted" style="font-size:0.7rem;margin-top:0.4rem">Parents enter one of these codes once on the availability link to mark this player, or on the stats-card link to unlock the season-stats card.</div>
     </div>
-    ${badgesSectionHtml(p)}
     ${canEdit ? `<button class="del-btn" data-remove style="margin-top:0.6rem">Remove player</button>` : ''}
   `;
-
-  // Badges section inside the player modal. Shows earned badges (all-time) with
-  // an X to remove when canEdit, plus an "Award badge" button that opens the
-  // picker modal. The section is rendered even for non-editors (read-only).
-  const badgesSectionHtml = (p) => {
-    const earned = badgesForPlayer(team.id, p.id, null); // all-time
-    const chipsHtml = earned.length === 0
-      ? `<p class="muted" style="margin:0.25rem 0 0;font-size:0.8rem">No badges yet.</p>`
-      : `<div class="pb-chip-row">
-           ${earned.map(b => {
-             const e = badgeEntry(b.badge_key);
-             const nm = e ? e.name : b.badge_key;
-             return `<span class="pb-chip" title="${escapeHtml(nm)}${b.note ? ' — ' + escapeHtml(b.note) : ''}">
-                       <span class="pb-chip-emoji">${badgeEmoji(b.badge_key)}</span>
-                       <span class="pb-chip-name">${escapeHtml(nm)}</span>
-                       ${canEdit ? `<button type="button" class="pb-chip-x" data-badge-remove="${escapeHtml(b.id)}" aria-label="Remove ${escapeHtml(nm)}">✕</button>` : ''}
-                     </span>`;
-           }).join('')}
-         </div>`;
-    return `
-      <div class="pb-section" style="margin-top:0.8rem;padding:0.6rem;background:#fff;border:1px solid #e3e7ee;border-radius:6px">
-        <div style="display:flex;align-items:center;gap:0.4rem;justify-content:space-between">
-          <strong style="font-size:0.85rem">🏅 Badges</strong>
-          ${canEdit ? `<button type="button" class="btn-secondary" data-award-badge style="font-size:0.78rem;padding:0.3rem 0.55rem">+ Award badge…</button>` : ''}
-        </div>
-        ${chipsHtml}
-      </div>
-    `;
-  };
 
   const openPlayerModal = (pid) => {
     const p = players.find(x => x.id === pid);
@@ -4930,438 +3333,12 @@ function renderSquadTab(team, canEdit, players) {
         photoRemoveBtn.disabled = false;
       }
     };
-
-    // ---------- Badges (Slice 9a) — award + remove inside player modal ----------
-    // Re-render only the .pb-section element so we don't lose the scroll position
-    // in the modal or rebuild the whole Squad tab for a badge change. Wires the
-    // fresh Award + remove buttons after every re-render.
-    const rerenderBadges = () => {
-      const section = root.querySelector('.pb-section');
-      const player = players.find(x => x.id === pid);
-      if (!section || !player) return;
-      // badgesSectionHtml returns a div wrapper — strip it and inject the inner HTML.
-      const tmp = document.createElement('div');
-      tmp.innerHTML = badgesSectionHtml(player);
-      const fresh = tmp.firstElementChild;
-      if (fresh) section.replaceWith(fresh);
-      wireBadgeHandlers();
-    };
-
-    const wireBadgeHandlers = () => {
-      const awardBtn = root.querySelector('[data-award-badge]');
-      if (awardBtn) awardBtn.onclick = () => {
-        const player = players.find(x => x.id === pid);
-        if (!player) return;
-        openAwardBadgeModal({
-          team, player,
-          onAwarded: async (newBadge) => {
-            rerenderBadges();
-            // Optional share-to-WhatsApp prompt immediately after awarding so
-            // the coach can pass the news straight to the parent group chat.
-            openBadgeShareConfirm(team, player, newBadge);
-          }
-        });
-      };
-      root.querySelectorAll('[data-badge-remove]').forEach(btn => {
-        btn.onclick = async () => {
-          const badgeId = btn.dataset.badgeRemove;
-          const b = getCachedTeamBadges(team.id).find(x => x.id === badgeId);
-          const label = b ? (badgeEntry(b.badge_key)?.name || b.badge_key) : 'this badge';
-          if (!confirm(`Remove ${label}?`)) return;
-          try {
-            await removeBadge(badgeId, team.id);
-          } catch (e) {
-            alert('Remove failed: ' + (e.message || e));
-            return;
-          }
-          rerenderBadges();
-        };
-      });
-    };
-    wireBadgeHandlers();
   };
 
   tabEl.querySelectorAll('.sc-card').forEach(cardEl => {
     const pid = cardEl.dataset.player;
     const openBtn = cardEl.querySelector('[data-open-modal]');
     if (openBtn) openBtn.onclick = () => openPlayerModal(pid);
-  });
-}
-
-// ---------- Training tracker (coach-side, Squad tab > Training subtab) ----------
-// Shows the next upcoming session with per-player intent + attended toggle,
-// plus a history list of past sessions, plus override controls
-// (cancel / move venue / time) for a single week.
-async function renderTrainingTracker(team, canEdit, players) {
-  const root = document.getElementById('training-tracker-root');
-  if (!root) return;
-  root.innerHTML = `<p class="loading">Loading training…</p>`;
-
-  const slots = parseTrainingSchedule(team);
-  if (!slots.length) {
-    root.innerHTML = `
-      <div class="card">
-        <h3 style="margin-top:0">Training</h3>
-        <p class="muted">No weekly training schedule set yet. Add one on the Team info tab to start tracking attendance.</p>
-      </div>`;
-    return;
-  }
-
-  // Resolve next upcoming session from the schedule + materialise the row.
-  const next = nextUpcomingTraining(team);
-  if (!next) { root.innerHTML = `<div class="card"><p class="muted">Could not resolve the next training session.</p></div>`; return; }
-  const dateStr = toLocalDateStr(next.date);
-
-  let session = null;
-  let migrationMissing = false;
-  {
-    const { data, error } = await supabase.rpc('ensure_training_session', {
-      p_team_id: team.id, p_date: dateStr
-    });
-    if (error) {
-      migrationMissing = /ensure_training_session|training_sessions/i.test(error.message || '');
-      console.warn('ensure_training_session failed:', error.message);
-    } else if (data) {
-      session = Array.isArray(data) ? data[0] : data;
-    }
-  }
-
-  if (migrationMissing) {
-    root.innerHTML = `
-      <div class="card">
-        <h3 style="margin-top:0">Training</h3>
-        <p class="error">The Slice 8 database migration hasn't been applied yet — training attendance can't be tracked until it is. Ask the developer.</p>
-      </div>`;
-    return;
-  }
-
-  // Fetch existing attendance for this session + history of past sessions.
-  let attendance = [];
-  let pastSessions = [];
-  if (session?.id) {
-    const { data: att } = await supabase
-      .from('training_attendance')
-      .select('player_id,intent,attended,note,responded_by,updated_at')
-      .eq('session_id', session.id);
-    attendance = att || [];
-  }
-  {
-    const { data: past } = await supabase
-      .from('training_sessions')
-      .select('id,scheduled_date,scheduled_start,scheduled_end,location,status,notes')
-      .eq('team_id', team.id)
-      .lt('scheduled_date', dateStr)
-      .order('scheduled_date', { ascending: false })
-      .limit(12);
-    pastSessions = past || [];
-  }
-
-  const effectiveSlot = {
-    day: next.slot.day,
-    start: session?.scheduled_start || next.slot.start,
-    end:   session?.scheduled_end   || next.slot.end,
-    location: session?.location ?? next.slot.location ?? team.home_ground_name ?? ''
-  };
-  const cancelled = session?.status === 'cancelled';
-  const moved = !cancelled && session && (session.scheduled_start !== next.slot.start || session.scheduled_end !== next.slot.end || (session.location ?? '') !== (next.slot.location ?? ''));
-
-  const byPlayer = Object.fromEntries(attendance.map(a => [a.player_id, a]));
-  const sortedPlayers = [...players].sort((a, b) => {
-    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
-    if (na !== nb) return na - nb;
-    return (a.name || '').localeCompare(b.name || '');
-  });
-
-  const chipPhoto = (p) => p.photo_url
-    ? `<div style="width:30px;height:30px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
-    : `<div style="width:30px;height:30px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;font-size:0.75rem;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
-
-  const rowHtml = (p) => {
-    const a = byPlayer[p.id];
-    const intent = a?.intent;
-    const intentPill = intent === 'available' ? `<span class="pill" style="background:#d4edda;color:#155724">✅ Available</span>`
-      : intent === 'maybe' ? `<span class="pill" style="background:#fff3cd;color:#856404">🤔 Maybe</span>`
-      : intent === 'unavailable' ? `<span class="pill" style="background:#f8d7da;color:#721c24">❌ Unavailable</span>`
-      : `<span class="muted" style="font-size:0.75rem">No response</span>`;
-    const responder = a?.responded_by ? `<span class="muted" style="font-size:0.7rem">· ${escapeHtml(a.responded_by)}</span>` : '';
-    const note = a?.note ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">${escapeHtml(a.note)}</div>` : '';
-    const att = a?.attended;
-    const attendedBtn = `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="true" style="padding:0.25rem 0.55rem;font-size:0.72rem;background:${att === true ? '#2a7' : '#fff'};color:${att === true ? '#fff' : '#333'};border:1px solid ${att === true ? '#2a7' : '#ccc'}">✓ Attended</button>`;
-    const noShowBtn = `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="false" style="padding:0.25rem 0.55rem;font-size:0.72rem;background:${att === false ? '#c33' : '#fff'};color:${att === false ? '#fff' : '#333'};border:1px solid ${att === false ? '#c33' : '#ccc'}">✕ No show</button>`;
-    const clearBtn = (att === true || att === false) ? `<button type="button" class="btn-secondary tt-att-btn" data-player="${p.id}" data-val="null" style="padding:0.25rem 0.55rem;font-size:0.72rem">Clear</button>` : '';
-    return `
-      <div class="tt-row" data-tt-row="${p.id}" style="display:flex;gap:0.6rem;align-items:center;padding:0.45rem 0;border-top:1px solid #eee">
-        ${chipPhoto(p)}
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:0.88rem">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
-          <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap">${intentPill}${responder}</div>
-          ${note}
-        </div>
-        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;justify-content:flex-end">${attendedBtn}${noShowBtn}${clearBtn}</div>
-      </div>`;
-  };
-
-  const counts = {
-    available: attendance.filter(a => a.intent === 'available').length,
-    maybe: attendance.filter(a => a.intent === 'maybe').length,
-    unavailable: attendance.filter(a => a.intent === 'unavailable').length,
-    attended: attendance.filter(a => a.attended === true).length,
-    noshow: attendance.filter(a => a.attended === false).length,
-  };
-
-  const base = location.origin + location.pathname;
-  const trainingUrl = `${base}#/train/${team.id}`;
-
-  const overrideControlsHtml = canEdit && !cancelled ? `
-    <details style="margin-top:0.5rem">
-      <summary style="cursor:pointer;font-size:0.82rem;color:#356">⚙ Override this session (cancel / move)</summary>
-      <div style="padding:0.5rem;border:1px solid #eee;border-radius:4px;margin-top:0.35rem">
-        <label style="font-size:0.72rem">Start</label>
-        <input type="time" id="tt-ov-start" value="${fmtTimeHHMM(effectiveSlot.start)}" style="width:100%;margin-bottom:0.3rem" />
-        <label style="font-size:0.72rem">End</label>
-        <input type="time" id="tt-ov-end" value="${fmtTimeHHMM(effectiveSlot.end)}" style="width:100%;margin-bottom:0.3rem" />
-        <label style="font-size:0.72rem">Location</label>
-        <input type="text" id="tt-ov-loc" value="${escapeHtml(effectiveSlot.location || '')}" placeholder="e.g. Indoor hall (weather)" style="width:100%;margin-bottom:0.3rem" />
-        <label style="font-size:0.72rem">Note (shown to parents)</label>
-        <input type="text" id="tt-ov-note" value="${escapeHtml(session?.notes || '')}" placeholder="Optional" style="width:100%;margin-bottom:0.4rem" />
-        <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
-          <button class="primary" id="tt-ov-save" type="button">💾 Save changes</button>
-          <button class="btn-secondary" id="tt-ov-cancel-session" type="button" style="color:#c33">🚫 Cancel this session</button>
-          ${moved ? `<button class="btn-secondary" id="tt-ov-reset" type="button">↺ Back to recurring</button>` : ''}
-        </div>
-        <div id="tt-ov-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.35rem"></div>
-      </div>
-    </details>` : '';
-
-  const cancelledHtml = cancelled && canEdit ? `
-    <div style="padding:0.6rem;border:1px solid #f8d7da;background:#fef1f2;border-radius:4px;margin-top:0.5rem">
-      <p style="margin:0 0 0.4rem;color:#721c24"><strong>This session is cancelled.</strong>${session?.notes ? ' ' + escapeHtml(session.notes) : ''}</p>
-      <button class="btn-secondary" id="tt-uncancel" type="button">↺ Un-cancel this session</button>
-    </div>` : '';
-
-  const pastRows = pastSessions.map(s => {
-    const d = new Date(s.scheduled_date + 'T00:00:00');
-    const label = `${DAY_NAMES_SHORT[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'short' })}`;
-    const statusChip = s.status === 'cancelled' ? `<span class="pill" style="background:#f8d7da;color:#721c24">Cancelled</span>` : '';
-    return `
-      <button type="button" class="tt-past-row" data-session="${s.id}" style="display:flex;width:100%;gap:0.5rem;align-items:center;padding:0.45rem 0.2rem;border:none;border-top:1px solid #eee;background:transparent;text-align:left;cursor:pointer">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:0.85rem">${label}</div>
-          <div class="muted" style="font-size:0.72rem">${fmtTimeHHMM(s.scheduled_start)}–${fmtTimeHHMM(s.scheduled_end)}${s.location ? ' · ' + escapeHtml(s.location) : ''}</div>
-        </div>
-        ${statusChip}
-        <span style="color:#888;font-size:0.8rem">›</span>
-      </button>`;
-  }).join('');
-
-  root.innerHTML = `
-    <div class="card">
-      <h3 style="margin-top:0;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-        Next training
-        ${cancelled ? `<span class="pill" style="background:#f8d7da;color:#721c24">Cancelled</span>` : ''}
-        ${moved ? `<span class="pill" style="background:#fff3cd;color:#856404">Overridden</span>` : ''}
-      </h3>
-      <p class="muted" style="margin:0">${fmtTrainingHeader(next.date, effectiveSlot)}</p>
-      ${effectiveSlot.location ? `<p class="muted" style="margin:0.25rem 0 0">📍 ${escapeHtml(effectiveSlot.location)}</p>` : ''}
-      <p class="muted" style="font-size:0.75rem;margin-top:0.5rem">Parent link: <a href="${trainingUrl}" target="_blank" rel="noopener">${trainingUrl}</a></p>
-      ${cancelledHtml}
-      ${overrideControlsHtml}
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.6rem;font-size:0.78rem">
-        <span>✅ ${counts.available} available</span>
-        <span>🤔 ${counts.maybe} maybe</span>
-        <span>❌ ${counts.unavailable} unavailable</span>
-        <span style="margin-left:auto">Attended: ${counts.attended} · No-show: ${counts.noshow}</span>
-      </div>
-      <div id="tt-list" style="margin-top:0.5rem">${sortedPlayers.map(rowHtml).join('')}</div>
-      <div id="tt-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
-    </div>
-    ${pastSessions.length ? `
-      <div class="card">
-        <h3 style="margin-top:0">Recent sessions</h3>
-        <div>${pastRows}</div>
-      </div>` : ''}
-  `;
-
-  // --- Wire attendance toggles ---
-  const msgEl = document.getElementById('tt-msg');
-  const flash = (txt, cls = 'muted') => {
-    if (!msgEl) return;
-    msgEl.textContent = txt; msgEl.className = cls;
-    setTimeout(() => { if (msgEl.textContent === txt) { msgEl.textContent = ''; msgEl.className = 'muted'; } }, 2200);
-  };
-
-  root.querySelectorAll('.tt-att-btn').forEach(btn => {
-    btn.onclick = async () => {
-      if (!session?.id) return;
-      const pid = btn.dataset.player;
-      const val = btn.dataset.val;
-      const attended = val === 'true' ? true : (val === 'false' ? false : null);
-      const existing = byPlayer[pid];
-      // Upsert: need a row with (session_id, player_id). Keep intent if present.
-      const row = {
-        session_id: session.id,
-        player_id: pid,
-        attended,
-        intent: existing?.intent || null,
-        note: existing?.note || null,
-        responded_by: existing?.responded_by || null,
-      };
-      const { error } = await supabase.from('training_attendance')
-        .upsert(row, { onConflict: 'session_id,player_id' });
-      if (error) { flash('Save failed: ' + error.message, 'error'); return; }
-      byPlayer[pid] = { ...row };
-      flash('✓ Saved', 'ok');
-      renderTrainingTracker(team, canEdit, players);
-    };
-  });
-
-  // --- Wire override controls ---
-  const ovSave = document.getElementById('tt-ov-save');
-  const ovCancel = document.getElementById('tt-ov-cancel-session');
-  const ovReset = document.getElementById('tt-ov-reset');
-  const ovMsg = document.getElementById('tt-ov-msg');
-  const saveOverride = async (patch) => {
-    if (!session?.id) return;
-    const { error } = await supabase.from('training_sessions')
-      .update(patch).eq('id', session.id);
-    if (error) {
-      if (ovMsg) { ovMsg.textContent = 'Save failed: ' + error.message; ovMsg.className = 'error'; }
-      return false;
-    }
-    return true;
-  };
-  if (ovSave) ovSave.onclick = async () => {
-    const start = document.getElementById('tt-ov-start').value;
-    const end = document.getElementById('tt-ov-end').value;
-    const loc = document.getElementById('tt-ov-loc').value.trim();
-    const note = document.getElementById('tt-ov-note').value.trim();
-    if (!start || !end || start >= end) {
-      ovMsg.textContent = 'End time must be after start.'; ovMsg.className = 'error'; return;
-    }
-    // "moved" if it differs from the recurring template, else "scheduled" (reset).
-    const tpl = next.slot;
-    const differs = (start !== tpl.start) || (end !== tpl.end) || (loc !== (tpl.location || ''));
-    const ok = await saveOverride({
-      scheduled_start: start,
-      scheduled_end: end,
-      location: loc || null,
-      status: differs ? 'moved' : 'scheduled',
-      notes: note || null
-    });
-    if (ok) renderTrainingTracker(team, canEdit, players);
-  };
-  if (ovCancel) ovCancel.onclick = async () => {
-    if (!confirm('Cancel this training session? Parents viewing the training link will see a cancellation notice.')) return;
-    const note = document.getElementById('tt-ov-note')?.value.trim() || null;
-    const ok = await saveOverride({ status: 'cancelled', notes: note });
-    if (ok) renderTrainingTracker(team, canEdit, players);
-  };
-  if (ovReset) ovReset.onclick = async () => {
-    const ok = await saveOverride({
-      scheduled_start: next.slot.start,
-      scheduled_end: next.slot.end,
-      location: next.slot.location || null,
-      status: 'scheduled',
-      notes: null
-    });
-    if (ok) renderTrainingTracker(team, canEdit, players);
-  };
-  const uncancelBtn = document.getElementById('tt-uncancel');
-  if (uncancelBtn) uncancelBtn.onclick = async () => {
-    const ok = await saveOverride({ status: 'scheduled', notes: null });
-    if (ok) renderTrainingTracker(team, canEdit, players);
-  };
-
-  // --- Past session drill-down ---
-  root.querySelectorAll('.tt-past-row').forEach(btn => {
-    btn.onclick = () => openPastTrainingModal(btn.dataset.session, team, players);
-  });
-}
-
-// Modal showing attendance for a past training session (read + edit attended flag).
-async function openPastTrainingModal(sessionId, team, players) {
-  const { data: s } = await supabase
-    .from('training_sessions')
-    .select('id,scheduled_date,scheduled_start,scheduled_end,location,status,notes')
-    .eq('id', sessionId).maybeSingle();
-  if (!s) return;
-  const { data: att } = await supabase
-    .from('training_attendance')
-    .select('player_id,intent,attended,note,responded_by')
-    .eq('session_id', sessionId);
-  const byPlayer = Object.fromEntries((att || []).map(a => [a.player_id, a]));
-  const sortedPlayers = [...players].sort((a, b) => {
-    const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
-    if (na !== nb) return na - nb;
-    return (a.name || '').localeCompare(b.name || '');
-  });
-  const d = new Date(s.scheduled_date + 'T00:00:00');
-  const header = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${d.toLocaleString('en-GB', { month: 'long' })} · ${fmtTimeHHMM(s.scheduled_start)}–${fmtTimeHHMM(s.scheduled_end)}`;
-
-  const rowHtml = (p) => {
-    const a = byPlayer[p.id];
-    const intent = a?.intent ? `<span class="muted" style="font-size:0.72rem">Intent: ${a.intent}</span>` : `<span class="muted" style="font-size:0.72rem">No response</span>`;
-    const att = a?.attended;
-    return `
-      <div style="display:flex;gap:0.5rem;align-items:center;padding:0.4rem 0;border-top:1px solid #eee">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:0.85rem">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
-          ${intent}
-        </div>
-        <div style="display:flex;gap:0.3rem">
-          <button type="button" class="btn-secondary pt-att" data-player="${p.id}" data-val="true" style="padding:0.2rem 0.45rem;font-size:0.7rem;background:${att === true ? '#2a7' : '#fff'};color:${att === true ? '#fff' : '#333'}">✓</button>
-          <button type="button" class="btn-secondary pt-att" data-player="${p.id}" data-val="false" style="padding:0.2rem 0.45rem;font-size:0.7rem;background:${att === false ? '#c33' : '#fff'};color:${att === false ? '#fff' : '#333'}">✕</button>
-        </div>
-      </div>`;
-  };
-
-  const overlay = document.createElement('div');
-  overlay.className = 'map-modal-overlay';
-  overlay.innerHTML = `
-    <div class="map-modal" style="max-width:520px;width:94vw;max-height:90vh;overflow:auto">
-      <div class="map-modal-header">
-        <strong>${header}</strong>
-        <button class="btn-secondary" id="pt-close" type="button">✕</button>
-      </div>
-      <div class="map-modal-body" style="padding:0.8rem">
-        ${s.location ? `<p class="muted" style="margin:0 0 0.3rem">📍 ${escapeHtml(s.location)}</p>` : ''}
-        ${s.status === 'cancelled' ? `<p class="error">Cancelled${s.notes ? ' — ' + escapeHtml(s.notes) : ''}</p>` : ''}
-        <div id="pt-msg" class="muted" style="font-size:0.72rem;min-height:1em"></div>
-        <div>${sortedPlayers.map(rowHtml).join('')}</div>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelector('#pt-close').onclick = close;
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  const msgEl = overlay.querySelector('#pt-msg');
-  overlay.querySelectorAll('.pt-att').forEach(btn => {
-    btn.onclick = async () => {
-      const pid = btn.dataset.player;
-      const val = btn.dataset.val;
-      const attended = val === 'true';
-      const existing = byPlayer[pid];
-      const row = {
-        session_id: s.id,
-        player_id: pid,
-        attended: existing?.attended === attended ? null : attended,
-        intent: existing?.intent || null,
-        note: existing?.note || null,
-        responded_by: existing?.responded_by || null,
-      };
-      const { error } = await supabase.from('training_attendance')
-        .upsert(row, { onConflict: 'session_id,player_id' });
-      if (error) { msgEl.textContent = 'Save failed: ' + error.message; msgEl.className = 'error'; return; }
-      byPlayer[pid] = { ...row };
-      msgEl.textContent = '✓ Saved'; msgEl.className = 'ok';
-      // Update button styles in place
-      overlay.querySelectorAll(`.pt-att[data-player="${pid}"]`).forEach(b => {
-        const isTrue = b.dataset.val === 'true';
-        const isCurrent = row.attended === true && isTrue || row.attended === false && !isTrue;
-        b.style.background = isCurrent ? (isTrue ? '#2a7' : '#c33') : '#fff';
-        b.style.color = isCurrent ? '#fff' : '#333';
-      });
-    };
   });
 }
 
@@ -5506,725 +3483,6 @@ function compactMatchResultCardHtml(current) {
       ${motmLine ? `<div style="font-size:0.78rem;margin-top:0.15rem;color:#333">🏆 ${motmLine}</div>` : ''}
     </div>
   `;
-}
-
-// Companion card that sits directly below the scoreline card and lists every
-// badge awarded during THIS specific match (strict `lineup_id === current.id`
-// filter — cumulative season awards don't leak in). Renders nothing when no
-// match-linked badges exist. `teamId` is read from the badge cache so it works
-// in both the coach editor (pass `editor.team?.id`) and the parent view (pass
-// `lineup.team_id`). Lightweight styling mirrors the result card (fafafa bg,
-// gold left-border hint) so the two feel paired.
-function matchAwardsCardHtml(current, teamId) {
-  if (!current || !current.id || !teamId) return '';
-  const all = getCachedTeamBadges(teamId);
-  const matchBadges = all.filter(b => b && b.lineup_id === current.id);
-  if (matchBadges.length === 0) return '';
-
-  const playersById = Object.fromEntries((editor?.players || []).map(p => [p.id, p]));
-
-  // Group rows by player so one coach-facing card can surface multiple badges
-  // for the same kid neatly. Within a player's row, keep awarded_at DESC
-  // (cache is already sorted, but be defensive).
-  const byPlayer = new Map();
-  for (const b of matchBadges) {
-    if (!byPlayer.has(b.player_id)) byPlayer.set(b.player_id, []);
-    byPlayer.get(b.player_id).push(b);
-  }
-
-  // Render one inline "awardee unit" per player: name + their badge chips. Units
-  // flow horizontally and wrap naturally so 3–4 short ones fit on a single line.
-  // Separator dots between units so it reads as a comma-style list, not a column.
-  const unitsHtml = Array.from(byPlayer.entries()).map(([pid, items]) => {
-    const p = playersById[pid];
-    const name = p ? shortName(p.name || '') : '—';
-    const chipsHtml = items.map(b => {
-      const e = badgeEntry(b.badge_key);
-      const nm = e ? e.name : b.badge_key;
-      const tip = b.note ? `${nm} — ${b.note}` : nm;
-      return `<span class="maw-chip" title="${escapeHtml(tip)}">
-                <span class="maw-chip-emoji">${badgeEmoji(b.badge_key)}</span>
-                <span class="maw-chip-name">${escapeHtml(nm)}</span>
-              </span>`;
-    }).join('');
-    return `<span class="maw-unit">
-              <span class="maw-player">${escapeHtml(name)}</span>
-              <span class="maw-chips">${chipsHtml}</span>
-            </span>`;
-  }).join('<span class="maw-sep" aria-hidden="true">·</span>');
-
-  // Notes still collected separately so the coach's "why?" narrative is readable
-  // without hover — one italic line per badge that has a note, grouped by player.
-  const notesHtml = Array.from(byPlayer.entries()).flatMap(([pid, items]) => {
-    const p = playersById[pid];
-    const name = p ? shortName(p.name || '') : '—';
-    return items
-      .filter(b => (b.note || '').trim())
-      .map(b => {
-        const e = badgeEntry(b.badge_key);
-        const nm = e ? e.name : b.badge_key;
-        return `<div class="maw-note muted">${escapeHtml(name)} · ${escapeHtml(nm)} — ${escapeHtml(b.note)}</div>`;
-      });
-  }).join('');
-
-  return `
-    <div class="match-awards-card" style="background:#fafafa;border:1px solid #e5e5e5;border-left:4px solid #d6a82b;border-radius:6px;padding:0.5rem 0.65rem;margin-bottom:0.4rem">
-      <div style="font-size:0.72rem;font-weight:700;color:#8a6a00;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.3rem">🏅 Awards given this match</div>
-      <div class="maw-flow">${unitsHtml}</div>
-      ${notesHtml}
-    </div>
-  `;
-}
-
-// ---------- Coach's Focus panel (Slice 10 Phase 2) ----------
-// The panel shows one row per player (picked or roster-wide — the coach toggles).
-// Each row lists the cues that have been set for this match (primary star + emoji
-// + short label) plus an "Add focus" button when there's room (cap = 3 per player).
-// Tapping a chip opens openFocusEditor in edit mode; the X removes the cue.
-// Designed to be re-rendered cheaply — pure-string output from cache reads.
-const FOCUS_MAX_PER_PLAYER = 3;
-
-// List-mode state — 'focus' (default) is a tap-to-focus flow where the coach
-// taps one player on the pitch at a time and only that player's row shows in
-// the panel; 'picked' shows the full picked-squad list (starters + subs).
-// Persisted across re-renders within a session so the coach's choice survives
-// tab switches and lineup reloads. Default flipped to 'focus' 2026-04-18 per
-// Chris — the tap-to-select flow scales better on a phone with 15+ players.
-let _focusListMode = 'focus';
-
-// In 'focus' mode this tracks which player the coach has tapped on the pitch.
-// Cleared whenever the lineup changes so the prompt shows first on a new match.
-let _focusSelectedPlayerId = null;
-// Remember which lineup the current selection belongs to, so we can auto-clear
-// _focusSelectedPlayerId when the coach switches matches (many call sites
-// reassign editor.current; hooking them all is noisier than this tripwire).
-let _focusSelectedLineupId = null;
-
-function _focusModeActive() {
-  return _focusListMode === 'focus' && _lineupPhoneTab === 'focus';
-}
-
-// Called from the pitch/subs click handlers when in focus mode. Selects the
-// player (so the Focus panel shows their row) and paints a highlight ring on
-// their chip.
-function _focusSelectPlayer(playerId) {
-  if (!playerId) return;
-  _focusSelectedPlayerId = playerId;
-  _focusSelectedLineupId = editor?.current?.id || null;
-  _paintFocusSelectionRing();
-  _rerenderFocusPanel();
-}
-
-// Paint a dashed purple ring on whichever pitch/subs chip matches the current
-// _focusSelectedPlayerId, and clear it from all others. Lightweight — reads
-// nothing from the DOM beyond the chip elements themselves.
-function _paintFocusSelectionRing() {
-  const selected = _focusSelectedPlayerId;
-  document.querySelectorAll('.chip[data-player-id]').forEach(chip => {
-    const match = selected && chip.dataset.playerId === selected;
-    chip.classList.toggle('focus-target-selected', !!match);
-  });
-}
-
-function _focusChipHtml(cue, playerName) {
-  // Cue label = catalog entry label, or the first chunk of the custom note.
-  const entry = cue.cue_slug ? cueEntry(cue.cue_slug) : null;
-  const emoji = entry ? entry.emoji : '📝';
-  const label = entry ? entry.label
-                      : (cue.custom_note || '').split('\n')[0].slice(0, 24) || 'Custom';
-  const tip = cue.custom_note
-    ? `${label} — ${cue.custom_note}`
-    : (entry?.description || label);
-  const tipWithPlayer = playerName ? `${playerName}: ${tip}` : tip;
-  const star = cue.is_primary ? '<span class="focus-chip-star" title="Primary focus" aria-label="primary">★</span>' : '';
-  const visDot = cue.visibility === 'coach_only'
-    ? '<span class="focus-chip-vis focus-chip-vis-coach" title="Coach only">🔒</span>'
-    : '';
-  return `
-    <span class="focus-cue-chip ${cue.is_primary ? 'is-primary' : ''}" data-cue-id="${cue.id}" title="${escapeHtml(tipWithPlayer)}">
-      ${star}
-      <span class="focus-chip-emoji" aria-hidden="true">${emoji}</span>
-      <span class="focus-chip-label">${escapeHtml(label)}</span>
-      ${visDot}
-      <button class="focus-chip-x" data-cue-del="${cue.id}" aria-label="Remove focus" title="Remove">✕</button>
-    </span>
-  `;
-}
-
-function _focusPlayerRowHtml(player, cues, opts = {}) {
-  const name = shortName(player.name || '') || '—';
-  const chipsHtml = cues.length
-    ? cues.map(c => _focusChipHtml(c, name)).join('')
-    : '<span class="focus-empty muted">No focus yet.</span>';
-  const canAdd = cues.length < FOCUS_MAX_PER_PLAYER;
-  const atCap = cues.length >= FOCUS_MAX_PER_PLAYER;
-  const addBtn = canAdd
-    ? `<button class="focus-add-btn" data-focus-add="${player.id}">+ Add focus</button>`
-    : `<span class="muted focus-cap-note">Max ${FOCUS_MAX_PER_PLAYER} reached</span>`;
-
-  // Count pill — shows how many cues are set vs the cap. Neutral at 0, gold as
-  // it fills, solid-gold at the cap so the coach can scan-check the list.
-  const countClass = cues.length === 0
-    ? 'focus-count-empty'
-    : atCap
-      ? 'focus-count-full'
-      : 'focus-count-partial';
-  const countPill = `<span class="focus-count-pill ${countClass}" title="${cues.length} of ${FOCUS_MAX_PER_PLAYER} focus cues set">${cues.length}/${FOCUS_MAX_PER_PLAYER}</span>`;
-
-  // In "all players" mode, subtly dim rows for players who aren't in the
-  // current picked squad so the coach can spot them — they can still add a
-  // focus (the cue saves against the lineup regardless of selection).
-  const notPickedClass = opts.notPicked ? 'focus-row-not-picked' : '';
-  const notPickedTag = opts.notPicked ? '<span class="focus-not-picked-tag muted" title="Not in the picked squad for this match">not picked</span>' : '';
-
-  return `
-    <div class="focus-player-row ${atCap ? 'at-cap' : ''} ${notPickedClass}" data-focus-player-row="${player.id}">
-      <div class="focus-row-head">
-        <span class="focus-row-name">${escapeHtml(name)}</span>
-        ${notPickedTag}
-        ${countPill}
-        ${addBtn}
-      </div>
-      <div class="focus-row-chips">${chipsHtml}</div>
-    </div>
-  `;
-}
-
-function renderFocusPanelHtml(current, teamId, players) {
-  if (!current?.id || !teamId) {
-    return `<p class="muted me-hint">Save the match first, then pick your squad — you'll be able to set a Focus for each player.</p>`;
-  }
-
-  // Lineup changed since we last recorded a focus selection — clear it so the
-  // tap-prompt shows fresh and we don't carry a stale highlight into a
-  // different match.
-  if (_focusSelectedLineupId && _focusSelectedLineupId !== current.id) {
-    _focusSelectedPlayerId = null;
-    _focusSelectedLineupId = null;
-  }
-
-  // Kick off a cache populate if we haven't fetched yet for this lineup. The
-  // fetcher sets _matchCues[lineupId] itself; when it resolves we re-render the
-  // one panel body so the coach doesn't see an empty state forever. We also
-  // populate the catalog in case renderTeamDashboard's parallel fetch lost the
-  // race (network hiccup, subsequent navigation, etc.).
-  if (!_matchCues[current.id]) {
-    fetchMatchCues(teamId, current.id)
-      .then(() => {
-        // Only refresh the focus panel if the editor is still on this lineup.
-        if (editor?.current?.id === current.id) _rerenderFocusPanel();
-      })
-      .catch(() => {});
-  }
-  if (!_cueCatalog && !_cueCatalogLoading) {
-    fetchCueCatalog().then(() => {
-      if (editor?.current?.id === current.id) _rerenderFocusPanel();
-    }).catch(() => {});
-  }
-
-  // Build the pick list: pitch starters (from slots) + subs — in formation /
-  // slot order, subs afterwards. De-dupe by player id.
-  const pickedIds = [];
-  const pickedSet = new Set();
-  const slotKeys = Object.keys(current.slots || {}).sort();
-  slotKeys.forEach(k => {
-    const pid = current.slots[k];
-    if (pid && !pickedSet.has(pid)) { pickedIds.push(pid); pickedSet.add(pid); }
-  });
-  (current.subs || []).forEach(pid => {
-    if (pid && !pickedSet.has(pid)) { pickedIds.push(pid); pickedSet.add(pid); }
-  });
-
-  // Segmented toggle — full picked-squad list vs tap-to-focus single-player.
-  // Focus-mode count shows the number of players that currently have ≥1 cue,
-  // so the coach gets a sense of progress regardless of which tab they're on.
-  const pickedCount = pickedIds.length;
-  const cueRowsAll = getCachedMatchCues(current.id);
-  const playersWithCueCount = new Set(cueRowsAll.map(c => c.player_id)).size;
-  const toggleHtml = `
-    <div class="focus-mode-toggle" role="tablist" aria-label="Focus list mode">
-      <button type="button"
-              class="focus-mode-btn ${_focusListMode === 'picked' ? 'active' : ''}"
-              role="tab"
-              aria-selected="${_focusListMode === 'picked' ? 'true' : 'false'}"
-              data-focus-mode="picked">📋 Full picked squad <span class="focus-mode-count">${pickedCount}</span></button>
-      <button type="button"
-              class="focus-mode-btn ${_focusListMode === 'focus' ? 'active' : ''}"
-              role="tab"
-              aria-selected="${_focusListMode === 'focus' ? 'true' : 'false'}"
-              data-focus-mode="focus">🎯 Focus mode <span class="focus-mode-count">${playersWithCueCount}</span></button>
-    </div>
-  `;
-
-  // Cues keyed by player id (for lookup regardless of mode).
-  const cueRows = cueRowsAll;
-  const cuesByPlayer = new Map();
-  cueRows.forEach(c => {
-    if (!cuesByPlayer.has(c.player_id)) cuesByPlayer.set(c.player_id, []);
-    cuesByPlayer.get(c.player_id).push(c);
-  });
-  // Cache is already ordered primary-first by fetcher; safe to use directly.
-
-  const playersById = Object.fromEntries((players || []).map(p => [p.id, p]));
-
-  // ---- Focus mode (tap-to-select) ----
-  // Paint just the single selected player's row + a list of "quick-switch"
-  // chips at the top showing players who already have cues set (so the coach
-  // can hop back to one without tapping the pitch again).
-  if (_focusListMode === 'focus') {
-    // Validate the selected id is still a roster member — guards against lineup
-    // switches / player removals mid-session.
-    if (_focusSelectedPlayerId && !playersById[_focusSelectedPlayerId]) {
-      _focusSelectedPlayerId = null;
-    }
-
-    // Quick-switch strip: players who already have ≥1 cue.
-    const quickSwitchPlayers = [...cuesByPlayer.keys()]
-      .map(pid => playersById[pid])
-      .filter(Boolean)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-    const quickSwitchHtml = quickSwitchPlayers.length
-      ? `
-        <div class="focus-quick-switch">
-          <div class="focus-quick-switch-label muted">Already set:</div>
-          <div class="focus-quick-switch-chips">
-            ${quickSwitchPlayers.map(p => {
-              const count = (cuesByPlayer.get(p.id) || []).length;
-              const isSel = p.id === _focusSelectedPlayerId;
-              return `<button type="button"
-                class="focus-quick-chip ${isSel ? 'active' : ''}"
-                data-focus-quick-pick="${p.id}"
-                title="${escapeHtml(p.name || '')} — ${count} cue${count === 1 ? '' : 's'}">
-                <span class="focus-quick-name">${escapeHtml(shortName(p.name || ''))}</span>
-                <span class="focus-quick-count">${count}/${FOCUS_MAX_PER_PLAYER}</span>
-              </button>`;
-            }).join('')}
-          </div>
-        </div>
-      `
-      : '';
-
-    let selectedRowHtml = '';
-    if (_focusSelectedPlayerId) {
-      const p = playersById[_focusSelectedPlayerId];
-      if (p) {
-        selectedRowHtml = _focusPlayerRowHtml(p, cuesByPlayer.get(p.id) || [], { notPicked: !pickedSet.has(p.id) });
-      }
-    }
-
-    const selectionArea = _focusSelectedPlayerId && selectedRowHtml
-      ? `<div class="focus-rows focus-rows-single">${selectedRowHtml}</div>`
-      : `<div class="focus-tap-prompt">
-          <div class="focus-tap-prompt-icon" aria-hidden="true">👆</div>
-          <div class="focus-tap-prompt-head">Tap a player on the pitch</div>
-          <p class="muted focus-tap-prompt-body">Pick a kid by tapping their chip on the pitch (or in the subs strip), then set up to ${FOCUS_MAX_PER_PLAYER} focus cues for them. Tap the next player when you're done.</p>
-         </div>`;
-
-    return `
-      <div class="focus-panel focus-mode-active">
-        <div class="focus-intro">
-          <div class="focus-intro-head">🎯 Coach's Focus — tap mode</div>
-          <p class="muted focus-intro-body">One thing you want each player to focus on. Max ${FOCUS_MAX_PER_PLAYER} per child. Parent-visible cues appear on the child's match page; coach-only stay here.</p>
-          <div class="focus-stats muted">${playersWithCueCount}/${pickedCount} picked players with a cue · ${cueRows.length} cue${cueRows.length === 1 ? '' : 's'} set in total</div>
-        </div>
-        ${toggleHtml}
-        ${quickSwitchHtml}
-        ${selectionArea}
-      </div>
-    `;
-  }
-
-  // ---- Picked squad mode (full list, default) ----
-  let emptyHint = '';
-  if (pickedIds.length === 0) {
-    emptyHint = `<p class="muted me-hint" style="padding:0.5rem 0">No squad picked yet — drop players onto the pitch (or subs) in the Squad tab, or switch to <strong>🎯 Focus mode</strong> above and tap any player on the pitch.</p>`;
-  }
-  const renderList = pickedIds.map(pid => playersById[pid]).filter(Boolean);
-  const rowsHtml = renderList
-    .map(p => _focusPlayerRowHtml(p, cuesByPlayer.get(p.id) || []))
-    .join('');
-
-  const totalSet = cueRows.length;
-  const playersWithCueInList = renderList.reduce((n, p) => n + ((cuesByPlayer.get(p.id) || []).length > 0 ? 1 : 0), 0);
-
-  return `
-    <div class="focus-panel">
-      <div class="focus-intro">
-        <div class="focus-intro-head">🎯 Coach's Focus</div>
-        <p class="muted focus-intro-body">One thing you want each player to focus on. Keep it small — one starred primary cue per player is the sweet spot (max ${FOCUS_MAX_PER_PLAYER} per child). Parent-visible cues appear on the child's match page; coach-only stay here.</p>
-        <div class="focus-stats muted">${playersWithCueInList}/${renderList.length} picked players with a cue · ${totalSet} cue${totalSet === 1 ? '' : 's'} set in total</div>
-      </div>
-      ${toggleHtml}
-      ${emptyHint}
-      <div class="focus-rows">${rowsHtml}</div>
-    </div>
-  `;
-}
-
-// Re-render just the Focus panel body in-place so background fetches don't
-// snap the whole editor. Safe to call from anywhere — bails if the panel isn't
-// mounted (e.g. coach switched sub-tabs mid-fetch).
-function _rerenderFocusPanel() {
-  const tabEl = document.getElementById('tab-content');
-  if (!tabEl) return;
-  const body = tabEl.querySelector('[data-phone-group="focus"]');
-  if (!body) return;
-  const current = editor?.current;
-  const team = editor?.team;
-  const players = editor?.players || [];
-  if (!current || !team) return;
-  body.innerHTML = renderFocusPanelHtml(current, team.id, players);
-  _wireFocusPanel();
-  // Refresh pitch + subs focus markers too — keeps chip-side "🎯 N" pills in
-  // sync when cues are added, edited or removed from the Focus panel.
-  _repaintFocusPitchMarkers();
-}
-
-// Re-run match decorations on the pitch + subs strip so the chip-side
-// Coach's Focus marker (🎯 count pill) updates after a cue CRUD operation.
-// Leans on applyMatchDecorations (which reads getCachedMatchCues internally)
-// so this is a single lightweight sweep — no extra DB round-trip.
-function _repaintFocusPitchMarkers() {
-  const current = editor?.current;
-  if (!current?.id) return;
-  const teamId = editor?.team?.id;
-  const slotsLayer = document.getElementById('slots-layer');
-  const subsRow    = document.getElementById('subs-row');
-  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, teamId, current.id);
-  if (subsRow)    applyMatchDecorations(subsRow,    current.motm, current.goalscorers, teamId, current.id);
-  // Preserve the focus-mode selection ring — applyMatchDecorations doesn't
-  // touch class lists but a fresh re-render would have. Idempotent.
-  _paintFocusSelectionRing();
-}
-
-// Wire the Focus panel click handlers: add-cue button opens openFocusEditor
-// in "add" mode, chip click opens it in "edit" mode, X button removes the cue
-// after a confirm. Idempotent — safe to re-run after each re-render.
-function _wireFocusPanel() {
-  const tabEl = document.getElementById('tab-content');
-  if (!tabEl) return;
-  const body = tabEl.querySelector('[data-phone-group="focus"]');
-  if (!body) return;
-
-  const current = editor?.current;
-  const team = editor?.team;
-  if (!current?.id || !team?.id) return;
-
-  // List-mode toggle — flip between the full picked-squad list and the
-  // tap-to-select Focus mode. When the coach switches INTO focus mode we
-  // (re)paint the selection ring so any previously-selected player still
-  // shows highlighted on the pitch.
-  body.querySelectorAll('[data-focus-mode]').forEach(btn => {
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      const mode = btn.dataset.focusMode;
-      if (mode !== 'picked' && mode !== 'focus') return;
-      if (_focusListMode === mode) return;
-      _focusListMode = mode;
-      _rerenderFocusPanel();
-      // Focus mode drives a chip-side ring; clear it when leaving so stale
-      // highlights don't linger if the coach flips back to the full list.
-      if (mode === 'focus') _paintFocusSelectionRing();
-      else {
-        document.querySelectorAll('.chip.focus-target-selected')
-          .forEach(c => c.classList.remove('focus-target-selected'));
-      }
-    };
-  });
-
-  // Quick-switch chips — shortcut to re-select a player who already has cues
-  // without hunting them down on the pitch again.
-  body.querySelectorAll('[data-focus-quick-pick]').forEach(btn => {
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      const pid = btn.dataset.focusQuickPick;
-      if (pid) _focusSelectPlayer(pid);
-    };
-  });
-
-  // Add button
-  body.querySelectorAll('[data-focus-add]').forEach(btn => {
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      const playerId = btn.dataset.focusAdd;
-      openFocusEditor({ teamId: team.id, lineupId: current.id, playerId });
-    };
-  });
-
-  // Chip click (edit) — ignore clicks on the X button
-  body.querySelectorAll('.focus-cue-chip[data-cue-id]').forEach(chip => {
-    chip.onclick = (ev) => {
-      if (ev.target.closest('[data-cue-del]')) return;
-      ev.stopPropagation();
-      const cueId = chip.dataset.cueId;
-      const row = getCachedMatchCues(current.id).find(c => c.id === cueId);
-      if (!row) return;
-      openFocusEditor({ teamId: team.id, lineupId: current.id, playerId: row.player_id, cueId });
-    };
-  });
-
-  // Remove X
-  body.querySelectorAll('[data-cue-del]').forEach(btn => {
-    btn.onclick = async (ev) => {
-      ev.stopPropagation();
-      const cueId = btn.dataset.cueDel;
-      if (!confirm('Remove this focus?')) return;
-      try {
-        await deleteMatchCue(cueId, current.id, team.id);
-        _rerenderFocusPanel();
-      } catch (e) {
-        alert('Remove failed: ' + (e.message || e));
-      }
-    };
-  });
-}
-
-// ---------- Coach's Focus editor modal (add / edit a match cue) ----------
-// Called with { teamId, lineupId, playerId, cueId? }. If cueId is provided,
-// we're editing an existing row — its fields populate the form. Otherwise we're
-// adding a new cue for that player on that lineup.
-// Layout: framework-grouped cue picker (search + categories), custom-note field
-// (140 chars), is_primary toggle, visibility toggle (parent_visible | coach_only).
-// Save calls setMatchCue or updateMatchCue; on success we close + re-render the panel.
-function openFocusEditor({ teamId, lineupId, playerId, cueId }) {
-  const existing = document.querySelector('.focus-editor-overlay');
-  if (existing) existing.remove();
-
-  const players = editor?.players || [];
-  const player = players.find(p => p.id === playerId);
-  const playerName = player ? shortName(player.name || '') : '—';
-  const isEdit = !!cueId;
-  const row = isEdit ? getCachedMatchCues(lineupId).find(c => c.id === cueId) : null;
-
-  // Current form state
-  let selectedSlug  = row?.cue_slug || null;
-  let customNote    = row?.custom_note || '';
-  let isPrimary     = row?.is_primary ?? false;
-  let visibility    = row?.visibility || 'parent_visible';
-  let searchText    = '';
-
-  // If the catalog didn't load (offline), still let the coach save a custom note.
-  const catalog = getCachedCueCatalog();
-  // Auto-default the new cue to primary if the player has none yet and this is
-  // an add flow — primary is the star cue, and the first cue on a player should
-  // almost always be primary unless the coach explicitly unchecks.
-  if (!isEdit) {
-    const existingForPlayer = cuesForPlayer(lineupId, playerId);
-    if (existingForPlayer.length === 0) isPrimary = true;
-  }
-
-  // Framework-group order — mirrors the catalog's conceptual grouping so the
-  // picker reads "Four Corner Model" → ELM → ROOTS → Tank → Welfare → Role →
-  // Encouragement.
-  const FRAMEWORK_GROUPS = [
-    { key: 'FA',            label: '🧭 FA Four Corner Model', hint: 'Technical · Physical · Psychological · Social' },
-    { key: 'ELM',           label: '💪 ELM — Effort · Learning · Mistakes',  hint: 'Positive Coaching Alliance' },
-    { key: 'ROOTS',         label: '🌳 ROOTS — Rules · Opponents · Officials · Teammates · Self', hint: 'Sportsmanship' },
-    { key: 'TANK',          label: '❤️ Emotional Tank', hint: 'Fill teammates\u2019 tanks with encouragement' },
-    { key: 'WELFARE',       label: '🛟 Welfare', hint: 'Coach-only flags (wellbeing, injury watch)' },
-    { key: 'ROLE',          label: '🧩 Role / position', hint: 'Position-specific coaching points' },
-    { key: 'ENCOURAGEMENT', label: '✨ Encouragement', hint: 'General confidence boosters' },
-  ];
-
-  const overlay = document.createElement('div');
-  overlay.className = 'picker-overlay focus-editor-overlay';
-  overlay.innerHTML = `
-    <div class="picker-modal focus-editor-modal" role="dialog" aria-label="Coach's Focus for ${escapeHtml(playerName)}">
-      <div class="picker-header">
-        <strong>🎯 ${isEdit ? 'Edit' : 'Set'} Focus — ${escapeHtml(playerName)}</strong>
-        <button class="btn-secondary" data-close type="button">✕</button>
-      </div>
-      <div class="picker-body" style="padding:0.6rem 0.8rem 0.8rem">
-        <div id="fe-selected-head" class="fe-selected-head muted" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.35rem"></div>
-
-        <input type="text" id="fe-search" placeholder="Search cues…" autocomplete="off"
-          style="width:100%;padding:0.5rem 0.6rem;border:1px solid var(--border);border-radius:6px;font-size:0.9rem;margin-bottom:0.45rem" />
-
-        <div id="fe-list" class="fe-list" style="max-height:40vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px"></div>
-
-        <label style="display:block;margin-top:0.6rem;font-size:0.78rem;color:#555">Personalise (optional — up to 140 chars)</label>
-        <textarea id="fe-note" rows="2" maxlength="140" placeholder="e.g. Try a switch-of-play when their left-back pushes up"
-          style="width:100%;padding:0.45rem 0.55rem;border:1px solid var(--border);border-radius:6px;font-size:0.88rem;resize:vertical;font-family:inherit">${escapeHtml(customNote)}</textarea>
-        <div id="fe-note-count" class="muted" style="font-size:0.72rem;text-align:right;margin-top:-0.1rem">${customNote.length}/140</div>
-
-        <div class="fe-toggles" style="display:flex;flex-wrap:wrap;gap:0.7rem;margin-top:0.4rem;align-items:center">
-          <label style="display:flex;gap:0.3rem;align-items:center;font-size:0.85rem;cursor:pointer">
-            <input type="checkbox" id="fe-primary" ${isPrimary ? 'checked' : ''} />
-            <span>★ Primary (the one thing)</span>
-          </label>
-          <label style="display:flex;gap:0.3rem;align-items:center;font-size:0.85rem;cursor:pointer">
-            <input type="checkbox" id="fe-coach-only" ${visibility === 'coach_only' ? 'checked' : ''} />
-            <span>🔒 Coach-only (hide from parents)</span>
-          </label>
-        </div>
-
-        <div id="fe-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em;font-size:0.8rem"></div>
-        <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:0.6rem;align-items:center;flex-wrap:wrap">
-          <div>
-            ${isEdit ? `<button class="btn-secondary" id="fe-delete" type="button" style="color:#b00;border-color:#f3c9c9">Remove focus</button>` : ''}
-          </div>
-          <div style="display:flex;gap:0.5rem">
-            <button class="btn-secondary" data-close type="button">Cancel</button>
-            <button class="primary" id="fe-save">${isEdit ? 'Save changes' : 'Save focus'}</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  const listEl        = overlay.querySelector('#fe-list');
-  const searchEl      = overlay.querySelector('#fe-search');
-  const noteEl        = overlay.querySelector('#fe-note');
-  const noteCountEl   = overlay.querySelector('#fe-note-count');
-  const primaryEl     = overlay.querySelector('#fe-primary');
-  const coachOnlyEl   = overlay.querySelector('#fe-coach-only');
-  const selectedHead  = overlay.querySelector('#fe-selected-head');
-  const msg           = overlay.querySelector('#fe-msg');
-  const saveBtn       = overlay.querySelector('#fe-save');
-  const deleteBtn     = overlay.querySelector('#fe-delete');
-
-  const renderSelectedHead = () => {
-    if (selectedSlug) {
-      const e = cueEntry(selectedSlug);
-      if (e) {
-        selectedHead.innerHTML = `Selected: <strong>${e.emoji} ${escapeHtml(e.label)}</strong> <span class="muted">— ${escapeHtml(e.description || '')}</span>`;
-      } else {
-        selectedHead.innerHTML = `<em class="muted">Selected a cue (loading…)</em>`;
-      }
-    } else if (customNote && customNote.trim()) {
-      selectedHead.innerHTML = `<em>Using your custom note only</em>`;
-    } else {
-      selectedHead.innerHTML = `<span class="muted">Pick a cue or write a custom note.</span>`;
-    }
-  };
-
-  const renderList = () => {
-    const q = searchText.trim().toLowerCase();
-    const allCues = Object.values(catalog);
-    if (!allCues.length) {
-      listEl.innerHTML = `<p class="muted" style="padding:0.6rem">Cue catalog not loaded yet — you can still save a custom note above.</p>`;
-      return;
-    }
-    const groupsHtml = FRAMEWORK_GROUPS.map(g => {
-      const items = allCues
-        .filter(c => c.framework === g.key)
-        .filter(c => !q || (c.label || '').toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q) || (c.slug || '').toLowerCase().includes(q))
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-      if (!items.length) return '';
-      return `
-        <div class="fe-group">
-          <div class="fe-group-head">
-            <span class="fe-group-label">${g.label}</span>
-            <span class="fe-group-hint muted">${g.hint}</span>
-          </div>
-          <div class="fe-group-body">
-            ${items.map(c => {
-              const isSel = c.slug === selectedSlug;
-              const coachOnly = c.visibility === 'coach_only';
-              return `
-                <button type="button" class="fe-item ${isSel ? 'selected' : ''} ${coachOnly ? 'coach-only' : ''}" data-cue-slug="${escapeHtml(c.slug)}">
-                  <span class="fe-item-emoji" aria-hidden="true">${c.emoji || '🎯'}</span>
-                  <span class="fe-item-txt">
-                    <span class="fe-item-name">${escapeHtml(c.label || c.slug)}${coachOnly ? ' <span class="fe-item-lock" title="Coach-only">🔒</span>' : ''}</span>
-                    <span class="fe-item-desc muted">${escapeHtml(c.description || '')}</span>
-                  </span>
-                </button>
-              `;
-            }).join('')}
-          </div>
-        </div>
-      `;
-    }).join('');
-    listEl.innerHTML = groupsHtml || '<p class="muted" style="padding:0.6rem">No cues match that search.</p>';
-    listEl.querySelectorAll('[data-cue-slug]').forEach(btn => {
-      btn.onclick = () => {
-        selectedSlug = btn.dataset.cueSlug;
-        const ent = cueEntry(selectedSlug);
-        // If a coach-only cue is picked and the coach hasn't explicitly set a
-        // visibility, auto-mirror it so we don't accidentally leak a welfare
-        // cue to the parent page.
-        if (ent?.visibility === 'coach_only' && visibility !== 'coach_only') {
-          visibility = 'coach_only';
-          coachOnlyEl.checked = true;
-        }
-        renderSelectedHead();
-        renderList();
-      };
-    });
-  };
-
-  renderSelectedHead();
-  renderList();
-  setTimeout(() => searchEl.focus(), 30);
-
-  searchEl.addEventListener('input', () => { searchText = searchEl.value; renderList(); });
-  noteEl.addEventListener('input', () => {
-    customNote = noteEl.value;
-    noteCountEl.textContent = `${customNote.length}/140`;
-    renderSelectedHead();
-  });
-  primaryEl.addEventListener('change', () => { isPrimary = !!primaryEl.checked; });
-  coachOnlyEl.addEventListener('change', () => { visibility = coachOnlyEl.checked ? 'coach_only' : 'parent_visible'; });
-
-  overlay.querySelectorAll('[data-close]').forEach(b => b.onclick = () => overlay.remove());
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-  if (deleteBtn) {
-    deleteBtn.onclick = async () => {
-      if (!confirm('Remove this focus?')) return;
-      msg.textContent = 'Removing…'; msg.className = 'muted';
-      try {
-        await deleteMatchCue(cueId, lineupId, teamId);
-        overlay.remove();
-        _rerenderFocusPanel();
-      } catch (e) {
-        msg.textContent = 'Remove failed: ' + (e.message || e);
-        msg.className = 'error';
-      }
-    };
-  }
-
-  saveBtn.onclick = async () => {
-    if (!selectedSlug && !customNote.trim()) {
-      msg.textContent = 'Pick a cue or write a custom note first.';
-      msg.className = 'error';
-      return;
-    }
-    msg.textContent = 'Saving…'; msg.className = 'muted';
-    saveBtn.disabled = true;
-    try {
-      if (isEdit) {
-        await updateMatchCue(cueId, lineupId, {
-          cue_slug: selectedSlug,
-          custom_note: customNote,
-          is_primary: isPrimary,
-          visibility,
-        });
-      } else {
-        // Enforce the per-player cap client-side for a nicer error than the DB
-        // would give us (there's no hard DB cap; Phase 2 convention is 3).
-        const existingForPlayer = cuesForPlayer(lineupId, playerId);
-        if (existingForPlayer.length >= FOCUS_MAX_PER_PLAYER) {
-          throw new Error(`Max ${FOCUS_MAX_PER_PLAYER} focus cues per player.`);
-        }
-        await setMatchCue({
-          teamId, lineupId, playerId,
-          cueSlug: selectedSlug,
-          customNote,
-          isPrimary,
-          visibility,
-        });
-      }
-      overlay.remove();
-      _rerenderFocusPanel();
-    } catch (e) {
-      msg.textContent = 'Save failed: ' + (e.message || e);
-      msg.className = 'error';
-      saveBtn.disabled = false;
-    }
-  };
 }
 
 function newLineupState() {
@@ -6546,11 +3804,6 @@ async function buildWhatsAppMessage(current, team) {
   const base = location.origin + location.pathname;
   const availUrl = `${base}#/avail/${current.id}`;
   const matchUrl = `${base}#/view/${current.id}`;
-  // Training link is appended only when the team has a recurring schedule set
-  // (Slice 8). The URL is permanent per team — rolls forward automatically —
-  // so pinning this message in WhatsApp covers both match + training.
-  const hasTrainingSchedule = parseTrainingSchedule(team).length > 0;
-  const trainingUrl = hasTrainingSchedule && team?.id ? `${base}#/train/${team.id}` : '';
 
   // Look up coach + admin names from profiles
   let coachNames = [];
@@ -6592,18 +3845,13 @@ async function buildWhatsAppMessage(current, team) {
     `Venue: ${venueLine}`,
     mapsUrl ? `Map: ${mapsUrl}` : null,
     '',
-    trainingUrl
-      ? 'Links — availability, match info, and training attendance:'
-      : 'Two links — let us know if your child can make it, and the other is the general match info:',
+    'Two links — let us know if your child can make it, and the other is the general match info:',
     '',
     'Availability:',
     availUrl,
     '',
     'Match info:',
     matchUrl,
-    trainingUrl ? '' : null,
-    trainingUrl ? 'Training (rolling link — always shows the next session):' : null,
-    trainingUrl || null,
     '',
     `The Availability link asks for your child's parent code the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
     '',
@@ -6928,17 +4176,12 @@ function matchResultSectionHtml(current, canEdit) {
   `;
 }
 
-// 5-step post-match result wizard (added 2026-04-17; badges step 2026-04-17 rev).
+// 4-step post-match result wizard (added 2026-04-17).
 // Primary entry point for entering/updating a match result once KO has passed.
-// Steps: 1) Half-time · 2) Full-time · 3) Goalscorers · 4) Man of the Match ·
-//        5) Badges (optional — skip or award per-player, writes to player_badges
-//                   with lineup_id set so awards are tied to the match).
+// Steps: 1) Half-time score · 2) Full-time score · 3) Goalscorers · 4) Man of the Match.
 // Goalscorers and MOTM use an add-one-at-a-time flow: a list of added entries +
 // "+ Add…" button that reveals an in-panel player picker. Local wizard state is
-// only committed to editor.current on Save (autosave then persists). Badge
-// awards persist immediately on pick (consistent with Squad tab) — the wizard
-// is just a discovery shortcut, and the badge is already public the moment a
-// coach confirms it in the picker.
+// only committed to editor.current on Save (autosave then persists).
 function openResultWizard() {
   const { current, canEdit } = editor;
   if (!current || !current.id) {
@@ -6989,7 +4232,7 @@ function openResultWizard() {
         <button class="btn-secondary" id="rw-close" type="button" aria-label="Close">✕</button>
       </div>
       <div id="rw-steps" style="display:flex;gap:0.25rem;padding:0.5rem 0.9rem 0.25rem">
-        ${[1,2,3,4,5].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
+        ${[1,2,3,4].map(n => `<div class="rw-step-chip" data-rw-chip="${n}" style="flex:1;height:4px;border-radius:2px;background:#e5e5e5"></div>`).join('')}
       </div>
       <div class="map-modal-body" id="rw-body" style="padding:0.9rem;overflow-y:auto;flex:1"></div>
       <div id="rw-footer" style="padding:0.6rem 0.9rem;border-top:1px solid #eee;display:flex;gap:0.5rem;justify-content:space-between;align-items:center"></div>
@@ -7149,59 +4392,6 @@ function openResultWizard() {
     `;
   };
 
-  // Step 5 — optional badges. Lists every matchday candidate with any badges
-  // they've already earned for THIS match (filtered by lineup_id). Each row
-  // has a "+ Award badge" button that opens the same picker as the Squad tab
-  // with lineup_id pre-filled. Awards persist immediately; this step is pure
-  // UI convenience and can be skipped entirely — nothing requires the coach
-  // to touch it.
-  const htmlStepBadges = () => {
-    const lineupId = current.id;
-    const teamId = editor.team?.id;
-    const allBadges = teamId ? getCachedTeamBadges(teamId) : [];
-    const thisMatchBadges = allBadges.filter(b => b.lineup_id === lineupId);
-    const byPlayer = {};
-    for (const b of thisMatchBadges) {
-      (byPlayer[b.player_id] = byPlayer[b.player_id] || []).push(b);
-    }
-
-    const rows = candidates.map(p => {
-      const numBadge = (p.number != null)
-        ? `<span style="display:inline-block;min-width:1.7em;text-align:center;background:#1e3a8a;color:#fff;font-size:0.72rem;padding:0.1em 0.35em;border-radius:3px;margin-right:0.55em;font-weight:600">${p.number}</span>`
-        : '<span style="display:inline-block;min-width:1.7em;margin-right:0.55em"></span>';
-      const mine = byPlayer[p.id] || [];
-      const chipsHtml = mine.length === 0
-        ? '<span class="muted" style="font-size:0.72rem">— no badges yet</span>'
-        : mine.map(b => {
-            const e = badgeEntry(b.badge_key);
-            const nm = e ? e.name : b.badge_key;
-            return `<span class="rw-bg-chip" data-rw-bg-id="${escapeHtml(b.id)}" title="${escapeHtml(nm)}${b.note ? ' — ' + escapeHtml(b.note) : ''}"
-                      style="display:inline-flex;align-items:center;gap:0.2rem;background:#fff8e1;border:1px solid #d6a82b;border-radius:999px;padding:0.1rem 0.45rem;font-size:0.72rem;margin-right:0.25rem;margin-bottom:0.2rem">
-                      <span>${badgeEmoji(b.badge_key)}</span>
-                      <span>${escapeHtml(nm)}</span>
-                      <button type="button" class="rw-bg-chip-x" aria-label="Remove badge"
-                        style="background:transparent;border:0;color:#8a6b00;cursor:pointer;font-size:0.85rem;padding:0 0 0 0.2rem">✕</button>
-                    </span>`;
-          }).join('');
-      return `
-        <div class="rw-badge-row" data-rw-player-id="${escapeHtml(p.id)}" style="padding:0.55rem 0.6rem;border:1px solid #e5e5e5;border-radius:6px;margin-bottom:0.4rem;background:#fff">
-          <div style="display:flex;align-items:center;gap:0.4rem">
-            ${numBadge}
-            <span style="flex:1;font-size:0.9rem;font-weight:600">${escapeHtml(p.name || '—')}</span>
-            <button type="button" class="rw-bg-add btn-secondary" data-rw-award-pid="${escapeHtml(p.id)}"
-              style="font-size:0.78rem;padding:0.3rem 0.55rem">+ Award badge</button>
-          </div>
-          <div style="margin-top:0.35rem">${chipsHtml}</div>
-        </div>
-      `;
-    }).join('');
-
-    return `
-      <p class="muted" style="margin:0 0 0.5rem;font-size:0.82rem">Optional — give recognition to any standout players. Skip this step if you'd rather not. Badges appear immediately on the public card and are tagged to this match.</p>
-      ${rows || '<p class="muted">No matchday squad.</p>'}
-    `;
-  };
-
   // ---- Main render + wire ----
 
   const render = () => {
@@ -7210,8 +4400,8 @@ function openResultWizard() {
     const footer  = overlay.querySelector('#rw-footer');
 
     // Title + step chips
-    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match', 'Badges (optional)'];
-    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 5: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
+    const stepLbls = ['Half-time score', 'Full-time score', 'Goalscorers', 'Man of the Match'];
+    titleEl.innerHTML = `Result — <span class="muted" style="font-weight:400;font-size:0.85rem">Step ${state.step} of 4: ${escapeHtml(stepLbls[state.step - 1])}</span>`;
     overlay.querySelectorAll('[data-rw-chip]').forEach(c => {
       const n = parseInt(c.getAttribute('data-rw-chip'), 10);
       c.style.background = n <= state.step ? '#1e3a8a' : '#e5e5e5';
@@ -7222,31 +4412,20 @@ function openResultWizard() {
     else if (state.step === 2) body.innerHTML = htmlStepFt();
     else if (state.step === 3) body.innerHTML = htmlStepGoals();
     else if (state.step === 4) body.innerHTML = htmlStepMotm();
-    else if (state.step === 5) body.innerHTML = htmlStepBadges();
 
     // Footer — hide Back/Next while a picker is open (the picker has its own Back).
-    // Step 4 shows both "Skip badges & save" (skips step 5) and "Next → Badges".
-    // Step 5 shows "✓ Save result" — any badges awarded are already persisted.
     if (state.pickMode) {
       footer.innerHTML = '';
     } else {
       const backBtn = state.step > 1
         ? '<button type="button" class="btn-secondary" id="rw-back">← Back</button>'
         : '<span></span>';
-      let rightBtn;
-      if (state.step < 4) {
-        rightBtn = '<button type="button" class="primary" id="rw-next">Next →</button>';
-      } else if (state.step === 4) {
-        rightBtn = `
-          <button type="button" class="btn-secondary" id="rw-save-skip">Save & skip badges</button>
-          <button type="button" class="primary" id="rw-next">Next → Badges</button>
-        `;
-      } else {
-        rightBtn = '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
-      }
+      const rightBtn = state.step < 4
+        ? '<button type="button" class="primary" id="rw-next">Next →</button>'
+        : '<button type="button" class="primary" id="rw-save">✓ Save result</button>';
       footer.innerHTML = `
         <div>${backBtn}</div>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end">
+        <div style="display:flex;gap:0.5rem">
           <button type="button" class="btn-secondary" id="rw-cancel">Cancel</button>
           ${rightBtn}
         </div>
@@ -7318,55 +4497,17 @@ function openResultWizard() {
     const pickCancel = overlay.querySelector('#rw-pick-cancel');
     if (pickCancel) pickCancel.onclick = () => { state.pickMode = null; render(); };
 
-    // Step 5 — badges (per-player award + remove)
-    overlay.querySelectorAll('[data-rw-award-pid]').forEach(btn => {
-      btn.onclick = () => {
-        const pid = btn.dataset.rwAwardPid;
-        const player = (editor.players || []).find(p => p.id === pid);
-        if (!player) return;
-        openAwardBadgeModal({
-          team: editor.team,
-          player,
-          lineupId: editor.current?.id || null,
-          onAwarded: () => {
-            // Cache already updated by awardManualBadge; just re-render step 5.
-            render();
-          }
-        });
-      };
-    });
-    overlay.querySelectorAll('.rw-bg-chip-x').forEach(xBtn => {
-      xBtn.onclick = async (ev) => {
-        ev.stopPropagation();
-        const chip = xBtn.closest('[data-rw-bg-id]');
-        if (!chip) return;
-        const badgeId = chip.dataset.rwBgId;
-        if (!confirm('Remove this badge?')) return;
-        try {
-          await removeBadge(badgeId, editor.team?.id);
-        } catch (e) {
-          alert('Remove failed: ' + (e.message || e));
-          return;
-        }
-        render();
-      };
-    });
-
     // Footer
     const backBtn = overlay.querySelector('#rw-back');
     const nextBtn = overlay.querySelector('#rw-next');
     const saveBtn = overlay.querySelector('#rw-save');
-    const saveSkipBtn = overlay.querySelector('#rw-save-skip');
     const cancelBtn = overlay.querySelector('#rw-cancel');
     if (backBtn) backBtn.onclick = () => { state.step = Math.max(1, state.step - 1); render(); };
-    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(5, state.step + 1); render(); };
+    if (nextBtn) nextBtn.onclick = () => { state.step = Math.min(4, state.step + 1); render(); };
     if (cancelBtn) cancelBtn.onclick = close;
-
-    const doSave = () => {
+    if (saveBtn) saveBtn.onclick = () => {
       // Commit state → editor.current. Autosave hash covers these fields so this
       // will persist on the 800ms schedule. We also trigger immediately.
-      // Note: badges are already persisted by the time we get here — they write
-      // straight to player_badges on pick, same as the Squad-tab flow.
       editor.current.our_score_ht = state.ht_us;
       editor.current.opp_score_ht = state.ht_opp;
       editor.current.our_score_ft = state.ft_us;
@@ -7389,8 +4530,6 @@ function openResultWizard() {
         if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo({ top: 0, behavior: 'auto' });
       } catch (_) {}
     };
-    if (saveBtn) saveBtn.onclick = doSave;
-    if (saveSkipBtn) saveSkipBtn.onclick = doSave;
   };
 
   render();
@@ -7666,7 +4805,6 @@ const _LINEUP_PHONE_TABS = [
   { key: 'squad',     label: 'Squad',        icon: '' },
   { key: 'subs',      label: 'Subs',         icon: '' },
   { key: 'formation', label: 'Formation',    icon: '' },
-  { key: 'focus',     label: '🎯 Focus',     icon: '' },
   { key: 'info',      label: 'Info',         icon: '' },
 ];
 
@@ -8155,17 +5293,6 @@ function renderLineupsTab() {
     </div>
   `;
 
-  // Focus panel: one row per picked player (pitch starters + subs), each with a
-  // compact list of match cues (primary star first) + an "Add focus" button.
-  // The panel is driven entirely off the in-memory caches — _matchCues and
-  // _cueCatalog — and kicks off a re-fetch in a sibling effect (further down)
-  // when the cache is missing for this lineup.
-  const focusPanelHtml = canEdit && current?.id
-    ? renderFocusPanelHtml(current, team?.id, players)
-    : (!canEdit
-        ? `<p class="muted me-hint">Focus notes are coach-only here — parents will see any parent-visible cues on the shared match page.</p>`
-        : `<p class="muted me-hint">Save the match first, then pick your squad — you'll be able to set a Focus for each player.</p>`);
-
   tabEl.innerHTML = `
     <div class="match-editor lineup-layout" data-phone-tab="${_lineupPhoneTab}">
       <!-- Match header: title + stats + actions. Desktop only (hidden on phone). -->
@@ -8200,8 +5327,6 @@ function renderLineupsTab() {
         <div class="me-top-strip">
           <!-- Result summary (only on played matches with a score/scorers/MOTM recorded) -->
           ${compactMatchResultCardHtml(current)}
-          <!-- Badges awarded during this match (only shows when ≥1 match-linked badge exists) -->
-          ${matchAwardsCardHtml(current, editor.team?.id)}
           <!-- Availability — permanently visible when a match is open -->
           ${availBarHtml}
           <!-- Phone-only status row (hidden on desktop where the header shows status) -->
@@ -8229,7 +5354,6 @@ function renderLineupsTab() {
             <div data-phone-group="squad" class="me-panel-body">${squadPanelHtml}</div>
             <div data-phone-group="subs" class="me-panel-body">${subsPanelHtml}</div>
             <div data-phone-group="formation" class="me-panel-body">${formationPanelHtml}</div>
-            <div data-phone-group="focus" class="me-panel-body">${focusPanelHtml}</div>
             <div data-phone-group="info" class="me-panel-body">${infoPanelHtml}</div>
           </div>
         </div>
@@ -8364,15 +5488,12 @@ function stopCoachAvailabilityPoll() {
   _coachAvailabilityPollLineupId = null;
 }
 
-// Decorate match-context chips with MOTM star (top-left), goal-count ball (top-right),
-// and a small bottom-left row of any badges earned in THIS match (when teamId + lineupId
-// are provided — filter is strict `lineup_id === lineupId` so cumulative awards don't
-// appear on every fixture chip).
+// Decorate match-context chips with MOTM star (top-left) and goal-count ball (top-right).
 // Scoped to a root element so it doesn't bleed across tabs (e.g. fixture preview vs editor).
-// Idempotent: clears previous .motm-star / .goal-ball / .chip-badges before re-adding so
-// calling from renderPitch / renderSubsBar / renderFixturePitch on every render is safe.
+// Idempotent: clears previous .motm-star / .goal-ball before re-adding so calling it from
+// renderPitch / renderSubsBar / renderFixturePitch on every render is safe.
 // No-op when arrays are empty (i.e. unplayed matches show nothing extra).
-function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
+function applyMatchDecorations(rootEl, motm, goalscorers) {
   if (!rootEl) return;
   const motmIds = new Set((Array.isArray(motm) ? motm : []).map(m => m && m.player_id).filter(Boolean));
   const goalsBy = {};
@@ -8380,22 +5501,8 @@ function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
     const c = parseInt(g && g.count, 10) || 0;
     if (g && g.player_id && c > 0) goalsBy[g.player_id] = (goalsBy[g.player_id] || 0) + c;
   }
-
-  // Build { playerId: [badge, ...] } from the cache, scoped to THIS lineup only.
-  // We keep every award (no de-dup) so Fair Play x2 would render as two emojis —
-  // the on-chip space is tight but that's the clearest signal to a parent glancing
-  // at the match view. If tighter than ~3 badges, later tweaks can group-count here.
-  const badgesByPlayer = {};
-  if (teamId && lineupId) {
-    const all = getCachedTeamBadges(teamId);
-    for (const b of all) {
-      if (!b || b.lineup_id !== lineupId) continue;
-      (badgesByPlayer[b.player_id] = badgesByPlayer[b.player_id] || []).push(b);
-    }
-  }
-
   rootEl.querySelectorAll('[data-player-id]').forEach(chip => {
-    chip.querySelectorAll('.motm-star, .goal-ball, .chip-badges').forEach(el => el.remove());
+    chip.querySelectorAll('.motm-star, .goal-ball').forEach(el => el.remove());
     if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
     const pid = chip.dataset.playerId;
     if (motmIds.has(pid)) {
@@ -8418,88 +5525,7 @@ function applyMatchDecorations(rootEl, motm, goalscorers, teamId, lineupId) {
       ball.style.cssText = 'position:absolute;top:-7px;right:-7px;min-width:24px;height:24px;padding:0 4px;border-radius:50%;background:#fff;color:#000;font-size:14px;line-height:1;font-weight:900;border:2.5px solid #111;box-shadow:0 1px 4px rgba(0,0,0,0.4);z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif';
       chip.appendChild(ball);
     }
-    // Match-specific badge row (bottom-left corner of chip). Cap at 3 emoji to
-    // keep the chip readable; surface a "+N" dot if more were earned this match.
-    const chipBadges = badgesByPlayer[pid] || [];
-    if (chipBadges.length > 0) {
-      const MAX_BADGES = 3;
-      const shown = chipBadges.slice(0, MAX_BADGES);
-      const overflow = chipBadges.length - shown.length;
-      const row = document.createElement('div');
-      row.className = 'chip-badges';
-      const title = chipBadges.map(b => {
-        const e = badgeEntry(b.badge_key);
-        const nm = e ? e.name : b.badge_key;
-        return b.note ? `${nm} — ${b.note}` : nm;
-      }).join('\n');
-      row.title = title;
-      row.innerHTML = shown.map(b => `<span class="chip-badge-emoji">${badgeEmoji(b.badge_key)}</span>`).join('')
-        + (overflow > 0 ? `<span class="chip-badge-more">+${overflow}</span>` : '');
-      chip.appendChild(row);
-    }
   });
-
-  // Coach's Focus marker — small 🎯 pill in the bottom-right of the chip
-  // showing how many focus cues are set for that player on THIS lineup. Only
-  // rendered when we have a lineup context (teamId+lineupId), and cue cache
-  // has been populated for that lineup. Coach-only semantically, but the row
-  // is public-benign (just a target emoji + number) so we don't gate on role.
-  if (lineupId) {
-    // Lazy-populate the match-cue cache on first paint of this lineup so the
-    // focus marker shows up even when the coach never opens the Focus tab.
-    // The fetcher de-dupes via _matchCuesInflight; the .then() repaints the
-    // pitch so markers appear without a manual re-render.
-    if (teamId && !_matchCues[lineupId] && !_matchCuesInflight[lineupId]) {
-      _matchCuesInflight[lineupId] = fetchMatchCues(teamId, lineupId)
-        .catch(() => [])
-        .finally(() => { delete _matchCuesInflight[lineupId]; })
-        .then(() => {
-          // Only repaint if the editor is still pointed at this lineup.
-          if (editor?.current?.id === lineupId) _repaintFocusPitchMarkers();
-        });
-    }
-    const cueRows = getCachedMatchCues(lineupId);
-    if (cueRows && cueRows.length) {
-      const cueCountByPlayer = {};
-      const primaryByPlayer = {};
-      for (const c of cueRows) {
-        if (!c || !c.player_id) continue;
-        cueCountByPlayer[c.player_id] = (cueCountByPlayer[c.player_id] || 0) + 1;
-        if (c.is_primary && !primaryByPlayer[c.player_id]) {
-          primaryByPlayer[c.player_id] = c;
-        }
-      }
-      rootEl.querySelectorAll('[data-player-id]').forEach(chip => {
-        // Clear any existing marker first — idempotent across re-renders.
-        chip.querySelectorAll('.chip-focus-marker').forEach(el => el.remove());
-        const pid = chip.dataset.playerId;
-        const n = cueCountByPlayer[pid] || 0;
-        if (n <= 0) return;
-        if (getComputedStyle(chip).position === 'static') chip.style.position = 'relative';
-        const mark = document.createElement('div');
-        // Focus pill sits bottom-left; stack it above the match-badge row if
-        // badges were already drawn on this chip. :has() handles this in
-        // modern browsers, the class is a fallback for older ones.
-        const hasBadges = !!chip.querySelector('.chip-badges');
-        mark.className = 'chip-focus-marker'
-          + (primaryByPlayer[pid] ? ' has-primary' : '')
-          + (hasBadges ? ' stacked-above-badges' : '');
-        const primary = primaryByPlayer[pid];
-        const primaryLabel = primary
-          ? (primary.cue_slug ? cueLabel(primary.cue_slug) : (primary.custom_note || '').split('\n')[0].slice(0, 40))
-          : '';
-        mark.title = primary
-          ? `Focus — ${n} cue${n === 1 ? '' : 's'} (primary: ${primaryLabel})`
-          : `Focus — ${n} cue${n === 1 ? '' : 's'}`;
-        mark.innerHTML = `<span class="chip-focus-icon" aria-hidden="true">🎯</span><span class="chip-focus-count">${n}</span>`;
-        chip.appendChild(mark);
-      });
-    } else {
-      // Cues cache is empty — still clear stale markers in case they were
-      // rendered before cues were deleted.
-      rootEl.querySelectorAll('.chip-focus-marker').forEach(el => el.remove());
-    }
-  }
 }
 
 // Batch-fetch availability rows for a set of lineup ids and return
@@ -9742,7 +6768,7 @@ function renderPitch() {
   }).join('');
 
   slotsLayer.innerHTML = slotsHtml;
-  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, editor.team?.id, current.id);
+  applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
 }
 
 // Kept as fallback helper (not currently called, but left in case)
@@ -9753,29 +6779,6 @@ function pitchSvgHtml() {
 // Inner SVG markup (pitch lines) — placed inside the outer <svg> in render
 // SVG uses viewBox "0 0 70 100" so it matches the container's 7:10 aspect ratio.
 // With matching aspects the SVG renders 1:1 — circles stay round, lines stay square.
-// Small click-to-expand legend describing every pill / marker that can appear
-// on a pitch chip — coach and parent views share the same chip renderer, so
-// one legend covers both. Rendered with native <details>/<summary> so no JS
-// listeners are needed; the popover closes when the user clicks anywhere
-// outside (handled by a one-liner in the pitch card render paths).
-function chipLegendHtml() {
-  return `
-    <details class="chip-legend">
-      <summary class="chip-legend-trigger" aria-label="Show chip marker key">
-        <span class="chip-legend-icon">ⓘ</span> What do the chip markers mean?
-      </summary>
-      <div class="chip-legend-popover" role="dialog" aria-label="Chip marker key">
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-focus">🎯 1</span><span class="chip-legend-text"><strong>Coach's Focus</strong> — cues set for the match. Gold tint means the <em>primary</em> cue is locked in.</span></div>
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-avail"></span><span class="chip-legend-text"><strong>Availability dot</strong> — green = available, amber = maybe, red = unavailable. Only visible in Availability / Published mode.</span></div>
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-motm">★</span><span class="chip-legend-text"><strong>Man of the Match</strong> — awarded post-match in the result wizard.</span></div>
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-goal">2</span><span class="chip-legend-text"><strong>Goal count</strong> — how many goals that player scored in this match.</span></div>
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-badges">🏅⚡</span><span class="chip-legend-text"><strong>Badge row</strong> — badges earned in this specific match. Hover for names + coach notes.</span></div>
-        <div class="chip-legend-row"><span class="chip-legend-sample cls-ring"></span><span class="chip-legend-text"><strong>Gold ring</strong> (parent view) — highlights your child's chip after you unlock with their access code.</span></div>
-      </div>
-    </details>
-  `;
-}
-
 function pitchSvgInner() {
   return `
       <!-- perimeter -->
@@ -9834,16 +6837,12 @@ function renderSubsBar() {
     `);
   }
   row.innerHTML = cells.join('');
-  applyMatchDecorations(row, current.motm, current.goalscorers, editor.team?.id, current.id);
+  applyMatchDecorations(row, current.motm, current.goalscorers);
 }
 
 function wireLineupEvents() {
   const { canEdit, team, lineups } = editor;
   const tabEl = document.getElementById('tab-content');
-
-  // Focus panel click handlers (Add focus · chip edit · X remove).
-  // Wired on every renderLineupsTab so newly-inserted rows pick up handlers.
-  _wireFocusPanel();
 
   // Phone-only tab strip: toggle active group without re-rendering the editor
   // (keeps pitch DOM, tactics canvas state and event handlers intact).
@@ -9860,10 +6859,6 @@ function wireLineupEvents() {
         b.classList.toggle('active', on);
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
-      // When the Focus tab is activated, regenerate the panel body — otherwise
-      // it can show a stale picked-players list (the coach may have just
-      // dragged someone onto the pitch in Squad tab without a full re-render).
-      if (key === 'focus') _rerenderFocusPanel();
       // On phone, bring the tab strip to the top of the viewport so the active
       // group is immediately visible below — otherwise the pitch can hide the
       // tab's content under the fold on tall phones.
@@ -10497,33 +7492,16 @@ function saveAsPlay() {
 // Works on both mouse and touch. HTML5 drag still works on desktop.
 function wirePicker() {
   const tabEl = document.getElementById('tab-content');
-
-  // Focus-mode intercept: when the coach is on the Focus sub-tab with tap
-  // mode active, a tap on a FILLED pitch/subs slot should pick that player
-  // into the Focus panel instead of opening the replace-player picker.
-  // An empty slot still falls through to the normal picker so the coach can
-  // pick a child and immediately set a cue for them in one flow.
-  const maybeFocusSelect = (el) => {
-    if (!_focusModeActive()) return false;
-    const chip = el.querySelector('.chip[data-player-id]');
-    const pid = chip?.dataset.playerId;
-    if (!pid) return false;
-    _focusSelectPlayer(pid);
-    return true;
-  };
-
   tabEl.querySelectorAll('[data-slot]').forEach(el => {
     el.addEventListener('click', (e) => {
       // Ignore clicks that originated during a drag
       if (el.classList.contains('drag-over')) return;
-      if (maybeFocusSelect(el)) return;
       openPlayerPicker('slot', parseInt(el.dataset.slot, 10));
     });
   });
   tabEl.querySelectorAll('[data-sub]').forEach(el => {
     el.addEventListener('click', () => {
       if (el.classList.contains('drag-over')) return;
-      if (maybeFocusSelect(el)) return;
       openPlayerPicker('sub', parseInt(el.dataset.sub, 10));
     });
   });
@@ -11034,8 +8012,8 @@ function refreshAfterChipMove() {
   applyAvailabilityDecorations();
   const slotsLayer = document.getElementById('slots-layer');
   const subsRow = document.getElementById('subs-row');
-  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, editor.team?.id, current.id);
-  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers, editor.team?.id, current.id);
+  if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers);
+  if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers);
 
   // Persist
   try { scheduleAutosaveIfPublished(); } catch (_) {}
@@ -12334,7 +9312,6 @@ function renderFixturesTab() {
             <div class="subs-row" id="fix-subs-row"></div>
           </div>
         </div>
-        ${chipLegendHtml()}
       ` : ''}
     </div>
   `;
@@ -12477,108 +9454,25 @@ async function highlightMyChildrenOnPitch(lineup, players) {
     ? `<div class="muted" style="margin-top:0.25rem;font-size:0.8rem">Reminder: ${timeBits.join(' · ')}.</div>`
     : '';
 
-  // Build a parent-visible cue chip for the Your Squad card. Read-only
-  // rendering — no edit/delete controls. Coach-only cues never reach this
-  // client (RLS filters the SELECT on anon users), but we also belt-and-
-  // braces filter by visibility here in case a coach is signed in as a
-  // team member viewing the public page.
-  const focusCuesForParent = (playerId) => {
-    const all = cuesForPlayer(lineup.id, playerId) || [];
-    return all.filter(c => c.visibility === 'parent_visible');
-  };
-  const renderParentCueChip = (cue) => {
-    const entry = cue.cue_slug ? cueEntry(cue.cue_slug) : null;
-    const emoji = entry ? entry.emoji : '📝';
-    // Build a "fallback label" from the custom note if the catalog entry is
-    // missing (e.g. RLS hasn't returned the catalog yet for anon users, or a
-    // coach wrote a custom-note-only cue with no slug). Keep the label tidy:
-    // first line, max 40 chars.
-    const noteLabelFallback = (cue.custom_note || '').split('\n')[0].slice(0, 40) || 'Focus';
-    const label = entry ? entry.label : noteLabelFallback;
-    // Show BOTH the catalog description (neutral context explaining the cue)
-    // AND the coach's custom note (personalised, italic) whenever both exist.
-    // Priority rules:
-    //   - Catalog description: always render when available. It's the stock
-    //     explanation of what this cue means; parents benefit from context
-    //     regardless of whether the coach added a personal note.
-    //   - Custom note: render below the description in italic. But if there
-    //     was no catalog entry, the note was already used as the label, so
-    //     don't repeat it here.
-    // Description: prefer the catalog's explicit description, fall back to
-    // sub_concept + framework (e.g. "Scanning · Technical corner") so parents
-    // still get SOME context even if a seed row shipped without a description.
-    // This is belt-and-braces — descriptions should normally be present, but
-    // empty-string rows have been observed in seed data.
-    const FRAMEWORK_LBL = {
-      FA: 'FA Four Corner Model',
-      ELM: 'Effort · Learning · Mistakes',
-      ROOTS: 'ROOTS',
-      TANK: 'Emotional Tank',
-      WELFARE: 'Welfare',
-      ROLE: 'Role',
-      ENCOURAGEMENT: 'Encouragement'
-    };
-    let desc = '';
-    if (entry) {
-      if (entry.description && entry.description.trim()) {
-        desc = entry.description.trim();
-      } else {
-        const bits = [];
-        if (entry.sub_concept) bits.push(entry.sub_concept);
-        if (entry.framework && FRAMEWORK_LBL[entry.framework]) bits.push(FRAMEWORK_LBL[entry.framework]);
-        else if (entry.corner) bits.push(`${entry.corner[0].toUpperCase()}${entry.corner.slice(1)} corner`);
-        if (bits.length) desc = bits.join(' · ');
-      }
-    }
-    const showNote = cue.custom_note && entry;  // if no entry, note is the label already
-    const star = cue.is_primary ? '<span class="pv-focus-star" aria-hidden="true">★</span>' : '';
-    return `
-      <div class="pv-focus-chip ${cue.is_primary ? 'is-primary' : ''}">
-        ${star}
-        <span class="pv-focus-emoji" aria-hidden="true">${emoji}</span>
-        <div class="pv-focus-text">
-          <div class="pv-focus-label">${escapeHtml(label)}</div>
-          ${desc ? `<div class="pv-focus-desc">${escapeHtml(desc)}</div>` : ''}
-          ${showNote ? `<div class="pv-focus-note">${escapeHtml(cue.custom_note)}</div>` : ''}
-        </div>
-      </div>`;
-  };
-  const renderFocusBlock = (player) => {
-    const cues = focusCuesForParent(player.id);
-    if (!cues.length) return '';
-    // Primary first, then the rest — the cached fetcher already orders that
-    // way, but re-sort here in case the filter stripped the primary out.
-    cues.sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0));
-    return `
-      <div class="pv-focus-block">
-        <div class="pv-focus-head">🎯 Coach's focus for this match</div>
-        <div class="pv-focus-chips">
-          ${cues.map(renderParentCueChip).join('')}
-        </div>
-      </div>`;
-  };
-
   // Build the notice copy
   const firstName = n => (n || '').split(/\s+/)[0] || 'Your child';
   const lines = entries.map(({ player, role, position }) => {
     const name = escapeHtml(firstName(player.name));
-    const focusBlock = role !== 'none' ? renderFocusBlock(player) : '';
     if (role === 'slot') {
       const posKey = (position || '').toUpperCase().replace(/[^A-Z]/g, '');
       const blurb = POSITION_BLURB[posKey] || '';
       const shirt = player.number != null ? ` in shirt <strong>#${player.number}</strong>` : '';
       return `
-        <div style="margin:0.25rem 0" class="pv-squad-entry">
+        <div style="margin:0.25rem 0">
           <strong>${name}</strong> is in the starting XI at <strong>${escapeHtml(position)}</strong>${shirt} ⚽
           ${blurb ? `<div class="muted" style="font-size:0.8rem;margin-top:0.15rem">The ${escapeHtml(blurb)}.</div>` : ''}
           <div style="font-size:0.8rem;margin-top:0.15rem">Go get 'em! 💪</div>
-          ${focusBlock}
         </div>`;
     }
     if (role === 'sub') {
-      return `<div style="margin:0.25rem 0" class="pv-squad-entry"><strong>${name}</strong> is on the bench today and will come on when the coaches make changes. They do their best to rotate minutes across the season, but we can't promise equal playing time every match — thanks for your support 💛${focusBlock}</div>`;
+      return `<div style="margin:0.25rem 0"><strong>${name}</strong> is on the bench today and will come on when the coaches make changes. They do their best to rotate minutes across the season, but we can't promise equal playing time every match — thanks for your support 💛</div>`;
     }
-    return `<div style="margin:0.25rem 0" class="pv-squad-entry"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
+    return `<div style="margin:0.25rem 0"><strong>${name}</strong> isn't in the squad for this match — we're really sorry. If you'd like to chat with the coaches about this, please catch <strong>${coachNamesForNotice}</strong> at the next training session. 💙</div>`;
   }).join('');
 
   noticeEl.innerHTML = `
@@ -12632,7 +9526,7 @@ function renderFixturePitch(lineup) {
           <div class="slot-pos-lbl">${escapeHtml(label)}</div>
         </div>`;
     }).join('');
-    applyMatchDecorations(slotsLayer, d.motm, d.goalscorers, lineup.team_id, lineup.id);
+    applyMatchDecorations(slotsLayer, d.motm, d.goalscorers);
   }
 
   // Render subs using the same .subs-row / .sub-slot markup — all MAX_SUBS cells (filled + empty)
@@ -12661,7 +9555,7 @@ function renderFixturePitch(lineup) {
     }
     subsRow.innerHTML = cells.join('');
     if (subsLabel) subsLabel.textContent = `SUBSTITUTES (${filledCount}/${MAX_SUBS})`;
-    applyMatchDecorations(subsRow, d.motm, d.goalscorers, lineup.team_id, lineup.id);
+    applyMatchDecorations(subsRow, d.motm, d.goalscorers);
   }
 
   const ball = document.getElementById('fix-ball');
