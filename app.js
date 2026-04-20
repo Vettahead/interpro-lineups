@@ -4259,8 +4259,9 @@ async function renderUpcomingTab() {
   const trainingUrl = `${location.origin}${location.pathname}#/train/${team.id}`;
   const playerNameById = new Map((players || []).map(p => [p.id, p.name || '']));
 
-  // Compact names line: ✓ Alice, Bob  ·  ? Dave  ·  ✗ Eve — skips unresponded.
-  // Groups passed in keyed by the two intent vocabularies (available/maybe/unavailable).
+  // Per-status name pills — one pill per player, colour-coded, reuses the same
+  // .ap pill styling as the count chips so they visually belong together.
+  // Skips the unresponded bucket on purpose (Chris: "not the unresponded ones").
   function ucNamesLine(groups) {
     const fmt = (arr) => arr
       .map(id => playerNameById.get(id))
@@ -4269,12 +4270,13 @@ async function renderUpcomingTab() {
     const av = fmt(groups.available || []);
     const mb = fmt(groups.maybe || []);
     const un = fmt(groups.unavailable || []);
-    const parts = [];
-    if (av.length) parts.push(`<span class="uc-ng uc-ng-av"><span class="uc-ng-ic">✓</span> ${av.map(escapeHtml).join(', ')}</span>`);
-    if (mb.length) parts.push(`<span class="uc-ng uc-ng-mb"><span class="uc-ng-ic">?</span> ${mb.map(escapeHtml).join(', ')}</span>`);
-    if (un.length) parts.push(`<span class="uc-ng uc-ng-un"><span class="uc-ng-ic">✗</span> ${un.map(escapeHtml).join(', ')}</span>`);
-    if (!parts.length) return '';
-    return `<div class="uc-names">${parts.join(' <span class="uc-names-sep">·</span> ')}</div>`;
+    if (!av.length && !mb.length && !un.length) return '';
+    const pills = [
+      ...av.map(n => `<span class="ap ap-av">${escapeHtml(n)}</span>`),
+      ...mb.map(n => `<span class="ap ap-mb">${escapeHtml(n)}</span>`),
+      ...un.map(n => `<span class="ap ap-un">${escapeHtml(n)}</span>`),
+    ];
+    return `<div class="avail-pills uc-name-pills">${pills.join('')}</div>`;
   }
 
   // Next training: pure client-side from team.training_schedule.
