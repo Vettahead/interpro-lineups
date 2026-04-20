@@ -3387,7 +3387,8 @@ async function openAvailabilityModal(lineupId) {
 }
 
 // ---------- Team dashboard ----------
-let activeTab = 'squad';
+// Default to Matches (the lineups tab) when opening a team — coach's most-used view.
+let activeTab = 'lineups';
 let _pendingLineupLoad = null; // play payload to apply next time the Lineups tab renders
 let _pendingLineupIdToOpen = null; // wizard-saved lineup id; Lineups tab should load it fully
 let currentFilter = 'All';
@@ -4274,6 +4275,8 @@ function renderSquadTab(team, canEdit, players) {
         Recurring weekly sessions. Add one row per training night — the parent training link and coach attendance tracker use this to generate each week's session automatically.
       </p>
       ${savedSummaryHtml}
+      <!-- Attendance pills for the next upcoming training session (decorated after mount) -->
+      ${sortedSavedSlots.length ? `<div id="ts-next-attendance" style="margin-top:0.3rem"></div>` : ''}
       ${trainingLinkHtml}
       <details style="margin-top:0.6rem">
         <summary style="cursor:pointer;font-size:0.82rem;color:#356">${sortedSavedSlots.length ? '✎ Edit schedule' : '+ Set up schedule'}</summary>
@@ -4692,6 +4695,44 @@ function renderSquadTab(team, canEdit, players) {
       const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
       window.open(waUrl, '_blank', 'noopener');
     };
+
+    // Attendance counts for the next training session — glance summary on the
+    // schedule card, so the coach doesn't have to open the Training subtab.
+    (async () => {
+      const box = document.getElementById('ts-next-attendance');
+      if (!box) return;
+      const nextTr = nextUpcomingTraining(team);
+      if (!nextTr) return;
+      const dateStr = toLocalDateStr(nextTr.date);
+      let counts = { available: 0, maybe: 0, unavailable: 0 };
+      try {
+        const sRes = await supabase
+          .from('training_sessions')
+          .select('id')
+          .eq('team_id', team.id)
+          .eq('scheduled_date', dateStr)
+          .limit(1);
+        const sessionId = sRes.data && sRes.data[0] ? sRes.data[0].id : null;
+        if (sessionId) {
+          const aRes = await supabase
+            .from('training_attendance')
+            .select('intent')
+            .eq('session_id', sessionId);
+          (aRes.data || []).forEach(a => {
+            if (a.intent === 'available') counts.available++;
+            else if (a.intent === 'maybe') counts.maybe++;
+            else if (a.intent === 'unavailable') counts.unavailable++;
+          });
+        }
+      } catch (_) { /* no-op — just show zeroed pills */ }
+      const dayName = DAY_NAMES[nextTr.slot.day];
+      const timeStr = fmtTimeHHMM(nextTr.slot.start);
+      box.innerHTML = `
+        <div style="font-size:0.72rem;color:#556;margin-bottom:0.2rem">
+          Next session: <strong>${dayName} ${timeStr}</strong> — attendance so far
+        </div>
+        ${availPillsHtml(counts, players.length)}`;
+    })();
   }
 
   // Build the details form HTML for a player (used by modal)
@@ -4701,11 +4742,27 @@ function renderSquadTab(team, canEdit, players) {
       <div class="photo-preview ${p.photo_url ? 'has-photo' : ''}" ${p.photo_url ? `style="background-image:url('${escapeHtml(p.photo_url)}')"` : ''}>
         ${p.photo_url ? '' : '<span>No photo</span>'}
       </div>
-      <div class="photo-actions">
+      <div class="photo-actions" style="flex:1;min-width:0">
+        <!-- Share block: access code + stats-card link + Copy / Open / WhatsApp, right next to the photo -->
+        <div class="pm-share-inline" style="background:#f5f7fa;border:1px solid #e3e7ee;border-radius:6px;padding:0.4rem 0.5rem">
+          <div style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.3rem">
+            <span style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:#666">Code</span>
+            <strong style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.95rem" data-pm-code-val>${escapeHtml(p.access_code || '—')}</strong>
+            <button type="button" class="btn-secondary" data-pm-copy-code title="Copy code" style="font-size:0.7rem;padding:0.15rem 0.4rem;margin-left:auto">📋</button>
+          </div>
+          <div style="display:flex;gap:0.3rem;flex-wrap:wrap">
+            <button type="button" class="btn-secondary" data-pm-copy-link style="font-size:0.72rem;padding:0.3rem 0.5rem">📋 Link</button>
+            <button type="button" class="btn-secondary" data-pm-open-link style="font-size:0.72rem;padding:0.3rem 0.5rem">🔗 Open</button>
+            <button type="button" class="btn-secondary" data-pm-whatsapp style="font-size:0.72rem;padding:0.3rem 0.5rem">💬 WhatsApp</button>
+          </div>
+          <div class="muted" data-pm-share-msg style="font-size:0.68rem;min-height:1em;margin-top:0.2rem"></div>
+        </div>
         <input type="file" accept="image/jpeg,image/png,image/webp" data-photo-file id="photo-file-${p.id}" style="display:none" ${canEdit ? '' : 'disabled'} />
-        <button type="button" class="btn-secondary" data-photo-pick>${p.photo_url ? 'Replace' : 'Upload'} photo</button>
-        ${p.photo_url ? `<button type="button" class="btn-secondary" data-photo-remove>Remove</button>` : ''}
-        <div class="muted photo-msg" data-photo-msg style="font-size:0.75rem;min-height:1em;margin-top:0.25rem"></div>
+        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.4rem">
+          <button type="button" class="btn-secondary" data-photo-pick style="font-size:0.75rem;padding:0.3rem 0.5rem">${p.photo_url ? 'Replace' : 'Upload'} photo</button>
+          ${p.photo_url ? `<button type="button" class="btn-secondary" data-photo-remove style="font-size:0.75rem;padding:0.3rem 0.5rem">Remove</button>` : ''}
+        </div>
+        <div class="muted photo-msg" data-photo-msg style="font-size:0.7rem;min-height:1em;margin-top:0.15rem"></div>
       </div>
     </div>
     <label>Name</label>
@@ -4863,6 +4920,66 @@ function renderSquadTab(team, canEdit, players) {
       ];
       const text = lines.join('\n');
       const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(waUrl, '_blank', 'noopener');
+    };
+
+    // Inline share block (right of photo) — code + link + WhatsApp quick buttons.
+    // Uses the same stats-card URL + code as the detailed share button above.
+    const pmShareMsg = root.querySelector('[data-pm-share-msg]');
+    const flashShareMsg = (txt) => {
+      if (!pmShareMsg) return;
+      pmShareMsg.textContent = txt;
+      setTimeout(() => { if (pmShareMsg.textContent === txt) pmShareMsg.textContent = ''; }, 2000);
+    };
+    const playerCardUrl = () => `${location.origin + location.pathname}#/card/${team.id}`;
+    const playerCode = () => {
+      const pl = players.find(q => q.id === pid);
+      return pl ? (pl.family_code || pl.access_code || '') : '';
+    };
+    const copyToClipboard = async (txt) => {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(txt);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        return true;
+      } catch (_) { return false; }
+    };
+    const copyCodeBtn = root.querySelector('[data-pm-copy-code]');
+    if (copyCodeBtn) copyCodeBtn.onclick = async () => {
+      const code = playerCode();
+      if (!code) { flashShareMsg('No code yet.'); return; }
+      const ok = await copyToClipboard(code);
+      flashShareMsg(ok ? `Copied ${code}` : 'Copy failed');
+    };
+    const copyLinkBtn = root.querySelector('[data-pm-copy-link]');
+    if (copyLinkBtn) copyLinkBtn.onclick = async () => {
+      const ok = await copyToClipboard(playerCardUrl());
+      flashShareMsg(ok ? 'Link copied' : 'Copy failed');
+    };
+    const openLinkBtn = root.querySelector('[data-pm-open-link]');
+    if (openLinkBtn) openLinkBtn.onclick = () => {
+      window.open(playerCardUrl(), '_blank', 'noopener');
+    };
+    const pmWhatsAppBtn = root.querySelector('[data-pm-whatsapp]');
+    if (pmWhatsAppBtn) pmWhatsAppBtn.onclick = () => {
+      const player = players.find(q => q.id === pid);
+      if (!player) return;
+      const cardUrl = playerCardUrl();
+      const code = player.family_code || player.access_code || '—';
+      const lines = [
+        `Hi — here's ${shortName(player.name)}'s stats card for ${team.name}${ageGroupLabel(team) ? ' (' + ageGroupLabel(team) + ')' : ''}:`,
+        '',
+        cardUrl,
+        '',
+        `Access code: ${code}`,
+        '',
+        'Save the link — it updates automatically every game.'
+      ];
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`;
       window.open(waUrl, '_blank', 'noopener');
     };
     const unlinkBtn = root.querySelector('[data-unlink-sibling]');
