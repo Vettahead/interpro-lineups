@@ -1,6 +1,184 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-20)
 
-## 🔖 Where we left off on 2026-04-20 (session 18 — read this first)
+## 🔖 Where we left off on 2026-04-20 (session 21 — read this first)
+
+**Locked matches: tapping a filled chip now opens the badge-award modal.** Session 20 locked the pitch on past-date matches and the banner promised "You can still... award badges" — but tapping a chip on a locked match was a dead no-op. Chris: "lock works well but cant award aby badges as clicking on aplyer does nothign now". Fixed: chip-tap on locked match → award modal for that player. Empty-slot tap still pulses the banner (nothing to award).
+
+### Shipped this session (session 21)
+
+1. **`openAwardBadgeForLocked(playerId)` helper.** Looks up the player in `editor.players`, then calls `openAwardBadgeModal({ team, player, lineupId: editor.current?.id, onAwarded })`. `lineupId` scopes the badge to this specific match (so it shows on the match chip + in the match awards card, not just the player's all-time totals). `onAwarded` re-runs `renderLineupsTab()` so the new badge appears on the chip immediately.
+2. **`wirePicker` slot + sub click handlers rewritten.** When `isMatchLocked(editor.current)` is true:
+   - Filled slot / sub (has a `playerId` in that position) → `openAwardBadgeForLocked(pid)`.
+   - Empty slot / sub → `flashLockedPitch()` only (nothing to award).
+   - Still returns early before opening the player picker — no accidental swap.
+3. **Banner promise now backed by real affordance.** Sub-line `"You can still enter the result, award badges, and set MOTM / scorers."` is literally true again: tapping a kid on the locked pitch is now the quickest way to award a match badge.
+4. **Drag + focus-mode + result-wizard paths untouched.** Drag on locked match is still a silent no-op (session 20 guard). Result wizard + "Enter result" button are separate code paths — unchanged. Squad tab's `data-award-badge` button still works for all-time (non-match-scoped) badges.
+
+### Files touched (session 21)
+
+- `app.js` — new `openAwardBadgeForLocked(playerId)` helper near `wirePicker`. Slot + sub click handlers in `wirePicker` rewritten to route locked-match taps to the award modal when a chip is present. Net line count 13948 → ~13970 (+22).
+- `styles.css` — untouched.
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 21)
+
+**None.** `openAwardBadgeModal` already exists (line ~2578) and already supports per-match badges via the optional `lineupId` arg. No new columns, no new RLS. `player_badges.lineup_id` was wired in Slice 2 — we're just exercising it from a new entry point.
+
+### Design decisions locked in (session 21)
+
+- **Locked chip = badge award, not picker.** Intentional mode-switch. On an active match, tapping a chip opens the player picker to swap/reassign. On a locked match, the chip becomes a badge target because that's the only pitch-scoped edit that still makes sense.
+- **Empty slot on locked match stays pulse-only.** Nothing to award — we don't pop open a player chooser just to then award a badge. Keeps the UI honest about what's possible from this state.
+- **Per-match scoping via `lineupId`.** Badges awarded this way carry `lineup_id = editor.current.id` so they appear scoped to the match. Matches the existing Squad-tab flow's match-scoped toggle.
+- **`onAwarded` triggers full tab re-render.** The locked match is a read-only target anyway — rebuild latency doesn't collide with rapid chip placement (session 20's fix only matters for ACTIVE editing). Full re-render keeps everything consistent: chip badge count, awards card, totals.
+
+### Sanity-check script (session 21)
+
+1. **Open a past-date match.** Amber "🔒 Match played — lineup is locked." banner visible above the pitch.
+2. **Tap a filled slot chip.** Badge-award modal opens with the correct player name pre-filled. Select a badge, confirm. Modal closes. Chip re-renders with the new badge indicator. Match awards card (if visible) shows the new award.
+3. **Tap an empty slot.** Banner pulses amber, no modal opens.
+4. **Tap a filled sub chip.** Same as #2 — badge modal opens for that player.
+5. **Try to drag a chip.** Still nothing happens (session 20 silent no-op holds).
+6. **Active (today or future) match — regression check.** Tapping a filled slot still opens the player picker (swap flow), NOT the badge modal. The lock-routing only triggers when `isMatchLocked` is true.
+7. **Award flows from elsewhere still work.** Squad tab `data-award-badge` button → all-time badge (no `lineup_id`). Result wizard step 5 `data-rw-award-pid` chips → result-flow badges. Neither should behave differently.
+
+### Start-here on the new machine (session 21)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI. (Note: `styles.css` untouched this session.)
+2. Vercel auto-deploys.
+3. Hard-reload; clear cache if needed.
+4. Run the sanity-check script above.
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg`.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 20)
+
+**Two fixes on the match editor: autosave no longer collapses the whole tab, and past-date matches lock the pitch.** Chris reported two connected issues while adding players to the pitch in match mode: (1) "takes a second once added and the matches collapse and reload for a split second causing issues if you choose another player too quickly", and (2) "if a game has passed the playdate we shouldn't be able to change the lineup on the pitch (can add badges though)". Both shipped this session.
+
+### Shipped this session (session 20)
+
+1. **Root cause of the "collapse + reload" flash was `saveLineupWithMsg` calling `renderLineupsTab()` unconditionally.** Every chip move triggers `refreshAfterChipMove` (targeted local DOM update) then `scheduleAutosaveIfPublished` (800ms debounce → DB write). After the DB write resolved, the final line of `saveLineupWithMsg` rebuilt the ENTIRE Matches tab — wiping the open editor, re-running all renderers, and re-wiring every event listener. If a coach tapped a second slot during that rebuild window (~50–300ms), the tap landed on a stale slot element that was about to be replaced — the picker either didn't open at all or opened for the wrong position. **Fix:** `renderLineupsTab()` now only fires when `msgEl` is present — i.e. only for EXPLICIT saves (Save button, status-change pills). Autosave (msgEl = null) and `flushAutosave` (pre-navigation) skip the rebuild because `refreshAfterChipMove` has already reconciled the UI locally. Net effect: coaches can tap/drag multiple chips in quick succession with zero flicker, and the "split second gap" disappears.
+2. **`isMatchLocked(lineup)` helper.** Returns true when `lineup.game_date < today (ISO yyyy-mm-dd)`. Null date = not locked (TBD matches stay editable). Today's matches (game_date === today) are editable too — coaches need to be able to make last-minute changes on matchday. Simple date compare, no time-of-day check.
+3. **Pitch lock on past-date matches.** Gated ALL lineup-edit entry points:
+   - `wirePicker()` slot + sub click handlers check `isMatchLocked(editor.current)` before opening the player picker.
+   - Global `pointerdown` chip-drag listener refuses to start a drag when the current match is locked.
+   - `handleDropToSlot`, `handleDropToSub`, `handleDropToPalette` all early-return when locked — defensive guard so any future code path that calls them directly is safe.
+   - Badges, MOTM, scorers, and the result wizard stay editable: they're separate code paths (`data-award-badge` button, result form inputs, JSONB writes) that don't touch the pitch-slot assignment flow.
+4. **Locked banner + pulse feedback.** When a match is locked, a small amber banner renders above the pitch card: `🔒 Match played — lineup is locked.` with a sub-line `You can still enter the result, award badges, and set MOTM / scorers.` If a coach taps a pitch slot on a locked match, `flashLockedPitch()` restarts a 0.55s CSS pulse animation on the banner — enough to draw the eye without blocking the click with an alert. Force-reflow trick (`void el.offsetWidth`) restarts the animation on repeat taps.
+
+### Files touched (session 20)
+
+- `app.js` — one-line fix in `saveLineupWithMsg` (`renderLineupsTab()` → `if (msgEl) renderLineupsTab();`). New `isMatchLocked` helper near `handleDropToPalette`. New `flashLockedPitch` helper near `wirePicker`. Guards added in `wirePicker` (slot + sub click handlers), global `pointerdown` drag listener, and all three `handleDropTo*` functions. Locked-banner markup inserted at the top of `.me-pitch-col` in `renderLineupsTab`. Net line count 13894 → 13948 (+54).
+- `styles.css` — new `.pitch-locked-banner` / `.pitch-locked-ic` / `.pitch-locked-sub` / `.pitch-locked-pulse` + `@keyframes pitch-locked-pulse-anim`. ~37 new lines (4459 → 4496).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 20)
+
+**None.** No schema changes. Lock is a pure client-side guard based on `game_date` — the server already accepts writes from any past-date match (RLS only cares about team role). Intentional: if a coach somehow bypasses the guard (different build cached on another device), the DB still accepts the edit so we never block legitimate data. The lock is a UX guardrail, not a security boundary.
+
+### Design decisions locked in (session 20)
+
+- **Autosave is invisible by design.** Manual save + status changes still re-render the tab so the match card on the left stays in sync with any opponent / date / status tweaks. Autosave is only for chip-level moves where the local `refreshAfterChipMove` has already updated everything visible.
+- **Lock is per-match, evaluated at render time.** No "locked_at" column, no manual lock toggle. When the clock rolls past midnight UTC, yesterday's matches auto-lock on next render. Simple, predictable, no data to migrate.
+- **Today's matches stay editable.** Matchday tweaks (kid got injured in warmup, late arrival, emergency sub) are common — coaches need to reshuffle. The lock only kicks in once the calendar day has passed.
+- **TBD / null dates = never locked.** Fixtures without a confirmed date stay editable indefinitely. Once Chris sets a date and it passes, they lock automatically on next render.
+- **Silent pointerdown refusal.** When a coach tries to drag a chip on a locked match, nothing happens visibly beyond the banner already being on screen. No alert (would be aggressive on desktop), no toast (adds complexity). Clicking a slot gives the pulse feedback because that's a more deliberate tap gesture; dragging has drift/accidental triggers.
+- **Banner says what IS editable, not just what isn't.** Coaches land on a locked match and immediately see the next useful action (enter result, award badges, set MOTM) rather than just a "can't edit" dead-end.
+
+### Sanity-check script (session 20)
+
+1. **Rapid-fire chip placement (was buggy, now smooth).** Open a Published match. Drag player A to slot 1. Immediately (within ~200ms) tap slot 2 and pick player B. Both should land cleanly — no flash, no stale-click miss, no "you're on the wrong slot" confusion.
+2. **Autosave still works.** After any chip move, wait ~1 second, then hard-reload the page. The moves persist.
+3. **Manual Save still re-renders.** Click the Save button. The match card in the left list updates (name/status/opponent). Info panel stays consistent. No regression from the autosave fix.
+4. **Past-date match — banner.** Create a match with game_date set to yesterday (or an old fixture). Open it. Amber `🔒 Match played — lineup is locked.` banner appears above the pitch.
+5. **Past-date match — pitch is read-only.** Try to tap an empty slot: banner pulses amber, no picker opens. Try to tap a filled slot: same pulse, picker doesn't open. Try to drag a chip: nothing happens (silent).
+6. **Past-date match — result flow still works.** Click "Enter result" → result wizard opens. Enter scores, set MOTM, add a goalscorer, save. All works.
+7. **Past-date match — badges still work.** Open the match awards flow (or Squad tab player modal) and award a match-linked badge. Saves. Re-renders. Visible on the pitch chip.
+8. **Today's match is editable.** A match with game_date === today still allows chip moves. Banner doesn't show.
+9. **TBD match (null game_date) is editable.** Banner doesn't show; chips still draggable.
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg`.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+### Start-here on the new machine (session 20)
+
+1. Upload `app.js`, `styles.css`, and `HANDOFF.md` to GitHub via the web UI.
+2. Vercel auto-deploys.
+3. Hard-reload Interpro in the browser; clear cache if you see stale JS.
+4. Run the sanity-check script above.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 19)
+
+**Availability rows auto-collapse once a parent has responded.** Small but nice polish on the unified parent page from session 18. Before this: every child in `unlockedPlayers` always rendered with the full 3-button picker (✅ Available / 🤔 Maybe / ❌ Unavailable) + note input, regardless of whether the parent had already replied. Now: on page load, a child with an existing response renders as a compact single-line summary showing a coloured status pill, responder name, and any saved note; a small "Change" button expands it back to the full picker if the parent wants to edit. Chris's exact ask: "can we have availabillity colapsed if allready submitted?" — yes, per child.
+
+Matters more for sibling families (two kids on the roster, parent has already replied for one and not the other). The unresponded child still gets the full picker; the submitted child is tucked into a one-liner so the eye goes to what still needs doing.
+
+### Shipped this session (session 19)
+
+1. **Per-child collapse, not whole-card collapse.** Each row in the availability list is now two sibling `<div>`s wrapped in one `.avail-row`: `.avail-collapsed` (shown when `availByPlayer[pid]` has a non-null status) and `.avail-expanded` (the original 3-button picker + note input, hidden by `style="display:none"` when a response exists). Both blocks live in the DOM from the start, so `wireAvailabilityForm` doesn't need to re-bind event handlers after the swap.
+2. **Compact summary row.** Collapsed block shows: photo, `#num Name`, a coloured status pill (reuses the existing `.avail-pills` / `.ap` / `.ap-av` / `.ap-mb` / `.ap-un` palette from `styles.css`), responder name in muted text, saved note in italics if present, and a "Change" button on the right.
+3. **"Change" button toggles visibility.** New handler in `wireAvailabilityForm` finds `[data-collapsed-for]` / `[data-expanded-for]` by player id and flips `display: none` — no re-render, no fetch. Once expanded, the row stays expanded for the rest of the session; a page refresh or the 6s poll re-runs `renderParentView` and will re-collapse if the response is still there.
+4. **Fixed a latent `.muted` selector ambiguity.** The submit handler used to update the "Last response: …" line via `row.querySelector('.muted')`. The new collapsed block also contains `.muted` spans (for responder name + note), so the selector is now `.avail-last-line` (new dedicated class on the line we actually want to update).
+
+### Files touched (session 19)
+
+- `app.js` — `renderAvailabilityFormHtml` expanded from one row template to a collapsed+expanded pair with a `statusPillHtml(status)` inner helper. `wireAvailabilityForm`: scoped the last-response selector to `.avail-last-line`, added a 4-line loop wiring `.avail-change-btn` clicks to toggle the display of the collapsed/expanded siblings. Net line count 13844 → 13894 (+50).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 19)
+
+**None.** No schema changes. No new tables or columns — `player_availability` already carries everything we need.
+
+### Design decisions locked in (session 19)
+
+- **Collapse is purely visual, driven by initial render.** Don't try to auto-collapse after a successful submit mid-session — it's more useful to leave the expanded block visible so the parent sees "✓ Saved" and the newly-active status button. Next refresh / poll tick collapses it naturally.
+- **"Change" button over a generic expand icon.** Explicit verb is friendlier for non-technical parents than a chevron or tap-target that isn't obviously interactive. Labelled `Change`, styled as `.btn-secondary` (grey), small so it doesn't dominate.
+- **Per-child, not per-card.** The whole availability card staying fully visible even when collapsed keeps the page rhythm familiar — parents aren't suddenly presented with a "tap to open availability" affordance they didn't have before. They still see the card heading, the name input, and each child's status at a glance.
+- **Reuse existing pill palette, no new CSS.** Wrapped the collapsed-state status pill in `<span class="avail-pills">` with `display:inline-flex` override so the existing compound selectors `.avail-pills .ap-av` etc kick in. Zero styles.css churn this session.
+
+### Sanity-check script (session 19)
+
+1. **Fresh parent on match in Availability.** Paste parent link in incognito, unlock with child code. Availability card loads with the full 3-button picker for that child — same as before.
+2. **Submit then reload.** Tap Available. Flash "✓ Saved". Reload the page. Row now appears collapsed — photo + `#num Name` + green "✅ Available" pill + "· Sarah (Alex's mum)" + Change button.
+3. **With a saved note.** Type a note ("back by 4pm") before submitting Available. Reload. Collapsed row shows the pill AND the note in italics under the responder name.
+4. **Tap Change.** Row swaps to the expanded picker (3 buttons + note input), with the previously-saved status already highlighted green and the note already populated.
+5. **Change to Maybe.** Tap 🤔 Maybe. "✓ Saved" flashes, last-response line updates to `Last response: maybe — Sarah (Alex's mum)`. Row stays expanded (by design). Reload to see it re-collapse with the amber pill.
+6. **Siblings — mixed state.** Family with two unlocked kids; reply for one only. On reload, first child shows collapsed, second child shows the full picker. They don't interfere with each other.
+7. **No response yet.** Unresponded child still renders expanded with "No response yet" muted line.
+8. **Match in Published (post-flip).** After the coach flips to Published, the same page now shows the pitch below the availability card. Collapsed responses still display correctly (and the pill colour still matches what's saved).
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg` (see memory: Rebrand + URL shortening).
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+### Start-here on the new machine (session 19)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI. `styles.css` untouched this session.
+2. Vercel auto-deploys.
+3. Hard-reload Interpro in the browser; clear cache if you see stale JS.
+4. Run the sanity-check script above.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 18)
 
 **Parent routes unified — one link now does availability + lineup + focus cues.** Before this, coaches had two parent URLs per match: `#/avail/{id}` (availability form, only visible while the lineup was in Availability or Published state) and `#/view/{id}` (lineup + tactics + focus cues, only visible while Published). Same renderer under the hood (`renderParentView` + `renderParentMatchView`), differentiated only by an `opts.mode` flag. This session collapsed the two into a single link parents get once per match: when the lineup is in Availability they see the form; when it flips to Published the same link now *also* shows the pitch, tactics, and each child's focus cues, without a second URL being sent. Chris's exact ask: "the avilabily for the games link canwe no just se that for the avail and the lineups and focus?" — yes, that's now how it works.
 

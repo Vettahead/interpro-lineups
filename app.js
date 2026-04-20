@@ -11200,8 +11200,16 @@ function wirePicker() {
     el.addEventListener('click', (e) => {
       // Ignore clicks that originated during a drag
       if (el.classList.contains('drag-over')) return;
-      // Past-date matches are read-only on the pitch (result/badges still editable).
-      if (isMatchLocked(editor.current)) { flashLockedPitch(); return; }
+      // Past-date matches: lineup is locked, but tapping a FILLED chip opens
+      // the award-badge modal for that player (post-match awards are the
+      // primary reason to interact with a played match). Empty slots just
+      // pulse the banner.
+      if (isMatchLocked(editor.current)) {
+        const pid = editor.current?.slots?.[parseInt(el.dataset.slot, 10)];
+        if (pid) { openAwardBadgeForLocked(pid); return; }
+        flashLockedPitch();
+        return;
+      }
       if (maybeFocusSelect(el)) return;
       openPlayerPicker('slot', parseInt(el.dataset.slot, 10));
     });
@@ -11209,14 +11217,19 @@ function wirePicker() {
   tabEl.querySelectorAll('[data-sub]').forEach(el => {
     el.addEventListener('click', () => {
       if (el.classList.contains('drag-over')) return;
-      if (isMatchLocked(editor.current)) { flashLockedPitch(); return; }
+      if (isMatchLocked(editor.current)) {
+        const pid = editor.current?.subs?.[parseInt(el.dataset.sub, 10)];
+        if (pid) { openAwardBadgeForLocked(pid); return; }
+        flashLockedPitch();
+        return;
+      }
       if (maybeFocusSelect(el)) return;
       openPlayerPicker('sub', parseInt(el.dataset.sub, 10));
     });
   });
 }
 
-// Highlight the locked banner briefly when a coach taps/clicks a pitch slot
+// Highlight the locked banner briefly when a coach taps/clicks an EMPTY slot
 // on a past-date match. No-ops silently if the banner isn't in the DOM.
 function flashLockedPitch() {
   const el = document.getElementById('pitch-locked-banner');
@@ -11225,6 +11238,25 @@ function flashLockedPitch() {
   // Force reflow so the animation restarts on rapid repeat taps.
   void el.offsetWidth;
   el.classList.add('pitch-locked-pulse');
+}
+
+// On a locked match, tapping a filled pitch/sub chip opens the award-badge
+// modal for that player instead of the lineup-edit picker. Matches the
+// banner's promise: "You can still award badges."
+function openAwardBadgeForLocked(playerId) {
+  const player = (editor.players || []).find(p => p.id === playerId);
+  if (!player) return;
+  openAwardBadgeModal({
+    team: editor.team,
+    player,
+    lineupId: editor.current?.id || null,
+    onAwarded: () => {
+      // Badge cache is already updated by awardManualBadge. Re-render the
+      // tab so the "Awards given this match" card above the pitch and the
+      // badge row on the chip both refresh.
+      renderLineupsTab();
+    }
+  });
 }
 
 function openPlayerPicker(kind, idx) {
