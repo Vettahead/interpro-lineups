@@ -1,6 +1,76 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-20)
 
-## 🔖 Where we left off on 2026-04-20 (session 17 — read this first)
+## 🔖 Where we left off on 2026-04-20 (session 18 — read this first)
+
+**Parent routes unified — one link now does availability + lineup + focus cues.** Before this, coaches had two parent URLs per match: `#/avail/{id}` (availability form, only visible while the lineup was in Availability or Published state) and `#/view/{id}` (lineup + tactics + focus cues, only visible while Published). Same renderer under the hood (`renderParentView` + `renderParentMatchView`), differentiated only by an `opts.mode` flag. This session collapsed the two into a single link parents get once per match: when the lineup is in Availability they see the form; when it flips to Published the same link now *also* shows the pitch, tactics, and each child's focus cues, without a second URL being sent. Chris's exact ask: "the avilabily for the games link canwe no just se that for the avail and the lineups and focus?" — yes, that's now how it works.
+
+This is a nice lead-in to the (parked) URL-shortening work — we only need to generate one short code per match instead of two.
+
+### Shipped this session (session 18)
+
+1. **Mode-gating simplified in `renderParentView`.** Previously:
+   ```js
+   const showAvailability = viewMode === 'avail' && (status === 'availability' || status === 'published');
+   const showPitch = viewMode === 'match' && status === 'published';
+   ```
+   Now depends only on lineup status — `viewMode` no longer gates which sections render:
+   ```js
+   const showAvailability = status === 'availability' || status === 'published';
+   const showPitch = status === 'published';
+   ```
+   The draft message (shown when status is 'draft') was similarly simplified — previously it checked `viewMode === 'avail' && status === 'draft'`, now just `status === 'draft'`.
+2. **`buildWhatsAppMessage` emits a single link.** Dropped the local `matchUrl` var and the "Match info:" line. New message body:
+   > Tap to confirm availability — same link shows the lineup and your child's focus cues once I publish them:
+   > {availUrl}
+   
+   The availability URL is now the one-and-only parent link. `/view/{id}` is still a valid route (see #4) — just no longer surfaced in new messages.
+3. **`openShareModal` refactored from two sections to one.** The Share modal on the Matches tab used to render both an "Availability link" section and a "Lineup view link" section with separate copy / native-share buttons (via internal `section('avail')` and `section('view')` helpers). Collapsed to a single `parentLinkSection()`. Removed dead `matchUrl`, `availOpen`, `lineupOpen` state vars. Description text is status-aware — three distinct paragraphs depending on whether the match is Draft, Availability, or Published:
+   - Draft: *"Once you switch the match to Availability, this link lets parents confirm their child can play. When you Publish, the same link also shows the lineup, tactics, and each child's focus cues."*
+   - Availability: *"Parents tap this to say whether their child can play. When you Publish, the same link will also show the lineup, tactics, and each child's focus cues."*
+   - Published: *"Parents see availability form, lineup, tactics, and each child's focus cues — all on this one link."*
+4. **Backward compat — `/view/{id}` still works.** Didn't touch the hash router. Already-sent WhatsApp messages with `/view/{id}` keep working because the renderer still accepts both modes — it just ignores `viewMode` for visibility gating now. No migration needed on existing links.
+
+### Files touched (session 18)
+
+- `app.js` — three edits, all in `renderParentMatchView` / `buildWhatsAppMessage` / `openShareModal`. Net line count 13847 → 13844 (−3 after removing dead vars and the second share section).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 18)
+
+**None.** No schema changes. No route changes. Purely client-side rendering logic.
+
+### Design decisions locked in (session 18)
+
+- **One link per match, forever.** When a match is created, the availability URL generated on day one is also the link parents use on matchday — it just shows different things at different stages. Coach never needs to resend a "here's the lineup view" message.
+- **`/view/{id}` kept alive.** Deliberately not killing the legacy route — it'd break already-sent WhatsApp links, and the cost of keeping it around is zero.
+- **Status-aware Share modal copy.** The description text under the single parent link adapts to the match's current lineup_status so coaches know exactly what parents will see *right now* vs after publishing. Prevents the "did I send the wrong link?" panic.
+
+### Sanity-check script (session 18)
+
+1. **Draft match.** Create a new match. Open the Share modal from the Matches tab. See a single "Parent link" section with the draft-state description. Copy the link, open in an incognito tab — parent view shows the "availability isn't open yet" draft message.
+2. **Availability match.** Flip the match to Availability. Share modal description updates. Same link now lets the parent submit availability. Pitch / focus cues NOT visible yet (status is `availability`, not `published`).
+3. **Published match.** Flip to Published. Same link now shows availability form AT THE TOP, and below it the pitch with positions, tactical notes, and each child's parent-visible focus cues.
+4. **Legacy link.** Paste an older `#/view/{id}` URL (if any still exist in WhatsApp history). Should still work — renders identically to the unified flow for a Published match.
+5. **WhatsApp button on the match card.** Tap the 💬 WhatsApp button on the Upcoming tab or inside the Matches-tab Share modal. Pre-filled message should contain the new one-line "Tap to confirm availability — same link shows the lineup and your child's focus cues once I publish them:" copy and a SINGLE URL (no more "Match info:" line).
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg` (see memory: Rebrand + URL shortening). Now cheaper to implement because only one short code per match is needed.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+### Start-here on the new machine (session 18)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI (same folder as before). `styles.css` untouched this session.
+2. Vercel auto-deploys.
+3. Hard-reload Interpro in the browser; clear cache if you see stale JS.
+4. Run the sanity-check script above.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 17)
 
 **Per-parent WhatsApp nudge shipped.** Notifications-channel question finally got a v1 answer: WhatsApp deep-links, one per parent-on-file. Zero infra, zero recurring cost, works on every phone. Coach taps `🔔 Nudge non-responders` on either Upcoming-tab card; a sheet lists kids who haven't replied, with a green WhatsApp button per parent phone number on file. Tap → WhatsApp opens with a pre-filled message that includes the child's first name, the event date/time, and the availability link. Phone normaliser handles UK `+44` and domestic `0` prefixes (also `0044`, `44`, and bare subscriber numbers); Chris's nudge on this was explicit. Nothing else changed — the decision for email/SMS/push still deferred.
 

@@ -2873,10 +2873,13 @@ async function renderParentView(lineupId, opts = {}) {
 
   const status = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
   const viewMode = opts.mode === 'avail' ? 'avail' : 'match';
-  // Show availability form only on the 'avail' route, and only when the lineup is collecting availability or already published
-  const showAvailability = viewMode === 'avail' && (status === 'availability' || status === 'published');
-  // Show pitch only on the 'match' route, and only when published
-  const showPitch = viewMode === 'match' && status === 'published';
+  // Unified parent page (2026-04-20): both /avail/ and /view/ routes render the
+  // same thing now — one link covers availability, lineup, focus cues, everything.
+  // Form shows whenever the status allows parents to respond; pitch shows as soon
+  // as the lineup is published. Route flag is kept for telemetry / future UI tweaks
+  // but no longer gates what's on the page.
+  const showAvailability = status === 'availability' || status === 'published';
+  const showPitch = status === 'published';
   // On the match page, if this device hasn't unlocked any children yet, show a code-entry box
   // so the parent can reveal the "your child is at X" banner here (mirrors the avail page).
   const pvUnlockedIdsForCode = showPitch ? (getUnlockedPlayers(lineup.team_id) || []) : [];
@@ -2929,7 +2932,7 @@ async function renderParentView(lineupId, opts = {}) {
 
     ${showAvailability ? renderAvailabilityFormHtml(lineup, players, availByPlayer) : ''}
 
-    ${viewMode === 'avail' && status === 'draft' ? `
+    ${status === 'draft' ? `
       <div class="pv-card"><p class="muted" style="margin:0">Availability isn't open yet — your coach will let you know when it is.</p></div>
     ` : ''}
 
@@ -6995,8 +6998,10 @@ async function buildWhatsAppMessage(current, team) {
   }
 
   const base = location.origin + location.pathname;
+  // Unified parent link (2026-04-20): /avail/ now covers availability, lineup
+  // (when published), focus cues, coach notes — one URL for everything parents need.
+  // Old /view/ links in already-sent chats still work (same renderer, same data).
   const availUrl = `${base}#/avail/${current.id}`;
-  const matchUrl = `${base}#/view/${current.id}`;
   // Training link is appended only when the team has a recurring schedule set
   // (Slice 8). The URL is permanent per team — rolls forward automatically —
   // so pinning this message in WhatsApp covers both match + training.
@@ -7044,19 +7049,15 @@ async function buildWhatsAppMessage(current, team) {
     mapsUrl ? `Map: ${mapsUrl}` : null,
     '',
     trainingUrl
-      ? 'Links — availability, match info, and training attendance:'
-      : 'Two links — let us know if your child can make it, and the other is the general match info:',
+      ? "Tap to confirm availability — same link shows the lineup and your child's focus cues once I publish them. Training link too:"
+      : "Tap to confirm availability — same link shows the lineup and your child's focus cues once I publish them:",
     '',
-    'Availability:',
     availUrl,
-    '',
-    'Match info:',
-    matchUrl,
     trainingUrl ? '' : null,
     trainingUrl ? 'Training (rolling link — always shows the next session):' : null,
     trainingUrl || null,
     '',
-    `The Availability link asks for your child's parent code the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
+    `The link asks for your child's parent code the first time you open it on a device (only once — your phone remembers). If you don't have it or have lost it, message ${coachList}.`,
     '',
     'Cheers!'
   ].filter(l => l !== null).join('\n');
@@ -9176,9 +9177,10 @@ function availPillsHtml(counts, rosterSize) {
 }
 
 // ---------- Share modal ----------
-// One popup, two clearly-labelled sections: Availability link + Match link.
-// Keeps every existing action — Copy, WhatsApp (combined message), Add to calendar.
-// Locked state if the lineup isn't in the right status to be shared (e.g. draft).
+// One popup, one Parent link section (unified URL covers availability + lineup +
+// focus cues depending on match status). Keeps every existing action — Copy,
+// WhatsApp (combined message), Add to calendar. Status badge tells the coach what
+// parents currently see on the link given the match's current status.
 // Post-create prompt shown after the Match Wizard inserts a lineup.
 // "Share to WhatsApp now?" — on Yes, flips status to 'availability' so the
 // availability link is live for parents, builds the combined WhatsApp message
@@ -9381,44 +9383,37 @@ async function openShareModal(opts = {}) {
   const team = editor?.team;
   const status = lineup.lineup_status || (lineup.published ? 'published' : 'draft');
   const base = location.origin + location.pathname;
+  // Unified parent link (2026-04-20): one URL covers availability + lineup + focus cues.
   const availUrl = `${base}#/avail/${id}`;
-  const matchUrl = `${base}#/view/${id}`;
-  const availOpen = true;   // availability link always copyable
-  const lineupOpen = status === 'published';
   const canWebShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
-  const statusBadge = (open, kind) => {
-    if (!open) return `<span class="share-status locked">○ Locked</span>`;
-    if (kind === 'avail' && status === 'availability') return `<span class="share-status ok">◐ Open</span>`;
-    return `<span class="share-status ok">● Open</span>`;
+  const statusBadge = () => {
+    if (status === 'draft') return `<span class="share-status locked">○ Draft — parents see "Availability isn't open yet"</span>`;
+    if (status === 'availability') return `<span class="share-status ok">◐ Availability open</span>`;
+    return `<span class="share-status ok">● Published — lineup + focus cues visible</span>`;
   };
 
-  const section = (kind) => {
-    const isAvail = kind === 'avail';
-    const open = isAvail ? availOpen : lineupOpen;
-    const url = isAvail ? availUrl : matchUrl;
-    const title = isAvail ? 'Availability link' : 'Match link (lineup + details)';
-    const desc = isAvail
-      ? "Parents tap this to say whether their child can play."
-      : "Parents see the lineup, tactics and match info.";
-    const lockedHint = isAvail
-      ? 'Switch the match to <em>Availability</em> or <em>Show lineup</em> to open this link for parents.'
-      : 'Switch the match to <em>Show lineup</em> (Published) to open this link for parents.';
+  const parentLinkSection = () => {
+    const url = availUrl;
+    const desc = status === 'draft'
+      ? "Once you switch the match to Availability, this link lets parents confirm their child can play. When you Publish, the same link also shows the lineup, tactics, and each child's focus cues."
+      : status === 'availability'
+        ? "Parents tap this to say whether their child can play. When you Publish, the same link will also show the lineup, tactics, and each child's focus cues."
+        : "Parents see availability form, lineup, tactics, and each child's focus cues — all on this one link.";
     return `
-      <section class="share-section ${open ? '' : 'share-locked'}">
+      <section class="share-section">
         <div class="share-sec-head">
           <div class="share-sec-titles">
-            <h4 class="share-sec-title">${title}</h4>
+            <h4 class="share-sec-title">Parent link</h4>
             <p class="share-sec-desc muted">${desc}</p>
           </div>
-          ${statusBadge(open, kind)}
+          ${statusBadge()}
         </div>
         <div class="share-url" title="${escapeHtml(url)}">${escapeHtml(url)}</div>
         <div class="share-actions">
-          <button class="btn-full share-btn share-btn-primary" data-share-copy="${kind}" ${open ? '' : 'disabled'}>📋 Copy link</button>
-          ${canWebShare ? `<button class="btn-full share-btn" data-share-native="${kind}" ${open ? '' : 'disabled'}>📲 Share…</button>` : ''}
+          <button class="btn-full share-btn share-btn-primary" data-share-copy="avail">📋 Copy link</button>
+          ${canWebShare ? `<button class="btn-full share-btn" data-share-native="avail">📲 Share…</button>` : ''}
         </div>
-        ${!open ? `<p class="share-hint muted">${lockedHint}</p>` : ''}
       </section>
     `;
   };
@@ -9432,13 +9427,12 @@ async function openShareModal(opts = {}) {
         <button type="button" class="map-modal-close" data-close aria-label="Close">×</button>
       </div>
       <div class="map-modal-body share-body">
-        ${section('avail')}
-        ${section('view')}
+        ${parentLinkSection()}
         <section class="share-section share-combined">
           <h4 class="share-sec-title">Send to the team chat</h4>
-          <p class="share-sec-desc muted">Combined message with match details, venue, both links and a reminder about the parent code.</p>
+          <p class="share-sec-desc muted">Combined message with match details, venue, the parent link and a reminder about the parent code.</p>
           <div class="share-actions">
-            <button class="btn-full share-btn share-wa" data-share-whatsapp ${(availOpen || lineupOpen) ? '' : 'disabled'}>💬 Send via WhatsApp</button>
+            <button class="btn-full share-btn share-wa" data-share-whatsapp>💬 Send via WhatsApp</button>
             ${lineup.game_date ? `<button class="btn-full share-btn" data-share-calendar>📅 Add to calendar</button>` : ''}
           </div>
         </section>
@@ -9468,17 +9462,14 @@ async function openShareModal(opts = {}) {
     setTimeout(() => { if (el.textContent === text) { el.textContent = ''; el.className = 'muted'; } }, 3000);
   };
 
-  // Copy-to-clipboard handlers
+  // Copy-to-clipboard handler — single parent link.
   overlay.querySelectorAll('[data-share-copy]').forEach(btn => {
     btn.onclick = async () => {
-      const which = btn.dataset.shareCopy;
-      const url = which === 'avail' ? availUrl : matchUrl;
-      const label = which === 'avail' ? 'Availability link' : 'Match link';
       try {
-        await navigator.clipboard.writeText(url);
-        showMsg(`✓ ${label} copied`);
+        await navigator.clipboard.writeText(availUrl);
+        showMsg('✓ Parent link copied');
       } catch (_) {
-        window.prompt('Copy this link:', url);
+        window.prompt('Copy this link:', availUrl);
         showMsg('Link ready to copy', 'muted');
       }
     };
@@ -9487,11 +9478,8 @@ async function openShareModal(opts = {}) {
   // Native OS share sheet (Android / iOS / desktop on supported browsers)
   overlay.querySelectorAll('[data-share-native]').forEach(btn => {
     btn.onclick = async () => {
-      const which = btn.dataset.shareNative;
-      const url = which === 'avail' ? availUrl : matchUrl;
-      const title = which === 'avail' ? 'Availability link' : 'Match link';
       try {
-        await navigator.share({ title, url });
+        await navigator.share({ title: 'Parent link', url: availUrl });
         showMsg('✓ Shared');
       } catch (e) {
         if (e?.name !== 'AbortError') showMsg('Share failed', 'error');
