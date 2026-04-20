@@ -3058,6 +3058,23 @@ function clearUnlockedPlayers(teamId) {
   try { localStorage.removeItem(_unlockKey(teamId)); } catch {}
 }
 
+// Shared by the availability form renderer and its submit handler — both need
+// to build the same little coloured status pill ("✅ Available" / "🤔 Maybe" /
+// "❌ Unavailable") for the collapsed row. Hoisted to module scope so the
+// submit handler in wireAvailabilityForm() can reuse it when refreshing the
+// pill after a save without duplicating the catalog.
+function availStatusPillHtml(s) {
+  const cls = s === 'available' ? 'ap-av'
+    : s === 'maybe'       ? 'ap-mb'
+    : s === 'unavailable' ? 'ap-un'
+    : 'ap-nr';
+  const lbl = s === 'available' ? '✅ Available'
+    : s === 'maybe'       ? '🤔 Maybe'
+    : s === 'unavailable' ? '❌ Unavailable'
+    : '— No response';
+  return `<span class="avail-pills" style="display:inline-flex;margin:0;gap:0"><span class="ap ${cls}">${lbl}</span></span>`;
+}
+
 function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
   const sorted = [...players].sort((a, b) => {
     const na = Number(a.number) || 9999, nb = Number(b.number) || 9999;
@@ -3080,20 +3097,9 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
   };
   // Collapsed-state helpers — once a parent has submitted for a child, initial
   // render shows a compact pill + "Change" button instead of the full 3-button
-  // picker. Tapping Change swaps to the expanded block (both blocks exist in
-  // the DOM from the start, so wireAvailabilityForm doesn't have to re-bind
-  // anything after the swap).
-  const statusPillHtml = (s) => {
-    const cls = s === 'available' ? 'ap-av'
-      : s === 'maybe'       ? 'ap-mb'
-      : s === 'unavailable' ? 'ap-un'
-      : 'ap-nr';
-    const lbl = s === 'available' ? '✅ Available'
-      : s === 'maybe'       ? '🤔 Maybe'
-      : s === 'unavailable' ? '❌ Unavailable'
-      : '— No response';
-    return `<span class="avail-pills" style="display:inline-flex;margin:0;gap:0"><span class="ap ${cls}">${lbl}</span></span>`;
-  };
+  // picker. The submit handler in wireAvailabilityForm toggles these blocks
+  // after a fresh save so the row collapses immediately (not just on reload).
+  const statusPillHtml = availStatusPillHtml;
 
   const rows = unlockedPlayers.map(p => {
     const cur = availByPlayer[p.id];
@@ -3104,20 +3110,26 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
     const lastLine = cur
       ? `<div class="muted avail-last-line" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.status}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
       : `<div class="muted avail-last-line" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
-    const collapsedBlock = hasResponse ? `
-      <div class="avail-collapsed" data-collapsed-for="${p.id}" style="display:flex;gap:0.6rem;align-items:center">
+    // Always render the collapsed block (hidden via display:none when no
+    // response). This lets wireAvailabilityForm.submit() just update the inner
+    // spans and toggle visibility after a save — no HTML rebuild, no event
+    // rebinding. Previously the collapsed block was only in the DOM if the
+    // parent had ALREADY responded at page load, so a fresh submit couldn't
+    // collapse (nothing to show).
+    const collapsedBlock = `
+      <div class="avail-collapsed" data-collapsed-for="${p.id}" style="display:${hasResponse ? 'flex' : 'none'};gap:0.6rem;align-items:center">
         ${photoHtml}
         <div style="flex:1;min-width:0">
           <div style="font-weight:600">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
           <div style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem">
-            ${statusPillHtml(cur.status)}
-            ${cur.responded_by ? `<span class="muted" style="font-size:0.7rem">· ${escapeHtml(cur.responded_by)}</span>` : ''}
+            <span class="avail-collapsed-pill">${cur?.status ? statusPillHtml(cur.status) : ''}</span>
+            <span class="avail-collapsed-responder muted" style="font-size:0.7rem;display:${cur?.responded_by ? '' : 'none'}">${cur?.responded_by ? '· ' + escapeHtml(cur.responded_by) : ''}</span>
           </div>
-          ${cur.note ? `<div class="muted" style="font-size:0.7rem;margin-top:0.2rem;font-style:italic">“${escapeHtml(cur.note)}”</div>` : ''}
+          <div class="avail-collapsed-note muted" style="font-size:0.7rem;margin-top:0.2rem;font-style:italic;display:${cur?.note ? '' : 'none'}">${cur?.note ? '“' + escapeHtml(cur.note) + '”' : ''}</div>
         </div>
         <button type="button" class="btn-secondary avail-change-btn" data-change-player="${p.id}"
           style="font-size:0.75rem;padding:0.3rem 0.6rem;align-self:flex-start;flex-shrink:0">Change</button>
-      </div>` : '';
+      </div>`;
     const expandedBlock = `
       <div class="avail-expanded" data-expanded-for="${p.id}"${hasResponse ? ' style="display:none"' : ''}>
         <div style="display:flex;gap:0.6rem;align-items:center">
@@ -3224,8 +3236,44 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
     // .muted spans (responder name, note), so we scope to .avail-last-line.
     const line = row?.querySelector('.avail-last-line');
     if (line) line.textContent = `Last response: ${status}${responderName ? ' — ' + responderName : ''}`;
+
+    // Collapse the row back into the compact pill + Change view. Update the
+    // collapsed block's spans (pill, responder, note) in-place, then swap
+    // visibility. The parent page can be very long with many siblings, so
+    // rolling each answered row back into one line keeps unanswered rows
+    // easy to find.
+    const collapsed = row?.querySelector('.avail-collapsed');
+    const expanded = row?.querySelector('.avail-expanded');
+    if (collapsed) {
+      const pillEl = collapsed.querySelector('.avail-collapsed-pill');
+      if (pillEl) pillEl.innerHTML = availStatusPillHtml(status);
+      const responderEl2 = collapsed.querySelector('.avail-collapsed-responder');
+      if (responderEl2) {
+        if (responderName) {
+          responderEl2.textContent = '· ' + responderName;
+          responderEl2.style.display = '';
+        } else {
+          responderEl2.textContent = '';
+          responderEl2.style.display = 'none';
+        }
+      }
+      const noteEl2 = collapsed.querySelector('.avail-collapsed-note');
+      if (noteEl2) {
+        if (note) {
+          noteEl2.textContent = '“' + note + '”';
+          noteEl2.style.display = '';
+        } else {
+          noteEl2.textContent = '';
+          noteEl2.style.display = 'none';
+        }
+      }
+      collapsed.style.display = 'flex';
+    }
+    if (expanded) expanded.style.display = 'none';
+
     flash('✓ Saved', 'ok');
   };
+
 
   document.querySelectorAll('.avail-btn').forEach(btn => {
     btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.status));
@@ -11770,6 +11818,19 @@ function refreshAfterChipMove() {
   if (slotsLayer) applyMatchDecorations(slotsLayer, current.motm, current.goalscorers, editor.team?.id, current.id);
   if (subsRow)   applyMatchDecorations(subsRow,   current.motm, current.goalscorers, editor.team?.id, current.id);
 
+  // Re-wire picker click handlers: both renderPitch() and renderSubsBar() above
+  // replace their slot/sub DOM via innerHTML, which wipes the per-element click
+  // listeners attached by wirePicker() at initial render. Drag still works
+  // because wireDragAndDrop uses a document-level pointerdown delegation guarded
+  // by _chipDragWired that persists across re-renders. Without this call, after
+  // the first chip move the coach can't tap empty slots to open the picker or
+  // tap filled chips to remove/replace — only drag-and-drop keeps working.
+  // Same guard conditions used in wireLineupEvents (line 10892) + line 12764.
+  // (Added 2026-04-17 — session 23.)
+  if (editor?.canEdit && !_posEditMode) {
+    try { wirePicker(); } catch (_) {}
+  }
+
   // Persist
   try { scheduleAutosaveIfPublished(); } catch (_) {}
 }
@@ -13197,11 +13258,17 @@ async function highlightMyChildrenOnPitch(lineup, players) {
 
   if (!entries.length) { noticeEl.innerHTML = ''; return; }
 
-  // Highlight each child's chip(s) on the pitch and subs bench with a gold ring
+  // Highlight each child's chip(s) on the pitch and subs bench with a gold ring.
+  // IMPORTANT: use INSET box-shadow, not outer. `.pitch { overflow: hidden }`
+  // clips outer shadows on chips near the pitch edge — so a 4px outer ring on
+  // a bottom-row goalkeeper or corner-hugging wing chip was visibly cropped
+  // (the "gold circle disappears when I scroll to the bottom" bug). Inset
+  // paints the ring inside the chip's border box and can never be clipped by
+  // an ancestor's overflow.
   entries.forEach(({ player, role }) => {
     if (role === 'none') return;
     document.querySelectorAll(`.chip[data-player-id="${player.id}"]`).forEach(chip => {
-      chip.style.boxShadow = '0 0 0 4px #f4c430, 0 1px 3px rgba(0,0,0,0.4)';
+      chip.style.boxShadow = 'inset 0 0 0 4px #f4c430, 0 1px 3px rgba(0,0,0,0.4)';
     });
   });
 

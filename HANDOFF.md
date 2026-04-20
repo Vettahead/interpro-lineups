@@ -1,6 +1,126 @@
 # Interpro Coach / Manager Assistant — Handoff (2026-04-20)
 
-## 🔖 Where we left off on 2026-04-20 (session 21 — read this first)
+## 🔖 Where we left off on 2026-04-20 (session 23 — read this first)
+
+**Subs tab picker-click regression fixed.** After placing the first sub, coach couldn't tap empty sub slots to add another, and couldn't tap the filled sub to remove / replace — only drag-and-drop kept working. Chris: "matches the subs tab once a sub has been chosen ytou cant add any more or remove the sub, you can move his postion though". Root cause: `refreshAfterChipMove` (added session 20 as the targeted local re-render that replaced the old full `renderLineupsTab` call) rebuilds pitch slots + subs row via `innerHTML =`, which wipes the per-element click listeners `wirePicker()` attached at initial render. Drag survived because `wireDragAndDrop` uses a document-level `pointerdown` delegation guarded by `_chipDragWired` that persists across re-renders. The picker was a sibling casualty of the session 20 speed-up. One-line fix: call `wirePicker()` at the end of `refreshAfterChipMove`, gated by the same `editor?.canEdit && !_posEditMode` condition used at wire-up sites (line 10892 + line 12764).
+
+### Shipped this session (session 23)
+
+1. **`wirePicker()` re-bound after every chip move.** New block near the end of `refreshAfterChipMove`, right before `scheduleAutosaveIfPublished()`:
+   ```js
+   if (editor?.canEdit && !_posEditMode) {
+     try { wirePicker(); } catch (_) {}
+   }
+   ```
+   Wrapped in try/catch to match the defensive style of the surrounding autosave call — a stray throw here would kill the autosave that follows.
+2. **Affects pitch slots + sub slots + empty-slot taps.** Chris reported only the subs tab, but the same regression was silently affecting pitch slots (tap to swap a chip vs. tap to open picker) and empty-slot picker opens. All three are now restored because `wirePicker()` binds handlers on `[data-slot]` AND `[data-sub]`.
+3. **Drag untouched.** `wireDragAndDrop` already handles its own re-binding via `_chipDragWired` + document-level pointerdown delegation — nothing to change there. Dragging a filled sub into another sub slot keeps working (which is why Chris could still move the sub around).
+4. **Guard conditions mirror the two existing call sites.** `wireLineupEvents` (line 10892) and the Tactics page wirer (line 12764) both gate picker wiring on `canEdit && !_posEditMode`. Using the same guard in `refreshAfterChipMove` means the re-bind is a no-op for read-only parents and for coaches in position-edit mode (where a different handler, `wirePositionEditing`, owns clicks).
+
+### Files touched (session 23)
+
+- `app.js` — `refreshAfterChipMove` gets the new wirePicker re-bind block just before the autosave call. Net line count 14034 → 14047 (+13; mostly comments explaining why).
+- `styles.css` — untouched.
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 23)
+
+**None.** Pure client-side handler re-wire. No schema changes.
+
+### Design decisions locked in (session 23)
+
+- **Re-bind at the end of `refreshAfterChipMove`, not after each of `renderPitch` / `renderSubsBar` individually.** Single re-bind covers both and matches how the other call sites wire once per full render pass. Two calls would double-bind on the sub slots or waste a pass.
+- **try/catch around `wirePicker()`.** Defensive — if a future renderer mutation introduces a null DOM lookup inside `wirePicker`, the autosave + availability overlays that run after it must still fire. The existing `scheduleAutosaveIfPublished` a few lines below already uses the same try/catch pattern.
+- **Don't call `wirePicker` from `renderPitch` or `renderSubsBar` directly.** Keeping render functions pure (no event-binding side effects) preserves the ability to call them in other contexts (e.g., palette-only refreshes) without double-binding picker handlers to stale slots.
+- **Kept session 20's `renderLineupsTab` guard.** The whole point of session 20 was to STOP full tab rebuilds on autosave. Re-introducing a `renderLineupsTab()` call here would undo that speed-up. The `wirePicker()` re-bind is the surgical equivalent.
+
+### Sanity-check script (session 23)
+
+1. **Open a published match in the coach's view.** Tap an empty sub slot. Picker opens. Pick a player. Sub is placed.
+2. **Tap the next empty sub slot.** Picker opens again (previously dead). Pick a player. Second sub placed.
+3. **Tap the filled first sub.** Remove picker opens (previously dead). Remove. Sub is empty again.
+4. **Tap an empty pitch slot.** Picker opens. Pick a player. Chip drops into the slot.
+5. **Tap a filled pitch slot.** Replace-or-remove picker opens.
+6. **Drag a sub chip to a different sub slot.** Still works (unchanged from before).
+7. **Drag a sub chip to a pitch slot.** Still works (unchanged from before).
+8. **Parent `/view` link on the same match.** No picker behaviour at all — read-only gate holds (no `canEdit`).
+9. **Position-edit mode.** Enter position editing on a formation. Chip drags move positions, not players. No picker opens (the `!_posEditMode` guard holds).
+10. **Locked match (past date).** Tapping a filled chip opens the award-badge modal (session 21 path). Empty-slot tap pulses the locked banner. Neither path re-binds picker behind the coach's back on the locked pitch.
+
+### Start-here on the new machine (session 23)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI. (`styles.css` untouched this session.)
+2. Vercel auto-deploys.
+3. Hard-reload; clear cache if needed.
+4. Run the sanity-check script above, especially steps 2 + 3 (the specific regression Chris hit).
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg`.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 22)
+
+**Two parent-view polish fixes: (1) availability rows now collapse after a fresh submit (not just on reload), and (2) the gold highlight ring on your child's chip no longer gets clipped at the pitch edge.** Chris: "when i scroll to the bottom of the avialablity screen the gold circle o my child disappears? also the availablity once chosen isnt collapsed. needs to collapsed with the change button allways after signing it as the page is ver long". Both shipped.
+
+### Shipped this session (session 22)
+
+1. **Availability rows collapse immediately after submit.** Session 19 wired collapse on INITIAL RENDER (if the parent had already responded when they opened the page). But submitting a fresh response just updated the button colors and left the expanded picker + note input + last-response line fully visible — which made the page very long for sibling families. Now the `submit` handler in `wireAvailabilityForm` toggles the collapsed block on after a successful save: the pill shows the new status, responder name + optional note refresh in place, and the 3-button picker + note input vanish. The "Change" button remains as the way back into the picker.
+2. **Collapsed block always in DOM.** Previously the collapsed `<div class="avail-collapsed">` was only generated when `hasResponse` was true at page load. A fresh submit had nothing to swap to. Now it's always rendered (with `display:none` when no response) so the submit handler just updates spans (`.avail-collapsed-pill`, `.avail-collapsed-responder`, `.avail-collapsed-note`) and flips `display: flex`. No HTML rebuild, no event re-binding — the existing Change button keeps its listener.
+3. **`availStatusPillHtml()` hoisted to module scope.** Both the renderer and the submit handler need to build the same coloured pill. Previously an inner closure in `renderAvailabilityFormHtml`. Now a top-level helper so the submit handler can call it without duplicating the palette.
+4. **Gold ring on parent's child chip uses INSET box-shadow.** `highlightMyChildrenOnPitch` applied `box-shadow: 0 0 0 4px #f4c430` as an OUTER ring — but `.pitch { overflow: hidden }` (styles.css:587) clips outer shadows on chips sitting near the pitch's edge. A goalkeeper at the bottom row, a winger hugging the touchline, a striker near the top — any chip close to the pitch boundary had its gold ring shaved off on the clipped side. Switched to `inset 0 0 0 4px #f4c430` so the ring paints inside the chip's border box and can never be clipped by an ancestor's overflow. Still reads as "this is my kid" — just a gold border inside the chip edge instead of outside it.
+5. **Drop shadow preserved.** The second shadow layer (`0 1px 3px rgba(0,0,0,0.4)`) is still an outer drop shadow — it's a tiny 3px blur so even if the chip is right at the pitch edge, the clipping is imperceptible. Only the 4px primary gold ring needed the inset treatment.
+
+### Files touched (session 22)
+
+- `app.js` — `renderAvailabilityFormHtml` now unconditionally renders the collapsed block (display toggled via inline style); inner spans got named classes (`avail-collapsed-pill` / `avail-collapsed-responder` / `avail-collapsed-note`). `wireAvailabilityForm.submit` updates those spans + flips visibility after a save. New top-level helper `availStatusPillHtml(s)`; the inner closure in `renderAvailabilityFormHtml` now just aliases it. `highlightMyChildrenOnPitch` gold ring changed to `inset`. Net line count 13980 → ~14000 (+~20).
+- `styles.css` — untouched.
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 22)
+
+**None.** Pure client-side UX fixes. No schema changes.
+
+### Design decisions locked in (session 22)
+
+- **Collapse is automatic, not opt-in.** A parent who has just picked ✅/🤔/❌ probably wants the row out of their face immediately so they can find the other kids still needing a response. If they want to change their mind, the Change button is right there — one tap, expanded picker again.
+- **Pill + responder + note all update in-place.** We don't blow away and rebuild the collapsed block; we just swap text inside known spans. Keeps the existing Change button handler alive (no re-binding needed) and avoids any flicker.
+- **Gold ring stays the same colour and thickness, only goes inside.** `#f4c430` at 4px matches the `pv-squad` card's gold accent (`border-left:4px solid #f4c430`) so the child's chip visually links to the "Your squad" banner.
+- **Inset shadow is preferred over CSS outline.** Outlines in Chromium CAN still be clipped by overflow:hidden ancestors in certain layout modes. Inset box-shadow is guaranteed to paint inside the border box.
+
+### Sanity-check script (session 22)
+
+1. **Fresh submit on a long availability page.** Open a parent availability link with multiple siblings, none answered yet. Pick ✅ for the first child. The row collapses immediately into `[photo] #7 Alex  [✅ Available pill]  · [responder name]  "note if present"  [Change]`. The picker + note input are gone.
+2. **Change → re-submit.** Tap Change on the collapsed row. Expanded picker reappears with the previous selection highlighted. Change ✅ to 🤔. Row collapses again with the new pill + note.
+3. **Siblings stay expanded until answered.** Child #2 (not yet responded) is still showing the full picker beneath the collapsed #1.
+4. **Re-load the page.** Previously answered children render straight into the collapsed view. Same as before — no regression.
+5. **Gold ring on parent-unlocked chip.** Open a parent /view link on a match where the child is playing. Scroll down to the pitch. The child's chip shows a gold ring INSIDE the chip perimeter (a gold border ~4px thick on the inside edge). Check chips near the pitch corners: goalkeeper at the bottom, winger at a side, striker near the top — all rings render cleanly, nothing clipped.
+6. **MOTM / goals / match badges overlay cleanly.** The inset ring sits inside the chip; the star (top-left), goal-ball (top-right), badge row (bottom-left), focus marker (bottom-right) all still render on top without collision.
+7. **Multiple siblings on the same pitch.** If two unlocked children are both in the squad, both chips get the gold inset ring. Verify both render.
+
+### Start-here on the new machine (session 22)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI. (`styles.css` untouched this session.)
+2. Vercel auto-deploys.
+3. Hard-reload; clear cache if needed.
+4. Run the sanity-check script above.
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg`.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 21)
 
 **Locked matches: tapping a filled chip now opens the badge-award modal.** Session 20 locked the pitch on past-date matches and the banner promised "You can still... award badges" — but tapping a chip on a locked match was a dead no-op. Chris: "lock works well but cant award aby badges as clicking on aplyer does nothign now". Fixed: chip-tap on locked match → award modal for that player. Empty-slot tap still pulses the banner (nothing to award).
 
