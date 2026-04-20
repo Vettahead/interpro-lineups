@@ -4457,3 +4457,40 @@ body.mw-open { overflow: hidden; }
 }
 .nudge-add-link:hover { text-decoration: underline; }
 
+/* Past-date match lock banner — shown above the pitch in the match editor
+   when game_date is before today. Pitch chips are silently non-interactive
+   while this banner is on screen; tapping a slot triggers the pulse animation
+   so the coach notices the banner if they try to edit. */
+.pitch-locked-banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: #fff7e0;
+  border: 1px solid #f1e0a0;
+  color: #6a4a00;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  transition: background 0.25s ease, border-color 0.25s ease;
+}
+.pitch-locked-ic {
+  font-size: 1.1rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.pitch-locked-sub {
+  font-size: 0.78rem;
+  color: #7a5a00;
+  margin-top: 0.1rem;
+  font-weight: normal;
+}
+.pitch-locked-pulse {
+  animation: pitch-locked-pulse-anim 0.55s ease;
+}
+@keyframes pitch-locked-pulse-anim {
+  0%   { background: #fff7e0; border-color: #f1e0a0; }
+  40%  { background: #ffe3a8; border-color: #d8a93f; }
+  100% { background: #fff7e0; border-color: #f1e0a0; }
+}
+

@@ -8899,6 +8899,15 @@ function renderLineupsTab() {
         </div>
 
         <div class="me-pitch-col">
+          ${isMatchLocked(current) ? `
+            <div class="pitch-locked-banner" id="pitch-locked-banner">
+              <span class="pitch-locked-ic" aria-hidden="true">🔒</span>
+              <div>
+                <strong>Match played — lineup is locked.</strong>
+                <div class="pitch-locked-sub">You can still enter the result, award badges, and set MOTM / scorers.</div>
+              </div>
+            </div>
+          ` : ''}
           <div class="card pitch-card">
             <div class="pitch" id="pitch">
               <svg class="pitch-lines" viewBox="0 0 70 100" preserveAspectRatio="none" aria-hidden="true">${pitchSvgInner()}</svg>
@@ -11191,6 +11200,8 @@ function wirePicker() {
     el.addEventListener('click', (e) => {
       // Ignore clicks that originated during a drag
       if (el.classList.contains('drag-over')) return;
+      // Past-date matches are read-only on the pitch (result/badges still editable).
+      if (isMatchLocked(editor.current)) { flashLockedPitch(); return; }
       if (maybeFocusSelect(el)) return;
       openPlayerPicker('slot', parseInt(el.dataset.slot, 10));
     });
@@ -11198,10 +11209,22 @@ function wirePicker() {
   tabEl.querySelectorAll('[data-sub]').forEach(el => {
     el.addEventListener('click', () => {
       if (el.classList.contains('drag-over')) return;
+      if (isMatchLocked(editor.current)) { flashLockedPitch(); return; }
       if (maybeFocusSelect(el)) return;
       openPlayerPicker('sub', parseInt(el.dataset.sub, 10));
     });
   });
+}
+
+// Highlight the locked banner briefly when a coach taps/clicks a pitch slot
+// on a past-date match. No-ops silently if the banner isn't in the DOM.
+function flashLockedPitch() {
+  const el = document.getElementById('pitch-locked-banner');
+  if (!el) return;
+  el.classList.remove('pitch-locked-pulse');
+  // Force reflow so the animation restarts on rapid repeat taps.
+  void el.offsetWidth;
+  el.classList.add('pitch-locked-pulse');
 }
 
 function openPlayerPicker(kind, idx) {
@@ -11539,6 +11562,9 @@ function wireDragAndDrop() {
 
   document.addEventListener('pointerdown', (e) => {
     if (!editor?.canEdit) return;
+    // Past-date matches: pitch chips can't be picked up for drag. Tapping a
+    // slot already flashes the locked banner via wirePicker; drag is silent.
+    if (isMatchLocked(editor?.current)) return;
     if (_posEditMode) return; // Edit-positions mode owns all pointer events on the pitch
     if (tacticMode) return;   // Tactics (move/click/drag/ball) own pointer events on the pitch
     if (e.button !== undefined && e.button !== 0) return;
@@ -11718,6 +11744,7 @@ function refreshAfterChipMove() {
 
 function handleDropToSlot(slotIdx, payload) {
   const { current } = editor;
+  if (isMatchLocked(current)) return;
   const targetPid = current.slots[slotIdx];
 
   // If dropping from another slot and target occupied → swap
@@ -11742,6 +11769,7 @@ function handleDropToSlot(slotIdx, payload) {
 
 function handleDropToSub(subIdx, payload) {
   const { current } = editor;
+  if (isMatchLocked(current)) return;
   const subsFilled = current.subs.filter(Boolean).length;
   const targetPid = current.subs[subIdx];
 
@@ -11766,8 +11794,26 @@ function handleDropToSub(subIdx, payload) {
 }
 
 function handleDropToPalette(payload) {
+  if (isMatchLocked(editor?.current)) return;
   removeFromSource(payload);
   refreshAfterChipMove();
+}
+
+// A match is "locked" once its date has passed — coaches can't reshuffle the
+// lineup on the pitch after kick-off. Badges, scorers, MOTM, and the result
+// wizard all remain editable (those are POST-match recording flows, not
+// planning flows). Null game_date = not locked (TBD matches stay editable).
+// Today's matches (game_date === todayISO) are editable so coaches can make
+// last-minute tweaks on matchday.
+function isMatchLocked(lineup) {
+  if (!lineup) return false;
+  const d = lineup.game_date;
+  if (!d) return false;
+  const n = new Date();
+  const todayISO = n.getFullYear() + '-'
+    + String(n.getMonth() + 1).padStart(2, '0') + '-'
+    + String(n.getDate()).padStart(2, '0');
+  return d < todayISO;
 }
 
 function hasUnsaved() {
@@ -11873,7 +11919,15 @@ async function saveLineupWithMsg(msgEl) {
   showMsg('✓ Saved', 'ok');
   _lastSavedHash = _lineupContentHash(editor.current);
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
-  renderLineupsTab();
+  // Only do a full tab re-render on an EXPLICIT save (msgEl present). Autosave
+  // fires ~800ms after every chip move during active editing — re-rendering
+  // there would collapse the whole match editor mid-edit and swallow any
+  // follow-on tap that landed during the rebuild (the "flash and rebuild"
+  // coaches saw when placing multiple chips quickly). refreshAfterChipMove
+  // has already updated the pitch/palette/subs locally, so the editor is
+  // consistent without a full re-render. Manual saves (Save button, status
+  // changes) still rebuild so the match card + info panel stay in sync.
+  if (msgEl) renderLineupsTab();
 }
 
 // ---------- Map picker (Leaflet) ----------
