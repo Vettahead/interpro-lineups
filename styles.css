@@ -4063,18 +4063,17 @@ body.mw-open { overflow: hidden; }
 }
 
 /* ---------- Pitch-chip Coach's Focus marker ---------- */
-/* Bottom-right 🎯 pill that shows how many cues are set for the player on the
-   current lineup. MOTM star sits top-left, goals top-right, badge row
-   bottom-left. Gets a slight gold tint when the primary cue is set so the
+/* Bottom-LEFT 🎯 pill that shows how many cues are set for the player on the
+   current lineup. MOTM star sits top-left, goals top-right, availability dot
+   bottom-right. Gets a slight gold tint when the primary cue is set so the
    coach can see at a glance which players have "the one thing" locked in.
-   When the availability dot is also present (coach side, in availability /
-   published mode) it sits in the same bottom-right corner, so we stack the
-   focus pill ABOVE the dot via the :has() rule below. The .stacked-above-avail
-   class is applied as a JS fallback for browsers without :has() support. */
+   The match-badge row also lives bottom-left, so when badges are present we
+   stack the focus pill ABOVE the badges via the :has() rule below. The
+   .stacked-above-badges class is a JS fallback for older browsers. */
 .chip-focus-marker {
   position: absolute;
   bottom: -5px;
-  right: -5px;
+  left: -5px;
   min-width: 22px;
   height: 20px;
   padding: 0 5px 0 3px;
@@ -4099,9 +4098,9 @@ body.mw-open { overflow: hidden; }
 }
 .chip-focus-icon { font-size: 10px; line-height: 1; }
 .chip-focus-count { font-weight: 800; }
-/* Stack focus pill above availability dot when both are on the same chip. */
-.chip:has(.avail-dot) .chip-focus-marker,
-.chip-focus-marker.stacked-above-avail {
+/* Stack focus pill above match-badge row when both are on the same chip. */
+.chip:has(.chip-badges) .chip-focus-marker,
+.chip-focus-marker.stacked-above-badges {
   bottom: 18px;
 }
 

@@ -485,6 +485,53 @@ Auto badges ship in a later update (Slice 9b). Until then, coaches pick them man
 
 ---
 
+## Coach's Focus (pre-match cues)
+
+### What is Coach's Focus?
+A **pre-match** companion to badges. Where badges celebrate what a kid did *after* the game, Coach's Focus is the **one thing you want them to focus on going in** — technical, physical, psychological, social, or welfare-related. Set it before kick-off, the parent sees it on their child's match page, and after the game you can circle back to how it went. Capped at **3 cues per player per match**, with one of them marked as the **primary** ("the one thing") so kids aren't overloaded.
+
+### Which frameworks is this based on?
+The catalog of ~86 cues is grounded in four well-regarded youth coaching models, plus welfare and position-specific points:
+
+- **The FA Four Corner Model** — the England Football Association's development framework: every cue is tagged to one of **Technical**, **Physical**, **Psychological** or **Social**. That's how the picker is structured so you're balancing the corners across the squad rather than always hammering technical.
+- **ELM (Effort · Learning · Mistakes)** — from the Positive Coaching Alliance. Cues like "Give 100%", "Make a new mistake", "Learn something from today" sit in this group. The idea is to praise effort and learning *over* outcome, so kids stay brave.
+- **ROOTS (Rules · Opponents · Officials · Teammates · Self)** — the PCA's sportsmanship and character framework. Cues like "Shake the ref's hand", "Pick up a teammate after a mistake", "Respect the rules".
+- **Emotional Tank** — Jim Thompson's metaphor: kids play well when their tank is full. Cues here focus on filling teammates' tanks through encouragement, celebration, and picking each other up.
+- **Welfare** — coach-only flags for wellbeing (tired today, came in upset, minding an injury). These **never** appear on the parent page by design — they're for your own awareness.
+- **Role / Position** — position-specific points (e.g. "Stay wide" for a winger, "Communicate with your back four" for a keeper).
+- **Encouragement** — general confidence boosters for players who need a lift.
+
+### Where do I set a focus?
+Open a match → **🎯 Focus** sub-tab (it sits between Formation and Info in the match editor). The default is **Focus mode** — a tap-to-select flow optimised for phones: tap a player on the pitch, only that player's row appears on the right, add up to 3 cues, tap the next player. For laptops or if you prefer scrolling, flip to **📋 Full picked squad** to see everyone at once.
+
+### What's the difference between "primary" and other cues?
+Each player can have up to 3 cues. One of them — the **primary** — gets a gold ★ styling and represents "the one thing" the kid should lead with. The first cue you add to a player is auto-marked primary; if you add a new primary, the old one quietly demotes (so there's always exactly zero or one primary, never two). Think of the primary as the pre-game message and the others as "…and if you get a chance, also…".
+
+### How do I know which players I've already set a focus for?
+Two places:
+- **On the pitch / subs strip** — each player chip gets a small **🎯 pill in the bottom-right corner** showing how many cues are set. The pill is **gold-tinted** when a primary is set, **purple** otherwise. Scan the pitch to see who still needs one.
+- **In the Focus panel** — an "Already set:" strip at the top lists players with cues as quick-switch chips, so you can jump back to a player without hunting for them on the pitch.
+
+### What do parents see?
+Each unlocked child's parent gets a new block in the yellow **Your squad** card on their match page titled **"🎯 Coach's focus for this match"** — one row per parent-visible cue. The primary cue is gold-tinted with a ★; others are purple. If you typed a personal note, that note shows underneath in italics; if you just picked a cue from the catalog, the catalog's default description shows instead so parents always get context.
+
+### What about coach-only cues?
+When you pick a **Welfare** cue (tired today, watching a niggle, etc.) the 🔒 **Coach-only** checkbox auto-ticks. Coach-only cues are hidden from the parent page — both at the database layer (RLS filters them out on anon SELECTs) and on the client. They still count toward the player's chip pill so you can see them on the pitch.
+
+### Why cap at 3?
+Youth-coaching best practice: a kid playing a 30-40 minute half can't act on five things. One clear primary + two optional fallbacks is enough to steer the match without overwhelming. If the cap feels tight, it's doing its job.
+
+### Can I edit or remove a focus after I've set it?
+Yes. Tap the chip to re-open the editor (change cue / note / primary flag / visibility). Tap the small **✕** on the chip to remove — confirm and it's gone. Everything saves immediately; no "Save changes" button to forget.
+
+### What happens to cues from previous matches?
+Each cue is attached to a specific match + player, so nothing carries over. Kids start each match with a clean Focus panel. Long-term we'll surface "last match's focus was X → how did it go?" for post-match debriefs (Phase 5), but for now each match stands alone.
+
+### Why is Focus separate from badges?
+**Different time horizons, different purposes.** Badges are celebratory, awarded *after* something happens, visible forever on the player's stats card. Focus is directional, set *before* the match, visible for that one match, and meant to steer behaviour in the moment. Having both means we praise what kids did AND prime them for what to work on next, without mixing the two signals.
+
+---
+
 ## Tips & troubleshooting
 
 ### My changes aren't saving
@@ -531,8 +578,12 @@ A typical week:
 
 ## Roadmap (coming soon)
 
-- **Badges & achievements** — FIFA-style collectible badges for every player. Some **auto-awarded** (Hat Trick Hero, On Fire, 10 games played, Ever-Present, Supersub, etc.) and some **coach-awarded** (Coach's Choice, Training Star, Fair Play, Nutmeg King, Celebration Star, …). Shown under the stats on the player card and in the Squad tab. Full brief in the handoff.
-- Email notifications when lineups are published or updated
-- Audit log UI to see who changed what
-- Team-wide public page so parents can bookmark one URL for the season
-- A holistic look-and-feel polish pass
+- **Coach's Focus — in-game "tap if you saw it" check.** Light one-tap affordance during the match so you can flag delivered / partial / not-delivered against each cue. Phase 4 of the Focus feature (Phase 1 schema, Phase 2 coach UI, and Phase 3 parent view have already shipped).
+- **Coach's Focus — post-match outcome review.** Wizard step to confirm what actually happened for each cue, with a short outcome note. Feeds the end-of-match debrief.
+- **Coach's Focus — export for the match-report tool.** Per-player one-liner ("Focus was X → outcome was Y") so you can paste into the summary you send parents.
+- **Auto-derived badges.** Hat-Trick Hero, Top Scorer, Ever-Present, Golden Glove, milestones (games / goals / MOTM / clean sheets) — already in the catalog, hidden from the manual Award menu until the automation rolls out.
+- **Admin CRUD for the cue catalog.** Add / edit / retire cues at the team level so you can grow the list with your coaching staff's own language.
+- Email / push notifications when lineups are published or updated (sitewide — not per-feature).
+- Audit log UI to see who changed what.
+- Team-wide public page so parents can bookmark one URL for the season.
+- A holistic look-and-feel polish pass.
