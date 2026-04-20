@@ -3078,16 +3078,48 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
       ${emoji} ${label}
     </button>`;
   };
+  // Collapsed-state helpers — once a parent has submitted for a child, initial
+  // render shows a compact pill + "Change" button instead of the full 3-button
+  // picker. Tapping Change swaps to the expanded block (both blocks exist in
+  // the DOM from the start, so wireAvailabilityForm doesn't have to re-bind
+  // anything after the swap).
+  const statusPillHtml = (s) => {
+    const cls = s === 'available' ? 'ap-av'
+      : s === 'maybe'       ? 'ap-mb'
+      : s === 'unavailable' ? 'ap-un'
+      : 'ap-nr';
+    const lbl = s === 'available' ? '✅ Available'
+      : s === 'maybe'       ? '🤔 Maybe'
+      : s === 'unavailable' ? '❌ Unavailable'
+      : '— No response';
+    return `<span class="avail-pills" style="display:inline-flex;margin:0;gap:0"><span class="ap ${cls}">${lbl}</span></span>`;
+  };
+
   const rows = unlockedPlayers.map(p => {
     const cur = availByPlayer[p.id];
+    const hasResponse = !!(cur && cur.status);
     const photoHtml = p.photo_url
       ? `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#eee center/cover no-repeat url('${escapeHtml(p.photo_url)}');flex-shrink:0"></div>`
       : `<div class="avail-photo" style="width:36px;height:36px;border-radius:50%;background:#e6e6e6;display:flex;align-items:center;justify-content:center;font-weight:600;color:#666;flex-shrink:0">${escapeHtml(String(p.number || ''))}</div>`;
     const lastLine = cur
-      ? `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.status}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
-      : `<div class="muted" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
-    return `
-      <div class="avail-row" data-player-row="${p.id}" style="padding:0.6rem 0;border-top:1px solid #eee">
+      ? `<div class="muted avail-last-line" style="font-size:0.7rem;margin-top:0.15rem">Last response: ${cur.status}${cur.responded_by ? ' — ' + escapeHtml(cur.responded_by) : ''}</div>`
+      : `<div class="muted avail-last-line" style="font-size:0.7rem;margin-top:0.15rem">No response yet</div>`;
+    const collapsedBlock = hasResponse ? `
+      <div class="avail-collapsed" data-collapsed-for="${p.id}" style="display:flex;gap:0.6rem;align-items:center">
+        ${photoHtml}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600">#${escapeHtml(String(p.number || '?'))} ${escapeHtml(p.name || '')}</div>
+          <div style="margin-top:0.2rem;display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem">
+            ${statusPillHtml(cur.status)}
+            ${cur.responded_by ? `<span class="muted" style="font-size:0.7rem">· ${escapeHtml(cur.responded_by)}</span>` : ''}
+          </div>
+          ${cur.note ? `<div class="muted" style="font-size:0.7rem;margin-top:0.2rem;font-style:italic">“${escapeHtml(cur.note)}”</div>` : ''}
+        </div>
+        <button type="button" class="btn-secondary avail-change-btn" data-change-player="${p.id}"
+          style="font-size:0.75rem;padding:0.3rem 0.6rem;align-self:flex-start;flex-shrink:0">Change</button>
+      </div>` : '';
+    const expandedBlock = `
+      <div class="avail-expanded" data-expanded-for="${p.id}"${hasResponse ? ' style="display:none"' : ''}>
         <div style="display:flex;gap:0.6rem;align-items:center">
           ${photoHtml}
           <div style="flex:1;min-width:0">
@@ -3103,6 +3135,10 @@ function renderAvailabilityFormHtml(lineup, players, availByPlayer) {
         <input type="text" class="avail-note" data-player-note="${p.id}" value="${escapeHtml(cur?.note || '')}"
           placeholder="Optional note (e.g. away weekend)"
           style="margin-top:0.4rem;width:100%;padding:0.4rem;font-size:0.8rem;border:1px solid #ddd;border-radius:4px" />
+      </div>`;
+    return `
+      <div class="avail-row" data-player-row="${p.id}" style="padding:0.6rem 0;border-top:1px solid #eee">
+        ${collapsedBlock}${expandedBlock}
       </div>`;
   }).join('');
 
@@ -3184,13 +3220,27 @@ function wireAvailabilityForm(lineup, players, availByPlayer) {
       btn.style.borderColor = active ? '#2a7' : '#ccc';
     });
     const row = document.querySelector(`[data-player-row="${playerId}"]`);
-    const line = row?.querySelector('.muted');
+    // Target the precise last-response line — the collapsed block also contains
+    // .muted spans (responder name, note), so we scope to .avail-last-line.
+    const line = row?.querySelector('.avail-last-line');
     if (line) line.textContent = `Last response: ${status}${responderName ? ' — ' + responderName : ''}`;
     flash('✓ Saved', 'ok');
   };
 
   document.querySelectorAll('.avail-btn').forEach(btn => {
     btn.addEventListener('click', () => submit(btn.dataset.player, btn.dataset.status));
+  });
+
+  // "Change" button on a collapsed row — swap in the expanded block so the
+  // parent can pick a new status / edit the note.
+  document.querySelectorAll('.avail-change-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pid = btn.dataset.changePlayer;
+      const collapsed = document.querySelector(`[data-collapsed-for="${pid}"]`);
+      const expanded = document.querySelector(`[data-expanded-for="${pid}"]`);
+      if (collapsed) collapsed.style.display = 'none';
+      if (expanded) expanded.style.display = '';
+    });
   });
 
   // Save note on blur if a status exists — re-submits via RPC with current status.
