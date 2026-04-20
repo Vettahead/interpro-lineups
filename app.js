@@ -4272,25 +4272,8 @@ function renderSquadTab(team, canEdit, players) {
     </div>
   ` : '';
 
-  // Landing-page picker — controls which top-level tab opens by default when you
-  // tap this team from the home screen. Stored per-user-per-team in
-  // team_members.landing_tab (syncs across devices). localStorage acts as a
-  // fallback when the DB write fails or the column isn't migrated yet.
-  const _currentLanding = _currentMemberLanding || getLocalLandingFallback() || LANDING_TAB_DEFAULT;
-  const landingPrefCard = `
-    <div class="card">
-      <h3 style="margin-top:0">Landing page</h3>
-      <p class="muted" style="font-size:0.72rem;margin:0 0 0.5rem">
-        Which tab should open when you tap this team from the home screen? Saves to your account, so it syncs across devices.
-      </p>
-      <select id="lp-select" style="width:100%">
-        <option value="lineups" ${_currentLanding === 'lineups' ? 'selected' : ''}>Matches (default)</option>
-        <option value="squad"   ${_currentLanding === 'squad'   ? 'selected' : ''}>Squad</option>
-        <option value="plays"   ${_currentLanding === 'plays'   ? 'selected' : ''}>Tactics</option>
-      </select>
-      <div id="lp-msg" class="muted" style="font-size:0.72rem;min-height:1em;margin-top:0.3rem"></div>
-    </div>
-  `;
+  // (Landing-page picker moved to the Admin tab — per-user-per-team settings
+  // belong with invites & role management.)
 
   // Training schedule card — recurring weekly template. JSONB list so teams
   // with two training nights (Tue+Thu) work out of the box. Each row:
@@ -4478,7 +4461,6 @@ function renderSquadTab(team, canEdit, players) {
         <div class="squad-layout">
           <div class="squad-main">
             ${teamInfoCard}
-            ${landingPrefCard}
             ${homeGroundCard}
             ${trainingScheduleCard}
           </div>
@@ -4650,46 +4632,7 @@ function renderSquadTab(team, canEdit, players) {
       setTimeout(() => renderSquadTab(team, canEdit, players), 700);
     };
 
-    // Landing-page picker — saves instantly on change to team_members.landing_tab
-    // (cross-device), with localStorage as a cache + fallback. Takes effect next
-    // time the coach opens a team from the home screen.
-    const lpSelect = document.getElementById('lp-select');
-    const lpMsg = document.getElementById('lp-msg');
-    if (lpSelect) {
-      lpSelect.onchange = async () => {
-        const val = lpSelect.value;
-        if (!lpMsg) return;
-        lpMsg.textContent = 'Saving…'; lpMsg.className = 'muted';
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        const userId = authUser?.id || null;
-        let savedToDb = false;
-        let migrationMissing = false;
-        if (userId) {
-          const res = await savePreferredLandingTabDb(team.id, userId, val);
-          savedToDb = !!res.ok;
-          migrationMissing = !!res.migrationMissing;
-        }
-        // Always update localStorage cache so fallback works offline too.
-        cacheLocalLanding(val);
-        _currentMemberLanding = savedToDb ? val : _currentMemberLanding;
-        const labels = { lineups: 'Matches', squad: 'Squad', plays: 'Tactics' };
-        if (savedToDb) {
-          lpMsg.textContent = `✓ Saved — next time you open the team it'll land on ${labels[val] || val}.`;
-          lpMsg.className = 'ok';
-        } else if (migrationMissing) {
-          lpMsg.textContent = `⚠ Saved to this browser only — run the landing_tab migration to sync across devices.`;
-          lpMsg.className = 'error';
-        } else {
-          lpMsg.textContent = `⚠ Saved to this browser only — DB save failed.`;
-          lpMsg.className = 'error';
-        }
-        setTimeout(() => {
-          if (lpMsg.textContent.startsWith('✓') || lpMsg.textContent.startsWith('⚠')) {
-            lpMsg.textContent = ''; lpMsg.className = 'muted';
-          }
-        }, 4000);
-      };
-    }
+    // (Landing-page picker onchange moved to wireMembersEvents on the Admin tab.)
 
     // Save home ground
     const hgSaveBtn = document.getElementById('hg-save');
@@ -13129,6 +13072,23 @@ async function renderMembersTab(currentUser) {
   })() : '';
 
   // Share the team's public player-card link. The URL is team-wide — parents
+  // My preferences — per-user-per-team landing tab picker. Shown to everyone
+  // (coach/admin/parent/viewer) since every member can choose where to land.
+  // Backed by team_members.landing_tab with localStorage as a fallback cache.
+  const _currentLanding = _currentMemberLanding || getLocalLandingFallback() || LANDING_TAB_DEFAULT;
+  const landingPrefHtml = `
+    <div class="card">
+      <h3 style="margin:0 0 0.5rem">My landing page <span class="muted" style="font-weight:400;font-size:0.82rem">— just for you on this team</span></h3>
+      <p class="muted" style="margin:0 0 0.6rem;font-size:0.85rem">Which tab should open when you tap <strong>${escapeHtml(team.name)}</strong> from the home screen? Saves to your account, syncs across devices.</p>
+      <select id="lp-select" style="width:100%;max-width:260px">
+        <option value="lineups" ${_currentLanding === 'lineups' ? 'selected' : ''}>Matches (default)</option>
+        <option value="squad"   ${_currentLanding === 'squad'   ? 'selected' : ''}>Squad</option>
+        <option value="plays"   ${_currentLanding === 'plays'   ? 'selected' : ''}>Tactics</option>
+      </select>
+      <div id="lp-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
+    </div>
+  `;
+
   // / kids enter each child's personal access code (or family code) to unlock
   // their specific card. Convenient place for admins to grab + share on the
   // group chat.
@@ -13149,6 +13109,7 @@ async function renderMembersTab(currentUser) {
   tabEl.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;max-width:900px">
       ${switcherHtml}
+      ${landingPrefHtml}
       ${cardShareHtml}
       <div class="card">
         <h3 style="margin:0 0 0.5rem">Invite someone <span class="muted" style="font-weight:400;font-size:0.82rem">to ${escapeHtml(team.name)}</span></h3>
@@ -13231,6 +13192,47 @@ async function renderMembersTab(currentUser) {
 function wireMembersEvents(currentUser) {
   const { team } = editor;
   const tabEl = document.getElementById('tab-content');
+
+  // Landing-page picker — saves to team_members.landing_tab (cross-device) with
+  // localStorage as a fallback cache. Takes effect next time the user enters
+  // this team from the home screen.
+  if (tabEl) {
+    const lpSelect = tabEl.querySelector('#lp-select');
+    const lpMsg = tabEl.querySelector('#lp-msg');
+    if (lpSelect) {
+      lpSelect.onchange = async () => {
+        const val = lpSelect.value;
+        if (!lpMsg) return;
+        lpMsg.textContent = 'Saving…'; lpMsg.className = 'muted';
+        const userId = currentUser?.id || null;
+        let savedToDb = false;
+        let migrationMissing = false;
+        if (userId) {
+          const res = await savePreferredLandingTabDb(team.id, userId, val);
+          savedToDb = !!res.ok;
+          migrationMissing = !!res.migrationMissing;
+        }
+        cacheLocalLanding(val); // always cache locally too
+        if (savedToDb) _currentMemberLanding = val;
+        const labels = { lineups: 'Matches', squad: 'Squad', plays: 'Tactics' };
+        if (savedToDb) {
+          lpMsg.textContent = `✓ Saved — next time you open ${team.name} it'll land on ${labels[val] || val}.`;
+          lpMsg.className = 'ok';
+        } else if (migrationMissing) {
+          lpMsg.textContent = `⚠ Saved to this browser only — run the landing_tab migration in Supabase to sync across devices.`;
+          lpMsg.className = 'error';
+        } else {
+          lpMsg.textContent = `⚠ Saved to this browser only — DB save failed.`;
+          lpMsg.className = 'error';
+        }
+        setTimeout(() => {
+          if (lpMsg && (lpMsg.textContent.startsWith('✓') || lpMsg.textContent.startsWith('⚠'))) {
+            lpMsg.textContent = ''; lpMsg.className = 'muted';
+          }
+        }, 4000);
+      };
+    }
+  }
 
   // Team switcher cards on the Admin panel — click a team to switch to it.
   if (tabEl) {
