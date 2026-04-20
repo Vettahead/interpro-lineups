@@ -1,6 +1,247 @@
-# Interpro Coach / Manager Assistant — Handoff (2026-04-18)
+# Interpro Coach / Manager Assistant — Handoff (2026-04-20)
 
-## 🔖 Where we left off on 2026-04-18 (session 12 — read this first)
+## 🔖 Where we left off on 2026-04-20 (session 15 — read this first)
+
+**New "Upcoming" tab shipped — at-a-glance next training + next match availability for coaches.** Tab bar gains a leftmost `Upcoming` tab; it's the new default landing page for anyone who hasn't explicitly picked a different landing tab. Two stacked summary cards: next training (from `teams.training_schedule` + `training_attendance`) and next match (next upcoming lineup + `player_availability`). Each card shows the existing count-pill row (✓ / ? / ✗ / —) and includes a **🔔 Nudge non-responders** placeholder button — intentionally not plumbed in, because the sitewide notifications decision (WhatsApp / SMS / push / email) is still parked. Tapping the nudge button shows a "coming soon" explainer; nothing is sent.
+
+### Shipped this session (session 15)
+
+1. **New top-level tab `Upcoming` + new default.** `LANDING_TAB_OPTIONS` gained `'upcoming'` as its first entry; `LANDING_TAB_DEFAULT` flipped from `'lineups'` to `'upcoming'`. Coaches who've explicitly saved a pick (`team_members.landing_tab` column) stay on their pick — the flip only affects anyone who's been falling back to the default. Tab button is leftmost on the horizontal header, the nav drawer (phone), and the desktop sidebar (all three mirror each other). The Admin → "My landing page" picker now shows `Upcoming (default)` as the first option; Matches/Squad/Tactics below.
+2. **`renderUpcomingTab` renderer.** Reads `editor.team / editor.players / editor.lineups` populated by a new dispatch branch in `renderTeamDashboard`. Renders a `.upcoming-wrap` with an intro line + two `.uc-card`s. Each card: header row (`🏋 Next training` / `⚽ Next match` label + primary line day/date/time + secondary line location/venue), count row `.uc-counts` (initially "Loading responses…", replaced async by `availPillsHtml(counts, rosterSize)`), action row (placeholder **🔔 Nudge non-responders** + a context-appropriate second button: Open parent link ↗ for training, Open match → for matches). Empty state per card: dashed link to set up a schedule or create a match.
+3. **Data fetches (both parallel, non-blocking).** Training: `nextUpcomingTraining(team)` → `supabase.rpc('ensure_training_session', { p_team_id, p_date })` → `select('intent').from('training_attendance').eq('session_id', …)` → count by intent. Match: `_findDefaultLineupId(upcomingOnly)` → `loadAvailabilityCountsForLineups([id])`. Failures degrade to an inline "couldn't load responses" message; the tab shell never gets stuck.
+4. **Tab-to-tab jumps.** Empty-state links (`set one up`, `create one on Matches`) and the "Open match →" button work by programmatically `.click()`ing the matching `.h-tab[data-tab="…"]` button — reuses the existing tab-switch handler (with its `flushAutosave`, `openCards.clear()`, and closure over user/teamId) so no user stash needed on module scope. "Open match" sets `_pendingLineupIdToOpen` first so the Matches tab lands inside the match editor.
+5. **Nudge button placeholder.** Clicking either nudge button shows an `alert()` explaining the decision is pending and pointing at the existing Share-to-WhatsApp flow. Deliberately unwired — don't hook it up until the sitewide notifications design is agreed.
+6. **CSS.** Appended a small block at the end of `styles.css`: `.upcoming-wrap`, `.uc-intro`, `.uc-card`, `.uc-head`, `.uc-line-primary`, `.uc-line-meta`, `.uc-counts`, `.uc-empty`, `.uc-loading`, `.uc-actions`, `.uc-nudge-btn`. Reuses the existing `.avail-pills` / `.ap` styles for the count chips — no duplication.
+
+### Files touched (session 15)
+
+- `app.js` — `LANDING_TAB_OPTIONS` + `LANDING_TAB_DEFAULT` updated; horizontal tab bar + nav drawer tabs array + desktop sidebar tabs array each got a new `Upcoming` entry at the top; new `if (activeTab === 'upcoming')` dispatch branch in `renderTeamDashboard`; new `async function renderUpcomingTab()` inserted above `renderSquadTab`; Admin tab landing-page picker got `Upcoming (default)` as first option.
+- `styles.css` — Upcoming-tab block appended at end.
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 15)
+
+**None.** Both data sources already exist from earlier sessions: `training_sessions` + `training_attendance` (session 14 rebuild), `player_availability` (legacy).
+
+### Sanity-check script (session 15)
+
+1. **Default lands on Upcoming.** Clear `prefs_landing_tab` from localStorage (or open in private window). Reload, sign in, tap a team. Opens on Upcoming. (Coaches with an explicit saved pick stay on that pick — expected.)
+2. **Two cards render.** Training card = day/date/time + location. Match card = vs Opponent (H/A) + day/date/time + venue. Both flip from "Loading responses…" to count pills within ~300ms.
+3. **Training counts match parent view.** Unlock parent training link, tap Available. Reload Upcoming — ✓ count +1, — count −1.
+4. **Match counts match the Matches tab.** Open the next match in Matches, check counts in header. Upcoming card shows the same numbers.
+5. **Empty states.** Temporarily null out `teams.training_schedule` → training card shows "No training schedule yet. Set one up on Squad details →". Click link → jumps to Squad tab. Team with no upcoming match → match card shows "No upcoming match. Create one on Matches →".
+6. **Open match button.** Lands inside the match editor on the Matches tab (not the cards list).
+7. **Open parent link button.** New tab opens `#/train/{teamId}`.
+8. **Nudge button placeholder.** Tapping either nudge button pops an alert explaining it's coming soon + pointing at Share-to-WhatsApp. No state changes.
+9. **Admin picker.** Admin → "My landing page" → four options, Upcoming first with "(default)". Change to Matches, reload app, lands on Matches. Change back.
+10. **Phone drawer + desktop sidebar.** Both show "📅 Upcoming" as the top entry.
+
+### Still pending (for notifications, when the decision lands)
+
+The nudge button is the only hook that needs wiring once you pick a channel. Today we only have aggregate non-responder count; a small follow-up will surface the actual list of non-responders (to pull contact details) when the nudge is armed.
+
+### Next up (unchanged)
+
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+- **Sitewide notifications design** — unblocks the nudge buttons and several deferred asks.
+
+### Start-here on the new machine (session 15)
+
+Pull `app.js`, `styles.css`, `HANDOFF.md`. No DB changes. Smoke test: open the team, land on Upcoming, see both cards render with counts. Tap Nudge → coming-soon alert. Tap Open parent link → new tab loads parent training page. Tap Open match → lands inside the match editor. Admin → My landing page should default to "Upcoming (default)".
+
+---
+
+## 🔖 Where we left off on 2026-04-20 (session 14)
+
+**Slice 8 rescue — schema clean-rebuild + visible save confirmation + shareable training link. Training & attendance now working end-to-end.** Session 13 shipped Slice 8 but the parent view threw "⚠ Saving attendance isn't available yet" on every submit. The cause: **a stale `training_sessions` table from an earlier design iteration was still in the DB, so the `CREATE TABLE IF NOT EXISTS` in session 13's chunk 1 silently skipped creation, and the corresponding `ensure_training_session` RPC from that earlier iteration was reading completely different columns + a different `training_schedule` shape than the client writes.** Fixed with a clean rebuild of the three training objects. Also added two UI tweaks Chris asked for after session 13: a visible "Currently saved" summary block on the schedule editor card, and a standalone shareable training link (Copy / Open / WhatsApp buttons).
+
+### Shipped this session (session 14)
+
+1. **Full clean-rebuild SQL run in Supabase.** Dropped old `training_sessions`, `training_attendance`, `ensure_training_session`, `submit_training_intent`. Recreated all four to match what the client actually writes and reads. No real attendance data was lost (only a test tap).
+2. **Visible "Currently saved" summary block.** Squad → Team info → Training schedule card now shows a grey summary box listing every saved slot ("Tuesday 19:00–20:00 · St Wilfreds Blackburn") above the editor. The editor itself is tucked behind a `<details>` toggle ("✎ Edit schedule" / "+ Set up schedule").
+3. **Standalone shareable training link block.** Dashed-border box on the schedule card once a schedule is saved, with the permanent `#/train/{team_id}` URL + Copy / Open / WhatsApp buttons. Complements the piggy-back in the match WhatsApp message.
+4. **End-to-end verified working.** Parent view unlocks with a kid code, availability submits land in `training_attendance`, the warning is gone.
+
+### The actual problem (for future-you's sanity)
+
+Chunk 1 of session 13's migration used `CREATE TABLE IF NOT EXISTS public.training_sessions (...)`. Because an older table of the same name from a pre-compaction design iteration was already present, the whole `CREATE TABLE` was skipped — including the new column definitions. The old table's columns were `session_date / start_time / end_time / location_name / location_postcode`, and the old `ensure_training_session` RPC read `training_schedule` as a **single object** with `{enabled, day_of_week, ...}` keys, using `extract(isodow from p_date)` (Mon=1..Sun=7). My client writes `training_schedule` as a **JSONB array** `[{"day":2,"end":"20:00","start":"19:00","location":"..."}]` with `day` using JS `getDay()` (Sun=0..Sat=6), and reads `training_sessions` as `scheduled_date / scheduled_start / scheduled_end / location`. Two different generations of the feature tripping over each other.
+
+### Clean-rebuild SQL that was run this session (for reference / new machine)
+
+```sql
+-- 1. Drop old mismatched objects
+DROP FUNCTION IF EXISTS public.submit_training_intent(uuid, uuid, text, text, text, text);
+DROP FUNCTION IF EXISTS public.ensure_training_session(uuid, date);
+DROP TABLE IF EXISTS public.training_attendance CASCADE;
+DROP TABLE IF EXISTS public.training_sessions CASCADE;
+
+-- 2. training_sessions (one row per concrete date)
+CREATE TABLE public.training_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id uuid NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+  scheduled_date date NOT NULL,
+  scheduled_start text,
+  scheduled_end text,
+  location text,
+  status text NOT NULL DEFAULT 'scheduled',   -- 'scheduled' | 'cancelled' | 'moved'
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (team_id, scheduled_date)
+);
+CREATE INDEX training_sessions_team_date_idx ON public.training_sessions (team_id, scheduled_date);
+
+-- 3. training_attendance (one row per player per session)
+CREATE TABLE public.training_attendance (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES public.training_sessions(id) ON DELETE CASCADE,
+  player_id uuid NOT NULL REFERENCES public.players(id) ON DELETE CASCADE,
+  intent text,           -- 'available' | 'maybe' | 'unavailable'
+  attended boolean,      -- coach-recorded actual attendance
+  note text,
+  responded_by text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, player_id)
+);
+CREATE INDEX training_attendance_session_idx ON public.training_attendance (session_id);
+
+-- 4. RLS
+ALTER TABLE public.training_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.training_attendance ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY training_sessions_read  ON public.training_sessions  FOR SELECT USING (true);
+CREATE POLICY training_attendance_read ON public.training_attendance FOR SELECT USING (true);
+CREATE POLICY training_sessions_write_auth  ON public.training_sessions  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY training_attendance_write_auth ON public.training_attendance FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- Parents write only via the SECURITY DEFINER RPC below; no anon write policy.
+
+-- 5. ensure_training_session — finds the matching slot in teams.training_schedule
+--    training_schedule is a JSONB array: [{"day":2,"start":"19:00","end":"20:00","location":"..."}]
+--    day uses JS getDay() (0=Sun..6=Sat), matching PG extract(dow).
+CREATE OR REPLACE FUNCTION public.ensure_training_session(
+  p_team_id uuid,
+  p_date date
+) RETURNS public.training_sessions
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  v_schedule jsonb; v_slot jsonb; v_dow int;
+  v_start text; v_end text; v_location text;
+  v_row public.training_sessions;
+BEGIN
+  SELECT training_schedule INTO v_schedule FROM public.teams WHERE id = p_team_id;
+  IF v_schedule IS NULL OR jsonb_typeof(v_schedule) <> 'array' THEN
+    RAISE EXCEPTION 'No training schedule configured for team';
+  END IF;
+
+  v_dow := extract(dow from p_date)::int;
+
+  SELECT elem INTO v_slot
+  FROM jsonb_array_elements(v_schedule) AS elem
+  WHERE (elem->>'day')::int = v_dow
+  LIMIT 1;
+
+  IF v_slot IS NULL THEN
+    RAISE EXCEPTION 'No training slot on %', to_char(p_date, 'YYYY-MM-DD');
+  END IF;
+
+  v_start := v_slot->>'start'; v_end := v_slot->>'end'; v_location := v_slot->>'location';
+
+  INSERT INTO public.training_sessions
+    (team_id, scheduled_date, scheduled_start, scheduled_end, location)
+  VALUES (p_team_id, p_date, v_start, v_end, v_location)
+  ON CONFLICT (team_id, scheduled_date) DO UPDATE
+    SET scheduled_start = COALESCE(public.training_sessions.scheduled_start, EXCLUDED.scheduled_start),
+        scheduled_end   = COALESCE(public.training_sessions.scheduled_end,   EXCLUDED.scheduled_end),
+        location        = COALESCE(public.training_sessions.location,        EXCLUDED.location),
+        updated_at      = now()
+  RETURNING * INTO v_row;
+
+  RETURN v_row;
+END;
+$$;
+
+-- 6. submit_training_intent — parent submits availability, validated by access/family code
+CREATE OR REPLACE FUNCTION public.submit_training_intent(
+  p_session_id uuid, p_player_id uuid, p_code text,
+  p_intent text, p_note text, p_name text
+) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE v_team_id uuid; v_norm text; v_ok boolean;
+BEGIN
+  IF p_intent NOT IN ('available','maybe','unavailable') THEN RAISE EXCEPTION 'Invalid intent: %', p_intent; END IF;
+
+  SELECT team_id INTO v_team_id FROM public.training_sessions WHERE id = p_session_id;
+  IF v_team_id IS NULL THEN RAISE EXCEPTION 'Unknown session'; END IF;
+
+  v_norm := upper(regexp_replace(coalesce(p_code,''), E'\\s', '', 'g'));
+  IF v_norm = '' THEN RAISE EXCEPTION 'Code required'; END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.players p
+    WHERE p.id = p_player_id AND p.team_id = v_team_id
+      AND (upper(p.access_code) = v_norm OR upper(p.family_code) = v_norm)
+  ) INTO v_ok;
+  IF NOT v_ok THEN RAISE EXCEPTION 'Invalid code for this player'; END IF;
+
+  INSERT INTO public.training_attendance
+    (session_id, player_id, intent, note, responded_by, updated_at)
+  VALUES (p_session_id, p_player_id, p_intent, nullif(p_note,''), nullif(p_name,''), now())
+  ON CONFLICT (session_id, player_id) DO UPDATE
+    SET intent = EXCLUDED.intent, note = EXCLUDED.note,
+        responded_by = EXCLUDED.responded_by, updated_at = now();
+END;
+$$;
+
+-- 7. Grants
+GRANT EXECUTE ON FUNCTION public.ensure_training_session(uuid, date)                           TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_training_intent(uuid, uuid, text, text, text, text)    TO anon, authenticated;
+GRANT SELECT ON public.training_sessions   TO anon, authenticated;
+GRANT SELECT ON public.training_attendance TO anon, authenticated;
+GRANT ALL    ON public.training_sessions   TO authenticated;
+GRANT ALL    ON public.training_attendance TO authenticated;
+```
+
+**Note:** this clean-rebuild supersedes session 13's 7-chunk migration. For a fresh DB, run only this session-14 SQL; session-13 SQL should NOT be re-run.
+
+### Files touched (session 14)
+
+- `app.js` — `renderSquadTab` training card: added "Currently saved" summary block above the editor `<details>`; added shareable training link block (Copy / Open / WhatsApp buttons); editor fields moved inside a `<details>` element.
+- Supabase — clean-rebuild SQL above.
+- `HANDOFF.md` — this entry.
+
+### Start-here on the new machine (session 14)
+
+Pull `app.js` and `HANDOFF.md`. If the DB has already been through session 14's rebuild (which it has on prod), do nothing on the DB. If spinning up fresh, run the clean-rebuild SQL above (NOT session 13's chunks).
+
+---
+
+## 🔖 Where we left off on 2026-04-19 (session 13)
+
+**Slice 8 — Training & attendance shipped.** Recurring weekly schedule per team + permanent rolling parent link + coach attendance tracker + per-session overrides + WhatsApp share piggy-back. Uses the existing kid / family access-code pattern (no new auth). **Note: this session's 7-chunk DB migration was superseded by session 14's clean rebuild — see session 14 above. The client code described here is still in place.**
+
+### Shipped this session (session 13)
+
+1. **Database migration (superseded — see session 14).** Added `teams.training_schedule` JSONB column + `training_sessions` table (per-date materialisation; status scheduled/cancelled/moved) + `training_attendance` table (per-player intent: available/maybe/unavailable + coach-side `attended` bool + note) + `ensure_training_session(p_team_id, p_date)` RPC + `submit_training_intent` RPC + RLS. Session 14 rebuilt all of this from scratch to fix a schema-drift bug; the rebuild is what's live today.
+2. **Training schedule editor (Squad tab → Team info subtab).** Multi-row editor for Tue+Thu-style teams. Day select + start/end time + optional location. Rows add/remove client-side; saved as JSONB array on `teams.training_schedule`. Session 14 added a visible saved-schedule summary + a shareable link block on top of this.
+3. **Training helpers (top of `app.js`).** `parseTrainingSchedule`, `computeNextTrainingInstance` (handles the 1h-past-end cutoff that rolls the link forward to next week), `nextUpcomingTraining`, `fmtTimeHHMM`, `toLocalDateStr`, `fmtTrainingHeader`. `DAY_NAMES` / `DAY_NAMES_SHORT` constants.
+4. **Public training view — `#/train/{team_id}`.** New public route wired in `currentRoute()` + `render()`. Page resolves the next upcoming session, calls `ensure_training_session` to materialise a concrete row, then renders: session header + code-entry box → per-child intent buttons (✅ / 🤔 / ❌) + optional note field. Submits via `submit_training_intent` RPC which re-validates the access code server-side. Unlock reuses the existing `get_player_by_code(team_id, code)` RPC, `pv_unlocked_*` / `pv_codes_*` localStorage keys, and family-code sibling flow. Cancelled sessions hide the attendance form.
+5. **Coach attendance tracker (Squad tab → new Training subtab).** Third subtab. Shows the next upcoming session with: session header + parent link URL, override controls, intent counts (✅/🤔/❌), and a full squad row list with an inline **✓ Attended / ✕ No show / Clear** toggle for post-session ground truth. Writes to `training_attendance` via upsert (authenticated; RLS gates to team members). A "Recent sessions" card lists the last 12 past sessions; clicking opens a modal for editing attendance after the fact.
+6. **WhatsApp share piggy-back.** `buildWhatsAppMessage` appends the permanent training link under the match + availability links when the team has a schedule set. One pinned WhatsApp post covers match + training for the whole week. No change when the team hasn't configured training yet.
+7. **Per-session overrides.** On the Training subtab, a `<details>` block exposes per-session override controls: change start/end time, change location, add a note, or cancel entirely. Writes update the materialised `training_sessions` row; status flips to `moved` / `cancelled` / back to `scheduled`. Public parent view surfaces these.
+8. **Cutoff behaviour.** Parent's training link always shows one session at a time. Cutoff is `end time + 1h`. Before: parents sign up for the upcoming session. After: link flips to next week's instance. Coach tracker is not cutoff-bound.
+
+### Files touched (session 13)
+
+- `app.js` — training helpers block (top, after `AGE_GROUP_OPTIONS`); new `#/train/{team_id}` route in `currentRoute()` and `render()`; `renderTrainingPublicView` + `wireTrainingPublicView` (public parent view) after `renderPlayerCardBody`; `renderSquadTab` training schedule editor + "Training" third subtab; new `renderTrainingTracker` + `openPastTrainingModal` functions; `buildWhatsAppMessage` appends training URL. No CSS changes — reused existing `pv-wrap` / `pv-card` / `avail-*` / `sd-subtabs` / `lineup-phone-tab` classes.
+
+---
+
+## 🔖 Where we left off on 2026-04-18 (session 12)
 
 **Focus mode tap-to-select + pitch-chip focus marker.** Follow-up tweaks on top of session 11's Coach's Focus Phase 2 after Chris flagged UX issues: (1) with 15+ picked players the full list is too long for a phone, so the "All players" toggle option was replaced with a **Focus mode** tap-to-select flow (coach taps player on pitch → only that player's row appears in the Focus panel → add cues → tap next player); (2) no way to see on the pitch which players already have a focus set, so each chip now shows a bottom-right 🎯 pill with the cue count (tinted gold when a primary is set).
 
@@ -1012,3 +1253,4 @@ Optional / nice-to-have observed during photo work:
 - **SQL:** never written to a `.sql` file — always pasted in chat for Chris to run in the Supabase SQL editor.
 - **Pitch sizing:** every pitch container is `aspect-ratio: 7/10`; SVG uses `viewBox="0 0 70 100"`. If you ever change one, change them all.
 - **Backups:** `web-backup-slice4-20260415-1228/` is the last clean Slice 4 snapshot, kept in the project root.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

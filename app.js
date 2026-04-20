@@ -1367,6 +1367,7 @@ function renderNavDrawer(user, teamId, team, role, canEdit, memberships) {
   // which shows the fixtures-as-cards list. The separate fixtures page is retired.
   const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
+    { id: 'upcoming',   label: 'Upcoming',      icon: '📅' },
     { id: 'lineups',    label: 'Matches',       icon: '🌐' },
     { id: 'squad',      label: 'Squad details', icon: '👥' },
     { id: 'plays',      label: 'Tactics',       icon: '📋' },
@@ -1493,6 +1494,7 @@ function renderDesktopSidebar(user, teamId, team, role, canEdit, memberships) {
   // sub-tab which shows the fixtures-as-cards list.
   const showSwitch = userCanSwitchTeams(memberships);
   const tabs = [
+    { id: 'upcoming',   label: 'Upcoming',      icon: '📅' },
     { id: 'lineups',    label: 'Matches',       icon: '🌐' },
     { id: 'squad',      label: 'Squad details', icon: '👥' },
     { id: 'plays',      label: 'Tactics',       icon: '📋' },
@@ -3390,9 +3392,11 @@ async function openAvailabilityModal(lineupId) {
 // Landing-tab preference. Primary source = team_members.landing_tab (per-user-per-team,
 // synced across devices). Secondary = localStorage (cache + fallback when the DB
 // column isn't yet migrated or the write fails). The coach picks which main tab
-// opens by default when entering a team — Matches / Squad / Tactics.
-const LANDING_TAB_OPTIONS = ['lineups', 'squad', 'plays'];
-const LANDING_TAB_DEFAULT = 'lineups';
+// opens by default when entering a team — Upcoming / Matches / Squad / Tactics.
+// Session 15: 'upcoming' added + promoted to default — at-a-glance training + next
+// match availability is the most useful first-open view for coaches.
+const LANDING_TAB_OPTIONS = ['upcoming', 'lineups', 'squad', 'plays'];
+const LANDING_TAB_DEFAULT = 'upcoming';
 // Stashed from the most recent team_members fetch so renderSquadTab's picker can
 // render the right current value and the onchange handler knows what to update.
 let _currentMemberLanding = null;
@@ -3575,6 +3579,7 @@ async function renderTeamDashboard(user, teamId) {
   const tabsEl = document.getElementById('header-tabs');
   if (tabsEl) {
     tabsEl.innerHTML = `
+      <button class="h-tab ${activeTab === 'upcoming' ? 'active' : ''}" data-tab="upcoming">Upcoming</button>
       <button class="h-tab ${activeTab === 'fixtures' ? 'active' : ''}" data-tab="fixtures">Fixtures</button>
       <button class="h-tab ${activeTab === 'squad' ? 'active' : ''}" data-tab="squad">Squad details</button>
       <button class="h-tab ${activeTab === 'lineups' ? 'active' : ''}" data-tab="lineups">Matches</button>
@@ -3612,7 +3617,16 @@ async function renderTeamDashboard(user, teamId) {
 
   appEl.innerHTML = `<div id="tab-content"></div>`;
 
-  if (activeTab === 'fixtures') {
+  if (activeTab === 'upcoming') {
+    editor = {
+      mode: 'upcoming',
+      team, canEdit, players, lineups, plays, customFormations,
+      currentUserId: user.id,
+      currentUserRole: role,
+      current: newLineupState()
+    };
+    renderUpcomingTab();
+  } else if (activeTab === 'fixtures') {
     editor = {
       mode: 'fixtures',
       team, canEdit, players, lineups, plays, customFormations,
@@ -4226,6 +4240,159 @@ function renderHelpTab(canEdit, role) {
       const s2 = document.getElementById('help-search');
       if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }
     });
+  }
+}
+
+// ---------- Upcoming tab (session 15) ----------
+// At-a-glance availability for coaches: next training + next match. Two stacked
+// cards with counters (✓ ? ✗ —) for each. View-only by design — nudge buttons
+// are deliberately placeholders pending the sitewide notifications decision
+// (WhatsApp/SMS/push/email — deferred). Hitting the nudge button today shows a
+// "coming soon" explainer; a coach who wants to prod parents can use the
+// existing Share-to-WhatsApp flow on the training or match page.
+//
+// Wiring: rendered when activeTab === 'upcoming'. Reads editor.team /
+// editor.players / editor.lineups populated by the dispatch branch in
+// renderTeamDashboard. Counts fetched async after the shell renders so the tab
+// feels responsive; counts widgets show a "Loading responses…" line in the
+// meantime. Jumps to other tabs are done via programmatic .click() on the
+// matching .h-tab button so the existing re-render path handles user/teamId
+// closure correctly — no need to stash the user on module scope.
+async function renderUpcomingTab() {
+  const { team, players, lineups } = editor || {};
+  const tabEl = document.getElementById('tab-content');
+  if (!tabEl) return;
+  if (!team) { tabEl.innerHTML = ''; return; }
+
+  const rosterSize = Array.isArray(players) ? players.length : 0;
+  const trainingUrl = `${location.origin}${location.pathname}#/train/${team.id}`;
+
+  // Next training: pure client-side from team.training_schedule.
+  const next = nextUpcomingTraining(team);
+  const trainingHeaderHtml = next
+    ? `<div class="uc-head">🏋 Next training</div>
+       <div class="uc-line-primary">${escapeHtml(fmtTrainingHeader(next.date, next.slot))}</div>
+       ${next.slot.location ? `<div class="uc-line-meta">📍 ${escapeHtml(next.slot.location)}</div>` : ''}`
+    : `<div class="uc-head">🏋 Next training</div>
+       <div class="uc-empty">No training schedule yet. <a href="#" data-uc-jump="squad">Set one up on Squad details →</a></div>`;
+
+  // Next match: soonest upcoming lineup (excludes played matches).
+  const upcomingOnly = Array.isArray(lineups) ? lineups.filter(l => !matchHasBeenPlayed(l)) : [];
+  const nextMatchId = _findDefaultLineupId(upcomingOnly);
+  const nextMatch = nextMatchId ? (lineups || []).find(l => l.id === nextMatchId) : null;
+  let matchHeaderHtml;
+  if (nextMatch) {
+    const ha = nextMatch.home_away === 'away' ? ' (A)' : (nextMatch.home_away === 'home' ? ' (H)' : '');
+    const who = nextMatch.opponent
+      ? `vs ${escapeHtml(nextMatch.opponent)}${ha}`
+      : (nextMatch.name ? escapeHtml(nextMatch.name) : 'Upcoming match');
+    const d = new Date((nextMatch.game_date || '1970-01-01') + 'T00:00:00');
+    const dayName = DAY_NAMES[d.getDay()];
+    const dd = d.getDate();
+    const month = d.toLocaleString('en-GB', { month: 'short' });
+    const ko = nextMatch.kickoff_time ? ` · ${escapeHtml(fmtTimeHHMM(nextMatch.kickoff_time))}` : '';
+    const venue = nextMatch.location_name || nextMatch.location_postcode || '';
+    matchHeaderHtml = `<div class="uc-head">⚽ Next match</div>
+      <div class="uc-line-primary">${who}</div>
+      <div class="uc-line-meta">${dayName} ${dd} ${month}${ko}</div>
+      ${venue ? `<div class="uc-line-meta">📍 ${escapeHtml(venue)}</div>` : ''}`;
+  } else {
+    matchHeaderHtml = `<div class="uc-head">⚽ Next match</div>
+      <div class="uc-empty">No upcoming match. <a href="#" data-uc-jump="lineups">Create one on Matches →</a></div>`;
+  }
+
+  tabEl.innerHTML = `
+    <div class="upcoming-wrap">
+      <div class="uc-intro">
+        <strong>Upcoming</strong>
+        <span class="muted"> — at a glance: who's in for the next session and the next game.</span>
+      </div>
+      <div class="uc-card">
+        ${trainingHeaderHtml}
+        <div class="uc-counts" data-uc-training-counts>${next ? '<div class="uc-loading">Loading responses…</div>' : ''}</div>
+        ${next ? `<div class="uc-actions">
+          <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="training" title="Coming soon">🔔 Nudge non-responders</button>
+          <a class="btn-secondary" href="${escapeHtml(trainingUrl)}" target="_blank" rel="noopener">Open parent link ↗</a>
+        </div>` : ''}
+      </div>
+      <div class="uc-card">
+        ${matchHeaderHtml}
+        <div class="uc-counts" data-uc-match-counts>${nextMatch ? '<div class="uc-loading">Loading responses…</div>' : ''}</div>
+        ${nextMatch ? `<div class="uc-actions">
+          <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="match" title="Coming soon">🔔 Nudge non-responders</button>
+          <button type="button" class="btn-secondary" data-uc-open-match="${escapeHtml(nextMatch.id)}">Open match →</button>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Placeholder nudge action — surface the decision-pending state instead of doing anything.
+  tabEl.querySelectorAll('[data-uc-nudge]').forEach(b => {
+    b.onclick = () => {
+      alert("Nudge coming soon.\n\nWe're still picking the best channel (WhatsApp text, SMS, in-app push or email). For now, tap '🔔 Share to WhatsApp' on the match or training link to poke the group.");
+    };
+  });
+
+  // Jumps to other tabs — programmatic .click() fires the existing handler
+  // which re-renders with the right user/teamId closure.
+  tabEl.querySelectorAll('[data-uc-jump]').forEach(el => {
+    el.onclick = (e) => {
+      e.preventDefault();
+      const target = el.dataset.ucJump;
+      const btn = document.querySelector(`.h-tab[data-tab="${target}"]`);
+      if (btn) btn.click();
+    };
+  });
+  tabEl.querySelectorAll('[data-uc-open-match]').forEach(el => {
+    el.onclick = (e) => {
+      e.preventDefault();
+      _pendingLineupIdToOpen = el.dataset.ucOpenMatch;
+      const btn = document.querySelector('.h-tab[data-tab="lineups"]');
+      if (btn) btn.click();
+    };
+  });
+
+  // Async: fill in the count pills for both cards. Parallel fetches.
+  if (next) {
+    (async () => {
+      try {
+        const dateStr = toLocalDateStr(next.date);
+        const { data: sess, error: sessErr } = await supabase.rpc('ensure_training_session', {
+          p_team_id: team.id,
+          p_date: dateStr
+        });
+        const el = tabEl.querySelector('[data-uc-training-counts]');
+        if (!el) return;
+        if (sessErr) {
+          el.innerHTML = `<div class="uc-empty">Couldn't load responses: ${escapeHtml(sessErr.message || 'unknown error')}</div>`;
+          return;
+        }
+        const sessId = Array.isArray(sess) ? (sess[0]?.id) : sess?.id;
+        if (!sessId) { el.innerHTML = ''; return; }
+        const { data: atts } = await supabase
+          .from('training_attendance')
+          .select('intent')
+          .eq('session_id', sessId);
+        const counts = { available: 0, maybe: 0, unavailable: 0 };
+        (atts || []).forEach(a => { if (counts[a.intent] != null) counts[a.intent]++; });
+        el.innerHTML = availPillsHtml(counts, rosterSize);
+      } catch (_e) {
+        const el = tabEl.querySelector('[data-uc-training-counts]');
+        if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
+      }
+    })();
+  }
+  if (nextMatch) {
+    (async () => {
+      try {
+        const counts = await loadAvailabilityCountsForLineups([nextMatch.id]);
+        const el = tabEl.querySelector('[data-uc-match-counts]');
+        if (el) el.innerHTML = availPillsHtml(counts[nextMatch.id] || {}, rosterSize);
+      } catch (_e) {
+        const el = tabEl.querySelector('[data-uc-match-counts]');
+        if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
+      }
+    })();
   }
 }
 
@@ -13081,9 +13248,10 @@ async function renderMembersTab(currentUser) {
       <h3 style="margin:0 0 0.5rem">My landing page <span class="muted" style="font-weight:400;font-size:0.82rem">— just for you on this team</span></h3>
       <p class="muted" style="margin:0 0 0.6rem;font-size:0.85rem">Which tab should open when you tap <strong>${escapeHtml(team.name)}</strong> from the home screen? Saves to your account, syncs across devices.</p>
       <select id="lp-select" style="width:100%;max-width:260px">
-        <option value="lineups" ${_currentLanding === 'lineups' ? 'selected' : ''}>Matches (default)</option>
-        <option value="squad"   ${_currentLanding === 'squad'   ? 'selected' : ''}>Squad</option>
-        <option value="plays"   ${_currentLanding === 'plays'   ? 'selected' : ''}>Tactics</option>
+        <option value="upcoming" ${_currentLanding === 'upcoming' ? 'selected' : ''}>Upcoming (default)</option>
+        <option value="lineups"  ${_currentLanding === 'lineups'  ? 'selected' : ''}>Matches</option>
+        <option value="squad"    ${_currentLanding === 'squad'    ? 'selected' : ''}>Squad</option>
+        <option value="plays"    ${_currentLanding === 'plays'    ? 'selected' : ''}>Tactics</option>
       </select>
       <div id="lp-msg" class="muted" style="font-size:0.75rem;min-height:1em;margin-top:0.35rem"></div>
     </div>
@@ -13107,298 +13275,4 @@ async function renderMembersTab(currentUser) {
   ` : '';
 
   tabEl.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:1rem;padding:1rem;max-width:900px">
-      ${switcherHtml}
-      ${landingPrefHtml}
-      ${cardShareHtml}
-      <div class="card">
-        <h3 style="margin:0 0 0.5rem">Invite someone <span class="muted" style="font-weight:400;font-size:0.82rem">to ${escapeHtml(team.name)}</span></h3>
-        <p class="muted" style="margin:0 0 0.75rem;font-size:0.85rem">They'll get an email with a magic link. When they sign in, they're automatically added to this team.</p>
-        <label>Email</label>
-        <input type="email" id="inv-email" placeholder="name@example.com" autocomplete="off" />
-        <label style="margin-top:0.5rem">Role</label>
-        <select id="inv-role">
-          <option value="coach">Coach (can edit lineups & plays)</option>
-          <option value="parent">Parent (read-only, linked to a player)</option>
-        </select>
-        <div id="inv-player-wrap" style="display:none;margin-top:0.5rem">
-          <label>Link to player</label>
-          <select id="inv-player">
-            <option value="">— choose a player —</option>
-            ${playerOpts}
-          </select>
-        </div>
-        <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-          <button class="primary" id="inv-send">Send invite</button>
-        </div>
-        <div id="inv-msg" class="muted" style="margin-top:0.5rem;min-height:1.1em"></div>
-      </div>
-
-      <div class="card">
-        <h3 style="margin:0 0 0.5rem">Pending invites (${pending.length})</h3>
-        <div class="lineup-list">${pendingHtml}</div>
-      </div>
-
-      <div class="card">
-        <h3 style="margin:0 0 0.5rem">Current members (${memberCount})</h3>
-        ${isAdmin ? '' : '<p class="muted" style="font-size:0.8rem;margin:0 0 0.5rem">Only admins can change roles or remove members.</p>'}
-        <div class="lineup-list">
-          ${_membersUi.members.map(m => {
-            const prof = profilesById[m.user_id] || {};
-            const isSelf = m.user_id === currentUser.id;
-            const linkedPlayerIds = parentLinks[m.user_id] || [];
-            const linkedNames = linkedPlayerIds
-              .map(pid => players.find(p => p.id === pid)?.name)
-              .filter(Boolean).join(', ');
-            const roleSelect = isAdmin && !isSelf
-              ? `<select class="m-role" data-uid="${m.user_id}" style="width:auto;display:inline-block;margin:0 0.5rem">
-                   <option value="admin"${m.role==='admin'?' selected':''}>admin</option>
-                   <option value="coach"${m.role==='coach'?' selected':''}>coach</option>
-                   <option value="parent"${m.role==='parent'?' selected':''}>parent</option>
-                   <option value="viewer"${m.role==='viewer'?' selected':''}>viewer</option>
-                 </select>`
-              : `<span class="pill" style="background:#e6f1fb;color:#185fa5;margin:0 0.5rem">${escapeHtml(m.role)}</span>`;
-            const removeBtn = isAdmin && !isSelf
-              ? `<button class="lineup-del" data-remove-uid="${m.user_id}" title="Remove from team">✕</button>`
-              : '';
-            return `
-              <div class="lineup-item" style="padding-right:2.5rem">
-                <div class="lineup-name">
-                  ${escapeHtml(prof.full_name || prof.email || '(no profile)')}
-                  ${isSelf ? ' <span class="muted" style="font-size:0.75rem">(you)</span>' : ''}
-                </div>
-                <div class="lineup-meta" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.25rem">
-                  ${roleSelect}
-                  ${prof.email && prof.email !== prof.full_name ? '· ' + escapeHtml(prof.email) : ''}
-                  ${linkedNames ? ' · linked to ' + escapeHtml(linkedNames) : ''}
-                </div>
-                ${removeBtn}
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-
-      ${acceptedHtml ? `<div class="card">
-        <h3 style="margin:0 0 0.5rem">Recent accepted / revoked</h3>
-        <div class="lineup-list">${acceptedHtml}</div>
-      </div>` : ''}
-    </div>
-  `;
-
-  wireMembersEvents(currentUser);
-}
-
-function wireMembersEvents(currentUser) {
-  const { team } = editor;
-  const tabEl = document.getElementById('tab-content');
-
-  // Landing-page picker — saves to team_members.landing_tab (cross-device) with
-  // localStorage as a fallback cache. Takes effect next time the user enters
-  // this team from the home screen.
-  if (tabEl) {
-    const lpSelect = tabEl.querySelector('#lp-select');
-    const lpMsg = tabEl.querySelector('#lp-msg');
-    if (lpSelect) {
-      lpSelect.onchange = async () => {
-        const val = lpSelect.value;
-        if (!lpMsg) return;
-        lpMsg.textContent = 'Saving…'; lpMsg.className = 'muted';
-        const userId = currentUser?.id || null;
-        let savedToDb = false;
-        let migrationMissing = false;
-        if (userId) {
-          const res = await savePreferredLandingTabDb(team.id, userId, val);
-          savedToDb = !!res.ok;
-          migrationMissing = !!res.migrationMissing;
-        }
-        cacheLocalLanding(val); // always cache locally too
-        if (savedToDb) _currentMemberLanding = val;
-        const labels = { lineups: 'Matches', squad: 'Squad', plays: 'Tactics' };
-        if (savedToDb) {
-          lpMsg.textContent = `✓ Saved — next time you open ${team.name} it'll land on ${labels[val] || val}.`;
-          lpMsg.className = 'ok';
-        } else if (migrationMissing) {
-          lpMsg.textContent = `⚠ Saved to this browser only — run the landing_tab migration in Supabase to sync across devices.`;
-          lpMsg.className = 'error';
-        } else {
-          lpMsg.textContent = `⚠ Saved to this browser only — DB save failed.`;
-          lpMsg.className = 'error';
-        }
-        setTimeout(() => {
-          if (lpMsg && (lpMsg.textContent.startsWith('✓') || lpMsg.textContent.startsWith('⚠'))) {
-            lpMsg.textContent = ''; lpMsg.className = 'muted';
-          }
-        }, 4000);
-      };
-    }
-  }
-
-  // Team switcher cards on the Admin panel — click a team to switch to it.
-  if (tabEl) {
-    tabEl.querySelectorAll('[data-am-team]').forEach(card => {
-      card.onclick = async () => {
-        const nextTeam = card.dataset.amTeam;
-        if (!nextTeam || nextTeam === team.id) return;
-        try { await flushAutosave(); } catch (_) {}
-        activeTab = 'members'; // stay on the Admin tab after the switch
-        openCards.clear();
-        location.hash = `#/team/${nextTeam}`;
-      };
-    });
-    // + Create new team card
-    const newTeamBtn = tabEl.querySelector('.am-new-team');
-    if (newTeamBtn) newTeamBtn.onclick = () => openCreateTeamModal(currentUser, async () => {
-      // Refresh the Admin tab so the new team appears in the strip (doesn't auto-switch).
-      renderMembersTab(currentUser);
-    });
-
-    // Team-wide stats-card link — copy / open helpers.
-    const cardUrlInput = tabEl.querySelector('#am-card-url');
-    const cardCopyBtn = tabEl.querySelector('#am-card-copy');
-    const cardOpenBtn = tabEl.querySelector('#am-card-open');
-    const cardMsg = tabEl.querySelector('#am-card-msg');
-    if (cardCopyBtn && cardUrlInput) cardCopyBtn.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(cardUrlInput.value);
-        if (cardMsg) { cardMsg.textContent = '✓ Link copied — paste into WhatsApp with each child\'s access code.'; cardMsg.className = 'ok'; setTimeout(() => { cardMsg.textContent = ''; cardMsg.className = 'muted'; }, 3500); }
-      } catch (_) {
-        cardUrlInput.select(); document.execCommand('copy');
-        if (cardMsg) { cardMsg.textContent = '✓ Copied'; cardMsg.className = 'ok'; setTimeout(() => { cardMsg.textContent = ''; cardMsg.className = 'muted'; }, 2500); }
-      }
-    };
-    if (cardOpenBtn && cardUrlInput) cardOpenBtn.onclick = () => {
-      window.open(cardUrlInput.value, '_blank', 'noopener');
-    };
-  }
-
-  // Show / hide player picker based on role
-  const roleEl = tabEl.querySelector('#inv-role');
-  const playerWrap = tabEl.querySelector('#inv-player-wrap');
-  const toggleWrap = () => { playerWrap.style.display = roleEl.value === 'parent' ? '' : 'none'; };
-  if (roleEl) roleEl.onchange = toggleWrap;
-  toggleWrap();
-
-  // Send invite
-  const sendBtn = tabEl.querySelector('#inv-send');
-  if (sendBtn) sendBtn.onclick = async () => {
-    const msg = tabEl.querySelector('#inv-msg');
-    const email = (tabEl.querySelector('#inv-email').value || '').trim().toLowerCase();
-    const role = tabEl.querySelector('#inv-role').value;
-    const playerId = role === 'parent' ? (tabEl.querySelector('#inv-player').value || '') : '';
-
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-      msg.textContent = 'Valid email required.'; msg.className = 'error'; return;
-    }
-    if (role === 'parent' && !playerId) {
-      msg.textContent = 'Pick a player to link this parent to.'; msg.className = 'error'; return;
-    }
-
-    sendBtn.disabled = true;
-    msg.textContent = 'Sending…'; msg.className = 'muted';
-
-    const payload = {
-      team_id: team.id,
-      email,
-      role,
-      player_id: playerId || null,
-      invited_by: currentUser.id,
-      status: 'pending'
-    };
-    const { data: inviteRow, error: insErr } = await supabase
-      .from('invites')
-      .insert(payload)
-      .select()
-      .single();
-    if (insErr) {
-      sendBtn.disabled = false;
-      msg.textContent = 'Save failed: ' + insErr.message; msg.className = 'error'; return;
-    }
-
-    // Send magic link (also creates the user if new)
-    const { error: otpErr } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: window.location.origin + window.location.pathname
-      }
-    });
-    if (otpErr) {
-      sendBtn.disabled = false;
-      msg.textContent = 'Email send failed: ' + otpErr.message + ' (invite saved — you can resend later).';
-      msg.className = 'error';
-      return;
-    }
-
-    await logAudit(team.id, 'invite', inviteRow.id, 'create', { email, role, player_id: playerId || null });
-    msg.textContent = `✓ Invite sent to ${email}.`; msg.className = 'ok';
-
-    // Reset form, refresh list
-    tabEl.querySelector('#inv-email').value = '';
-    tabEl.querySelector('#inv-role').value = 'coach';
-    const playerEl = tabEl.querySelector('#inv-player');
-    if (playerEl) playerEl.value = '';
-    renderMembersTab(currentUser);
-  };
-
-  // Revoke pending invite
-  tabEl.querySelectorAll('[data-revoke-invite]').forEach(btn => {
-    btn.onclick = async () => {
-      const id = btn.dataset.revokeInvite;
-      if (!confirm('Revoke this invite?')) return;
-      const { error } = await supabase
-        .from('invites')
-        .update({ status: 'revoked' })
-        .eq('id', id);
-      if (error) { alert('Revoke failed: ' + error.message); return; }
-      await logAudit(team.id, 'invite', id, 'revoke', {});
-      renderMembersTab(currentUser);
-    };
-  });
-
-  // Change a member's role (admin only — RLS will block non-admins)
-  tabEl.querySelectorAll('.m-role').forEach(sel => {
-    sel.onchange = async () => {
-      const uid = sel.dataset.uid;
-      const newRole = sel.value;
-      const { error } = await supabase
-        .from('team_members')
-        .update({ role: newRole })
-        .eq('team_id', team.id)
-        .eq('user_id', uid);
-      if (error) { alert('Role change failed: ' + error.message); renderMembersTab(currentUser); return; }
-      await logAudit(team.id, 'member', uid, 'role_change', { new_role: newRole });
-      renderMembersTab(currentUser);
-    };
-  });
-
-  // Remove a member (admin only)
-  tabEl.querySelectorAll('[data-remove-uid]').forEach(btn => {
-    btn.onclick = async () => {
-      const uid = btn.dataset.removeUid;
-      if (!confirm('Remove this member from the team? Their account will not be deleted, but they will lose access to this team.')) return;
-      const { error } = await supabase
-        .from('team_members')
-        .delete()
-        .eq('team_id', team.id)
-        .eq('user_id', uid);
-      if (error) { alert('Remove failed: ' + error.message); return; }
-      await logAudit(team.id, 'member', uid, 'remove', {});
-      renderMembersTab(currentUser);
-    };
-  });
-}
-
-// Look up the current user's role on a given team (used to gate admin UI)
-async function getMyRole(teamId, userId) {
-  const { data } = await supabase
-    .from('team_members')
-    .select('role')
-    .eq('team_id', teamId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  return data?.role || null;
-}
-
-// Kick off
-render();
+    <div style="display:flex;
