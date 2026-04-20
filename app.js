@@ -4257,6 +4257,25 @@ async function renderUpcomingTab() {
 
   const rosterSize = Array.isArray(players) ? players.length : 0;
   const trainingUrl = `${location.origin}${location.pathname}#/train/${team.id}`;
+  const playerNameById = new Map((players || []).map(p => [p.id, p.name || '']));
+
+  // Compact names line: ✓ Alice, Bob  ·  ? Dave  ·  ✗ Eve — skips unresponded.
+  // Groups passed in keyed by the two intent vocabularies (available/maybe/unavailable).
+  function ucNamesLine(groups) {
+    const fmt = (arr) => arr
+      .map(id => playerNameById.get(id))
+      .filter(n => n)
+      .sort((a, b) => a.localeCompare(b));
+    const av = fmt(groups.available || []);
+    const mb = fmt(groups.maybe || []);
+    const un = fmt(groups.unavailable || []);
+    const parts = [];
+    if (av.length) parts.push(`<span class="uc-ng uc-ng-av"><span class="uc-ng-ic">✓</span> ${av.map(escapeHtml).join(', ')}</span>`);
+    if (mb.length) parts.push(`<span class="uc-ng uc-ng-mb"><span class="uc-ng-ic">?</span> ${mb.map(escapeHtml).join(', ')}</span>`);
+    if (un.length) parts.push(`<span class="uc-ng uc-ng-un"><span class="uc-ng-ic">✗</span> ${un.map(escapeHtml).join(', ')}</span>`);
+    if (!parts.length) return '';
+    return `<div class="uc-names">${parts.join(' <span class="uc-names-sep">·</span> ')}</div>`;
+  }
 
   // Next training: pure client-side from team.training_schedule.
   const next = nextUpcomingTraining(team);
@@ -4301,6 +4320,7 @@ async function renderUpcomingTab() {
       <div class="uc-card">
         ${trainingHeaderHtml}
         <div class="uc-counts" data-uc-training-counts>${next ? '<div class="uc-loading">Loading responses…</div>' : ''}</div>
+        <div class="uc-names-wrap" data-uc-training-names></div>
         ${next ? `<div class="uc-actions">
           <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="training" title="Coming soon">🔔 Nudge non-responders</button>
           <a class="btn-secondary" href="${escapeHtml(trainingUrl)}" target="_blank" rel="noopener">Open parent link ↗</a>
@@ -4309,10 +4329,19 @@ async function renderUpcomingTab() {
       <div class="uc-card">
         ${matchHeaderHtml}
         <div class="uc-counts" data-uc-match-counts>${nextMatch ? '<div class="uc-loading">Loading responses…</div>' : ''}</div>
-        ${nextMatch ? `<div class="uc-actions">
-          <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="match" title="Coming soon">🔔 Nudge non-responders</button>
-          <button type="button" class="btn-secondary" data-uc-open-match="${escapeHtml(nextMatch.id)}">Open match →</button>
-        </div>` : ''}
+        <div class="uc-names-wrap" data-uc-match-names></div>
+        ${nextMatch ? (() => {
+          const _st = nextMatch.lineup_status || (nextMatch.published ? 'published' : 'draft');
+          const _isDraft = _st === 'draft';
+          const waBtn = _isDraft
+            ? `<button type="button" class="btn-secondary uc-wa-btn uc-wa-disabled" disabled aria-disabled="true" title="Match is still Draft — open the match and set it to Availability first.">💬 WhatsApp (draft)</button>`
+            : `<button type="button" class="btn-secondary uc-wa-btn" data-uc-wa-match="${escapeHtml(nextMatch.id)}" style="background:#25D366;border-color:#25D366;color:#fff">💬 WhatsApp</button>`;
+          return `<div class="uc-actions">
+            <button type="button" class="btn-secondary uc-nudge-btn" data-uc-nudge="match" title="Coming soon">🔔 Nudge non-responders</button>
+            ${waBtn}
+            <button type="button" class="btn-secondary" data-uc-open-match="${escapeHtml(nextMatch.id)}">Open match →</button>
+          </div>`;
+        })() : ''}
       </div>
     </div>
   `;
@@ -4320,7 +4349,29 @@ async function renderUpcomingTab() {
   // Placeholder nudge action — surface the decision-pending state instead of doing anything.
   tabEl.querySelectorAll('[data-uc-nudge]').forEach(b => {
     b.onclick = () => {
-      alert("Nudge coming soon.\n\nWe're still picking the best channel (WhatsApp text, SMS, in-app push or email). For now, tap '🔔 Share to WhatsApp' on the match or training link to poke the group.");
+      alert("Nudge coming soon.\n\nWe're still picking the best channel (WhatsApp text, SMS, in-app push or email). For now, tap '💬 WhatsApp' on the match card to poke the group.");
+    };
+  });
+
+  // WhatsApp the next match — reuses the same composer as the Matches-tab Share modal.
+  tabEl.querySelectorAll('[data-uc-wa-match]').forEach(b => {
+    b.onclick = async () => {
+      const id = b.dataset.ucWaMatch;
+      const match = (lineups || []).find(l => l.id === id);
+      if (!match) return;
+      const originalText = b.textContent;
+      b.disabled = true; b.textContent = 'Building…';
+      try {
+        const text = await buildWhatsAppMessage(match, team);
+        try { await navigator.clipboard.writeText(text); } catch (_) {}
+        const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+        const win = window.open(waUrl, '_blank');
+        if (!win) location.href = waUrl;
+      } catch (e) {
+        alert('Could not build WhatsApp message: ' + (e?.message || e));
+      } finally {
+        b.disabled = false; b.textContent = originalText;
+      }
     };
   });
 
@@ -4343,7 +4394,7 @@ async function renderUpcomingTab() {
     };
   });
 
-  // Async: fill in the count pills for both cards. Parallel fetches.
+  // Async: fill in the count pills AND name lines for both cards. Parallel fetches.
   if (next) {
     (async () => {
       try {
@@ -4352,21 +4403,29 @@ async function renderUpcomingTab() {
           p_team_id: team.id,
           p_date: dateStr
         });
-        const el = tabEl.querySelector('[data-uc-training-counts]');
-        if (!el) return;
+        const countsEl = tabEl.querySelector('[data-uc-training-counts]');
+        const namesEl = tabEl.querySelector('[data-uc-training-names]');
+        if (!countsEl) return;
         if (sessErr) {
-          el.innerHTML = `<div class="uc-empty">Couldn't load responses: ${escapeHtml(sessErr.message || 'unknown error')}</div>`;
+          countsEl.innerHTML = `<div class="uc-empty">Couldn't load responses: ${escapeHtml(sessErr.message || 'unknown error')}</div>`;
           return;
         }
         const sessId = Array.isArray(sess) ? (sess[0]?.id) : sess?.id;
-        if (!sessId) { el.innerHTML = ''; return; }
+        if (!sessId) { countsEl.innerHTML = ''; return; }
         const { data: atts } = await supabase
           .from('training_attendance')
-          .select('intent')
+          .select('player_id, intent')
           .eq('session_id', sessId);
         const counts = { available: 0, maybe: 0, unavailable: 0 };
-        (atts || []).forEach(a => { if (counts[a.intent] != null) counts[a.intent]++; });
-        el.innerHTML = availPillsHtml(counts, rosterSize);
+        const groups = { available: [], maybe: [], unavailable: [] };
+        (atts || []).forEach(a => {
+          if (counts[a.intent] != null) {
+            counts[a.intent]++;
+            if (a.player_id) groups[a.intent].push(a.player_id);
+          }
+        });
+        countsEl.innerHTML = availPillsHtml(counts, rosterSize);
+        if (namesEl) namesEl.innerHTML = ucNamesLine(groups);
       } catch (_e) {
         const el = tabEl.querySelector('[data-uc-training-counts]');
         if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
@@ -4376,9 +4435,23 @@ async function renderUpcomingTab() {
   if (nextMatch) {
     (async () => {
       try {
-        const counts = await loadAvailabilityCountsForLineups([nextMatch.id]);
-        const el = tabEl.querySelector('[data-uc-match-counts]');
-        if (el) el.innerHTML = availPillsHtml(counts[nextMatch.id] || {}, rosterSize);
+        const countsEl = tabEl.querySelector('[data-uc-match-counts]');
+        const namesEl = tabEl.querySelector('[data-uc-match-names]');
+        const { data, error } = await supabase
+          .from('player_availability')
+          .select('player_id, status')
+          .eq('lineup_id', nextMatch.id);
+        if (error) throw error;
+        const counts = { available: 0, maybe: 0, unavailable: 0 };
+        const groups = { available: [], maybe: [], unavailable: [] };
+        (data || []).forEach(r => {
+          if (counts[r.status] != null) {
+            counts[r.status]++;
+            if (r.player_id) groups[r.status].push(r.player_id);
+          }
+        });
+        if (countsEl) countsEl.innerHTML = availPillsHtml(counts, rosterSize);
+        if (namesEl) namesEl.innerHTML = ucNamesLine(groups);
       } catch (_e) {
         const el = tabEl.querySelector('[data-uc-match-counts]');
         if (el) el.innerHTML = `<div class="uc-empty">Couldn't load responses.</div>`;
