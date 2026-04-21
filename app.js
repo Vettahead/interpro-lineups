@@ -5188,7 +5188,28 @@ function renderSquadTab(team, canEdit, players) {
           <div style="display:flex;gap:0.3rem;flex-wrap:wrap">
             <button type="button" class="btn-secondary" data-pm-copy-link style="font-size:0.72rem;padding:0.3rem 0.5rem">📋 Link</button>
             <button type="button" class="btn-secondary" data-pm-open-link style="font-size:0.72rem;padding:0.3rem 0.5rem">🔗 Open</button>
-            <button type="button" class="btn-secondary" data-pm-whatsapp style="font-size:0.72rem;padding:0.3rem 0.5rem">💬 WhatsApp</button>
+            ${(() => {
+              // Per-parent WhatsApp deep-links — same pattern as the 🔔 Nudge non-responders sheet.
+              // Tapping opens WhatsApp straight to THAT parent with the stats-card message pre-filled,
+              // no contact-picker step. Falls back to the generic picker button only when neither
+              // parent has a phone on file (the copy-link remains as the ultimate "just in case").
+              const mkBtn = (pName, pPhone, idx) => {
+                const raw = (pPhone || '').trim();
+                if (!raw) return '';
+                const normalised = waPhone(raw);
+                const firstName = ((pName || '').trim().split(/\s+/)[0]) || (idx === 0 ? 'Parent 1' : 'Parent 2');
+                if (!normalised) {
+                  return `<button type="button" class="btn-secondary" disabled title="Phone number doesn't look right — check the parent fields below" style="font-size:0.72rem;padding:0.3rem 0.5rem;opacity:0.55">💬 ${escapeHtml(firstName)}: invalid</button>`;
+                }
+                return `<button type="button" class="btn-secondary" data-pm-wa-parent data-pm-wa-phone="${escapeHtml(normalised)}" data-pm-wa-parent-first="${escapeHtml(firstName)}" title="Open WhatsApp to ${escapeHtml(firstName)} with the stats card + code pre-filled" style="font-size:0.72rem;padding:0.3rem 0.5rem">💬 ${escapeHtml(firstName)}</button>`;
+              };
+              const b1 = mkBtn(p.parent1_name, p.parent1_phone, 0);
+              const b2 = mkBtn(p.parent2_name, p.parent2_phone, 1);
+              if (b1 || b2) return b1 + b2;
+              // No phones on file — fall back to the generic WhatsApp picker button so Chris still has
+              // a one-tap option if he wants to handpick a contact.
+              return `<button type="button" class="btn-secondary" data-pm-whatsapp style="font-size:0.72rem;padding:0.3rem 0.5rem">💬 WhatsApp</button>`;
+            })()}
           </div>
           <div class="muted" data-pm-share-msg style="font-size:0.68rem;min-height:1em;margin-top:0.2rem"></div>
         </div>
@@ -5399,22 +5420,44 @@ function renderSquadTab(team, canEdit, players) {
     if (openLinkBtn) openLinkBtn.onclick = () => {
       window.open(playerCardUrl(), '_blank', 'noopener');
     };
+    // Build the stats-card share message. `parentFirst` is optional — when set, the
+    // message opens with "Hi {Name}," (direct-to-parent buttons use this); when blank,
+    // falls back to the original generic "Hi —" opener used by the picker button.
+    const buildShareCardText = (player, parentFirst) => {
+      const cardUrl = playerCardUrl();
+      const code = player.family_code || player.access_code || '—';
+      const opener = parentFirst
+        ? `Hi ${parentFirst},`
+        : `Hi —`;
+      const intro = parentFirst
+        ? `Here's ${shortName(player.name)}'s stats card for ${team.name}${ageGroupLabel(team) ? ' (' + ageGroupLabel(team) + ')' : ''}:`
+        : `here's ${shortName(player.name)}'s stats card for ${team.name}${ageGroupLabel(team) ? ' (' + ageGroupLabel(team) + ')' : ''}:`;
+      const lines = parentFirst
+        ? [opener, '', intro, '', cardUrl, '', `Access code: ${code}`, '', 'Save the link — it updates automatically every game.']
+        : [`${opener} ${intro}`, '', cardUrl, '', `Access code: ${code}`, '', 'Save the link — it updates automatically every game.'];
+      return lines.join('\n');
+    };
+
+    // 💬 Per-parent direct WhatsApp — same one-tap pattern as the 🔔 Nudge sheet.
+    root.querySelectorAll('[data-pm-wa-parent]').forEach(btn => {
+      btn.onclick = () => {
+        const player = players.find(q => q.id === pid);
+        if (!player) return;
+        const phone = btn.dataset.pmWaPhone;
+        const parentFirst = btn.dataset.pmWaParentFirst || '';
+        if (!phone) return;
+        const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(buildShareCardText(player, parentFirst))}`;
+        const win = window.open(waUrl, '_blank', 'noopener');
+        if (!win) location.href = waUrl;
+      };
+    });
+
+    // 💬 Generic WhatsApp picker — only rendered when neither parent has a phone on file.
     const pmWhatsAppBtn = root.querySelector('[data-pm-whatsapp]');
     if (pmWhatsAppBtn) pmWhatsAppBtn.onclick = () => {
       const player = players.find(q => q.id === pid);
       if (!player) return;
-      const cardUrl = playerCardUrl();
-      const code = player.family_code || player.access_code || '—';
-      const lines = [
-        `Hi — here's ${shortName(player.name)}'s stats card for ${team.name}${ageGroupLabel(team) ? ' (' + ageGroupLabel(team) + ')' : ''}:`,
-        '',
-        cardUrl,
-        '',
-        `Access code: ${code}`,
-        '',
-        'Save the link — it updates automatically every game.'
-      ];
-      const waUrl = `https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`;
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(buildShareCardText(player, ''))}`;
       window.open(waUrl, '_blank', 'noopener');
     };
     const unlinkBtn = root.querySelector('[data-unlink-sibling]');

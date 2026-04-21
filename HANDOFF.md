@@ -1,6 +1,62 @@
-# Interpro Coach / Manager Assistant — Handoff (2026-04-20)
+# Interpro Coach / Manager Assistant — Handoff (2026-04-21)
 
-## 🔖 Where we left off on 2026-04-20 (session 23 — read this first)
+## 🔖 Where we left off on 2026-04-21 (session 24 — read this first)
+
+**Stats-card share: per-parent WhatsApp deep-links in the player modal.** Chris: "we added the nudge direct [WhatsApp] that works great can we use the same idea to share the kids code, keep the copy link too just in case". The player modal's inline share block previously had a single 💬 WhatsApp button that opened `wa.me/?text=…` with no recipient — Chris had to pick a contact every time. Now it mirrors the 🔔 Nudge non-responders sheet pattern: per-parent 💬 Parent1 / 💬 Parent2 buttons that deep-link straight to that parent's number via `wa.me/{phone}?text=…`. One tap → WhatsApp opens with the stats-card URL + access code pre-filled, addressed to that specific parent. The copy-code, copy-link, and open-link buttons are untouched — kept as the "just in case" fallback.
+
+### Shipped this session (session 24)
+
+1. **Per-parent WhatsApp buttons rendered from phones on file.** The inline share block in `detailsHtml(p)` now uses an IIFE to build 0–2 direct buttons (`data-pm-wa-parent` + `data-pm-wa-phone` + `data-pm-wa-parent-first`) from `p.parent1_phone` / `p.parent2_phone`, normalised via the existing `waPhone()` helper. Button label is the parent's first name (`parent1_name.split()[0]`), falling back to "Parent 1" / "Parent 2" when the name field is empty but the phone is present.
+2. **Invalid phone → disabled button with "invalid" label.** Mirrors the nudge sheet: if `waPhone()` returns empty (unparsable number), render a muted disabled button with tooltip "Phone number doesn't look right — check the parent fields below". Keeps the UI honest about what will and won't work.
+3. **Generic WhatsApp picker fallback only when NEITHER parent has a phone.** If both parent phones are blank, the share block renders the old `[data-pm-whatsapp]` contact-picker button instead. Chris can still one-tap-share to a contact he picks manually; copy-link sits alongside as always.
+4. **New `buildShareCardText(player, parentFirst)` helper.** Centralises the stats-card message so the per-parent and generic paths stay in sync. When `parentFirst` is set, the message opens with `Hi {Name},` on its own line (matches the nudge copy). When blank (generic picker path), it keeps the original `Hi — here's …` opener so wording doesn't regress for users with no phones on file.
+5. **`wirePlayerDetails` wires both paths.** New `querySelectorAll('[data-pm-wa-parent]')` loop reads phone + parent-first from data attributes and opens `wa.me/{phone}?text=…` with `window.open(..., '_blank', 'noopener')` + `location.href` fallback for popup-blocked contexts. The existing `[data-pm-whatsapp]` handler now routes through `buildShareCardText(player, '')` so its wording is identical to the old behaviour.
+
+### Files touched (session 24)
+
+- `app.js` — `detailsHtml(p)` share block + `wirePlayerDetails` handlers. Net line count 14047 → 14090 (+43).
+- `styles.css` — untouched (reuses existing `.btn-secondary` styling).
+- `HANDOFF.md` — this entry.
+
+### SQL to run in Supabase (session 24)
+
+**None.** Pure client-side UX change. `players.parent1_phone` / `parent2_phone` already exist and are already used by the nudge sheet.
+
+### Design decisions locked in (session 24)
+
+- **Replace, don't augment.** Showing the generic 💬 WhatsApp button alongside per-parent buttons would clutter an already-busy row (📋 Link / 🔗 Open already there). The direct buttons make the picker redundant when phones are present. When phones aren't there, the picker reappears as the fallback.
+- **First name in button label, not full name.** "💬 Sarah" reads better than "💬 Sarah Jenkins" in a cramped inline row. Matches the nudge sheet labelling.
+- **Keep copy-code + copy-link + open-link untouched.** Chris explicitly asked to keep the copy link "just in case" — these are the escape hatches when the direct deep-link misfires (wrong number, parent on different channel, shared phone, etc.).
+- **Same `waPhone()` normaliser as the nudge sheet.** One source of truth for "+44 / 07 / 0044 / bare subscriber" handling — if the nudge sheet gets smarter about phones, the share block inherits it for free.
+
+### Sanity-check script (session 24)
+
+1. **Player with both parents' phones on file.** Squad tab → open modal → share block shows `💬 Parent1First` + `💬 Parent2First` (real first names). Tap Parent1 → WhatsApp opens directly to that number with "Hi {Parent1First}, / Here's {Child}'s stats card … / {URL} / Access code: {code}". No contact-picker step.
+2. **Player with only parent1 phone.** Only one 💬 button renders. Copy / Open / Link untouched.
+3. **Player with no parent phones on file.** Per-parent buttons disappear; the generic `💬 WhatsApp` picker button reappears (old behaviour preserved).
+4. **Parent phone on file but gibberish (e.g. "abc").** Button renders as `💬 {Name}: invalid`, disabled, with tooltip. No accidental `wa.me/` open.
+5. **Family-code player.** Share message prefers `family_code` over `access_code` (same as before).
+6. **Copy code + Copy link + Open ↗.** All three still work unchanged.
+7. **Picker + drag on Lineups tab.** Unchanged — session 23's `wirePicker` re-bind still holds.
+
+### Start-here on the new machine (session 24)
+
+1. Upload `app.js` and `HANDOFF.md` to GitHub via the web UI. (`styles.css` untouched.)
+2. Vercel auto-deploys.
+3. Hard-reload; clear cache if needed.
+4. Run the sanity-check script above, especially steps 1 + 3 (direct path vs. fallback path).
+
+### Still pending
+
+- **URL shortening + custom domain** — parked until Chris buys `gengen.football` + `gengen.gg`.
+- **Team hub link** — one permanent URL per team wrapping match + training + season.
+- **Slice 6 — Season / history page** (parent-facing, gated by access code).
+- **Admin panel, email notifications on publish, audit log UI** — Slice 5 carryover.
+- **Visual / design pass** — still deferred.
+
+---
+
+## Previous session — Where we left off on 2026-04-20 (session 23)
 
 **Subs tab picker-click regression fixed.** After placing the first sub, coach couldn't tap empty sub slots to add another, and couldn't tap the filled sub to remove / replace — only drag-and-drop kept working. Chris: "matches the subs tab once a sub has been chosen ytou cant add any more or remove the sub, you can move his postion though". Root cause: `refreshAfterChipMove` (added session 20 as the targeted local re-render that replaced the old full `renderLineupsTab` call) rebuilds pitch slots + subs row via `innerHTML =`, which wipes the per-element click listeners `wirePicker()` attached at initial render. Drag survived because `wireDragAndDrop` uses a document-level `pointerdown` delegation guarded by `_chipDragWired` that persists across re-renders. The picker was a sibling casualty of the session 20 speed-up. One-line fix: call `wirePicker()` at the end of `refreshAfterChipMove`, gated by the same `editor?.canEdit && !_posEditMode` condition used at wire-up sites (line 10892 + line 12764).
 
